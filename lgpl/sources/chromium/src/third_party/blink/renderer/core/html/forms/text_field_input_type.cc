@@ -96,7 +96,7 @@ class DataListIndicatorElement final : public HTMLDivElement {
   void InitializeInShadowTree() {
     DCHECK(ContainingShadowRoot());
     DCHECK(ContainingShadowRoot()->IsUserAgent());
-    SetShadowPseudoId(AtomicString("-webkit-calendar-picker-indicator"));
+    SetShadowPseudoId(shadow_element_names::kPseudoCalendarPickerIndicator);
     setAttribute(html_names::kIdAttr, shadow_element_names::kIdPickerIndicator);
     setAttribute(html_names::kStyleAttr,
                  "display:list-item; "
@@ -289,10 +289,10 @@ bool TextFieldInputType::ShouldSubmitImplicitly(const Event& event) {
   return InputTypeView::ShouldSubmitImplicitly(event);
 }
 
-void TextFieldInputType::CustomStyleForLayoutObject(ComputedStyle& style) {
+void TextFieldInputType::AdjustStyle(ComputedStyleBuilder& builder) {
   // The flag is necessary in order that a text field <input> with non-'visible'
   // overflow property doesn't change its baseline.
-  style.SetShouldIgnoreOverflowPropertyForInlineBlockBaseline();
+  builder.SetShouldIgnoreOverflowPropertyForInlineBlockBaseline();
 }
 
 LayoutObject* TextFieldInputType::CreateLayoutObject(
@@ -432,6 +432,13 @@ static bool IsASCIILineBreak(UChar c) {
   return c == '\r' || c == '\n';
 }
 
+// Returns true if `c` may contain a line break. This is an inexact comparison.
+// This is used as the common case is the text does not contain a newline.
+static bool MayBeASCIILineBreak(UChar c) {
+  static_assert('\n' < '\r');
+  return c <= '\r';
+}
+
 static String LimitLength(const String& string, unsigned max_length) {
   unsigned new_length = std::min(max_length, string.length());
   if (new_length == string.length())
@@ -442,6 +449,13 @@ static String LimitLength(const String& string, unsigned max_length) {
 }
 
 String TextFieldInputType::SanitizeValue(const String& proposed_value) const {
+  // Typical case is the string doesn't contain a break and fits. The Find()
+  // is not exact (meaning it'll match many other characters), but is a good
+  // approximation for a fast path.
+  if (proposed_value.Find(MayBeASCIILineBreak) == kNotFound &&
+      proposed_value.length() < std::numeric_limits<int>::max()) {
+    return proposed_value;
+  }
   return LimitLength(proposed_value.RemoveCharacters(IsASCIILineBreak),
                      std::numeric_limits<int>::max());
 }

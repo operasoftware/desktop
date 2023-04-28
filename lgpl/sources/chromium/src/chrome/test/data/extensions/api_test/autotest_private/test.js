@@ -109,6 +109,8 @@ var defaultTests = [
           chrome.test.assertTrue(status.hasOwnProperty("isLoggedIn"));
           chrome.test.assertTrue(status.hasOwnProperty("isOwner"));
           chrome.test.assertTrue(status.hasOwnProperty("isScreenLocked"));
+          chrome.test.assertTrue(
+              status.hasOwnProperty('isLockscreenWallpaperAnimating'));
           chrome.test.assertTrue(status.hasOwnProperty("isRegularUser"));
           chrome.test.assertTrue(status.hasOwnProperty("isGuest"));
           chrome.test.assertTrue(status.hasOwnProperty("isKiosk"));
@@ -405,16 +407,6 @@ var defaultTests = [
     chrome.autotestPrivate.getArcPackage(
          'fake.package',
          chrome.test.callbackFail('Package is not available'));
-  },
-  // Launch fails, no any ARC app by default
-  function launchArcApp() {
-    chrome.autotestPrivate.launchArcApp(
-        'bifanmfigailifmdhaomnmchcgflbbdn',
-        '#Intent;',
-        function(appLaunched) {
-          chrome.test.assertFalse(appLaunched);
-          chrome.test.succeed();
-        });
   },
   // This gets the primary display's scale factor.
   function getPrimaryDisplayScaleFactor() {
@@ -1115,6 +1107,35 @@ var defaultTests = [
     });
   },
 
+  function collectFrameCountingData() {
+    promisify(
+        chrome.autotestPrivate.startFrameCounting, /*bucketSizeInSeconds=*/1)
+        .then(function() {
+          // Minimize/restore to trigger screen updates.
+          return promisify(minimizeBrowserWindow);
+        })
+        .then(function() {
+          return promisify(unminimizeBrowserWindow);
+        })
+        .then(function() {
+          return promisify(
+              chrome.autotestPrivate.stopFrameCounting);
+        })
+        .then(function(data) {
+          chrome.test.assertTrue(data.length >= 0);
+          chrome.test.succeed();
+        })
+        .catch(function(err) {
+          chrome.test.fail(err);
+        });
+  },
+
+  function stopFrameCountingWithoutStart() {
+    // Expects the stop call to fail when not paired with a start call.
+    chrome.autotestPrivate.stopFrameCounting(
+        chrome.test.callbackFail('No frame counting data'));
+  },
+
   // KEEP |lockScreen()| TESTS AT THE BOTTOM OF THE defaultTests AS IT WILL
   // CHANGE THE SESSION STATE TO LOCKED STATE.
   function lockScreen() {
@@ -1198,32 +1219,9 @@ var arcEnabledTests = [
           chrome.test.assertTrue(
               Date.now() <= packageInfo.lastBackupTime + 5 * 60 * 1000.0);
           chrome.test.assertEq(true, packageInfo.shouldSync);
-          chrome.test.assertEq(false, packageInfo.system);
           chrome.test.assertEq(false, packageInfo.vpnProvider);
           chrome.test.succeed();
         }));
-  },
-  // Launch existing ARC app
-  function launchArcApp() {
-    chrome.autotestPrivate.launchArcApp(
-        'bifanmfigailifmdhaomnmchcgflbbdn',
-        '#Intent;',
-        function(appLaunched) {
-          chrome.test.assertNoLastError();
-          chrome.test.assertTrue(appLaunched);
-          chrome.test.succeed();
-        });
-  },
-  // Launch non-existing ARC app
-  function launchNonExistingApp() {
-    chrome.autotestPrivate.launchArcApp(
-        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        '#Intent;',
-        function(appLaunched) {
-          chrome.test.assertNoLastError();
-          chrome.test.assertFalse(appLaunched);
-          chrome.test.succeed();
-        });
   },
 
   async function douleStartArc() {
@@ -1294,6 +1292,16 @@ var policyTests = [
     );
   },
 
+];
+
+var remoteCommandsTests = [
+  function refreshRemoteCommands() {
+    chrome.autotestPrivate.refreshRemoteCommands(
+      chrome.test.callbackPass(function () {
+        chrome.test.succeed();
+      })
+    );
+  },
 ];
 
 var arcPerformanceTracingTests = [
@@ -1497,6 +1505,13 @@ var shelfTests = [function fetchShelfUIInfo() {
       }));
 }];
 
+var launcherSearchBoxStateTests = [ function verifyGhostText(){
+  chrome.autotestPrivate.getLauncherSearchBoxState(
+      chrome.test.callbackPass(info => {
+        chrome.test.assertEq('youtube - Websites', info.ghostText);
+      }));
+}];
+
 var holdingSpaceTests = [
   function resetHoldingSpace(options) {
     // State after this call is checked in C++ test code.
@@ -1563,9 +1578,9 @@ var systemWebAppsTests = [
       function checkLacrosInfoFieldValue() {
         chrome.autotestPrivate.getLacrosInfo(
             chrome.test.callbackPass(function(lacrosInfo) {
-              chrome.test.assertEq('Stopped', lacrosInfo['state']);
+              chrome.test.assertEq('Unavailable', lacrosInfo['state']);
               chrome.test.assertTrue(!lacrosInfo['isKeepAlive']);
-              chrome.test.assertEq('/run/lacros', lacrosInfo['lacrosPath']);
+              chrome.test.assertEq('', lacrosInfo['lacrosPath']);
               chrome.test.assertEq('SideBySide', lacrosInfo['mode']);
             }));
       },
@@ -1576,6 +1591,7 @@ var systemWebAppsTests = [
       'arcEnabled': arcEnabledTests,
       'arcProcess': arcProcessTests,
       'enterprisePolicies': policyTests,
+      'remoteCommands': remoteCommandsTests,
       'arcPerformanceTracing': arcPerformanceTracingTests,
       'overviewDefault': overviewTests,
       'overviewDrag': overviewDragTests,
@@ -1585,6 +1601,7 @@ var systemWebAppsTests = [
       'holdingSpace': holdingSpaceTests,
       'systemWebApps': systemWebAppsTests,
       'lacrosEnabled': lacrosEnabledTests,
+      'launcherSearchBoxState' : launcherSearchBoxStateTests,
     };
 
 chrome.test.getConfig(function(config) {

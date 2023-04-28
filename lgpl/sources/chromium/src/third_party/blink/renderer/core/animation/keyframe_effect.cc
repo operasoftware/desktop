@@ -43,6 +43,7 @@
 #include "third_party/blink/renderer/core/animation/timing_input.h"
 #include "third_party/blink/renderer/core/css/parser/css_selector_parser.h"
 #include "third_party/blink/renderer/core/css/properties/css_property_ref.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
@@ -671,9 +672,11 @@ void KeyframeEffect::DetachTarget(Animation* animation) {
 }
 
 AnimationTimeDelta KeyframeEffect::IntrinsicIterationDuration() const {
-  if (GetAnimation() && GetAnimation()->timeline()) {
-    return GetAnimation()->timeline()->CalculateIntrinsicIterationDuration(
-        timing_);
+  if (auto* animation = GetAnimation()) {
+    auto* timeline = animation->timeline();
+    if (timeline) {
+      return timeline->CalculateIntrinsicIterationDuration(animation, timing_);
+    }
   }
   return AnimationTimeDelta();
 }
@@ -783,11 +786,15 @@ ActiveInterpolationsMap KeyframeEffect::InterpolationsForCommitStyles() {
   if (removed)
     ApplyEffects();
 
+  auto property_pass_filter = [](const PropertyHandle& property) {
+    return property.IsCSSProperty();
+  };
+
   ActiveInterpolationsMap results = EffectStack::ActiveInterpolations(
       &target()->GetElementAnimations()->GetEffectStack(),
       /*new_animations=*/nullptr,
-      /*suppressed_animations=*/nullptr, kDefaultPriority,
-      /*property_pass_filter=*/nullptr, this);
+      /*suppressed_animations=*/nullptr, kDefaultPriority, property_pass_filter,
+      this);
 
   if (removed)
     ClearEffects();

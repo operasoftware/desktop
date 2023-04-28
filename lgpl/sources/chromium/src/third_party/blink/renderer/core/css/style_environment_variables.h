@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_ENVIRONMENT_VARIABLES_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_ENVIRONMENT_VARIABLES_H_
 
+#include "third_party/blink/public/public_buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_variable_data.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -50,7 +51,25 @@ enum class UADefinedVariable {
   kTitlebarAreaX,
   kTitlebarAreaY,
   kTitlebarAreaWidth,
-  kTitlebarAreaHeight
+  kTitlebarAreaHeight,
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_BROWSER_COLORS)
+  // OperaSpecific variables
+  kOperaGxAccentColor,
+  kOperaGxAccentColorH,
+  kOperaGxAccentColorS,
+  kOperaGxAccentColorL,
+  kOperaGxAccentColorR,
+  kOperaGxAccentColorG,
+  kOperaGxAccentColorB,
+  kOperaGxBackgroundColor,
+  kOperaGxBackgroundColorH,
+  kOperaGxBackgroundColorS,
+  kOperaGxBackgroundColorL,
+  kOperaGxBackgroundColorR,
+  kOperaGxBackgroundColorG,
+  kOperaGxBackgroundColorB,
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_BROWSER_COLORS)
 };
 
 enum class UADefinedTwoDimensionalVariable {

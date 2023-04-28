@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
@@ -103,7 +103,9 @@ class MockWebMediaPlayer : public WebMediaPlayer {
                             : media::VideoFrame::CreateTransparentFrame(size_);
   }
 
-  absl::optional<int> CurrentFrameId() const override { return absl::nullopt; }
+  absl::optional<media::VideoFrame::ID> CurrentFrameId() const override {
+    return absl::nullopt;
+  }
 
   bool IsOpaque() const override { return is_video_opaque_; }
   bool HasAvailableVideoFrame() const override { return true; }

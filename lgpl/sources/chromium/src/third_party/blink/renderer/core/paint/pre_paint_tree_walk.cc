@@ -27,7 +27,6 @@
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_printer.h"
-#include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
@@ -56,11 +55,10 @@ void PrePaintTreeWalk::WalkTree(LocalFrameView& root_frame_view) {
 
   PrePaintTreeWalkContext context;
 
-  // GeometryMapper depends on paint properties.
-  bool needs_tree_builder_context_update =
+#if DCHECK_IS_ON()
+  bool needed_tree_builder_context_update =
       NeedsTreeBuilderContextUpdate(root_frame_view, context);
-  if (needs_tree_builder_context_update)
-    GeometryMapper::ClearCache();
+#endif
 
   VisualViewport& visual_viewport =
       root_frame_view.GetPage()->GetVisualViewport();
@@ -74,9 +72,16 @@ void PrePaintTreeWalk::WalkTree(LocalFrameView& root_frame_view) {
   paint_invalidator_.ProcessPendingDelayedPaintInvalidations();
 
 #if DCHECK_IS_ON()
-  if (needs_tree_builder_context_update && VLOG_IS_ON(1))
+  if (needed_tree_builder_context_update && VLOG_IS_ON(1)) {
     ShowAllPropertyTrees(root_frame_view);
+  }
 #endif
+
+  bool was_opacity_updated = root_frame_view.UpdateAllPendingOpacityUpdates();
+  bool was_transform_updated = root_frame_view.UpdateAllPendingTransforms();
+
+  if (was_opacity_updated || was_transform_updated)
+    needs_invalidate_chrome_client_ = true;
 
   // If the page has anything changed, we need to inform the chrome client
   // so that the client will initiate repaint of the contents if needed (e.g.
@@ -85,7 +90,6 @@ void PrePaintTreeWalk::WalkTree(LocalFrameView& root_frame_view) {
     if (auto* client = root_frame_view.GetChromeClient())
       client->InvalidateContainer();
   }
-  root_frame_view.UpdateAllPendingTransforms();
 }
 
 void PrePaintTreeWalk::Walk(LocalFrameView& frame_view,
@@ -281,7 +285,6 @@ bool PrePaintTreeWalk::ObjectRequiresPrePaint(const LayoutObject& object) {
          object.DescendantEffectiveAllowedTouchActionChanged() ||
          object.BlockingWheelEventHandlerChanged() ||
          object.DescendantBlockingWheelEventHandlerChanged();
-  ;
 }
 
 bool PrePaintTreeWalk::ContextRequiresChildPrePaint(
@@ -294,10 +297,10 @@ bool PrePaintTreeWalk::ContextRequiresChildPrePaint(
 bool PrePaintTreeWalk::ObjectRequiresTreeBuilderContext(
     const LayoutObject& object) {
   return object.NeedsPaintPropertyUpdate() ||
-         object.ShouldCheckGeometryForPaintInvalidation() ||
+         object.ShouldCheckLayoutForPaintInvalidation() ||
          (!object.ChildPrePaintBlockedByDisplayLock() &&
           (object.DescendantNeedsPaintPropertyUpdate() ||
-           object.DescendantShouldCheckGeometryForPaintInvalidation()));
+           object.DescendantShouldCheckLayoutForPaintInvalidation()));
 }
 
 bool PrePaintTreeWalk::ContextRequiresChildTreeBuilderContext(
@@ -325,8 +328,8 @@ void PrePaintTreeWalk::CheckTreeBuilderContextState(
 
   DCHECK(!object.NeedsPaintPropertyUpdate());
   DCHECK(!object.DescendantNeedsPaintPropertyUpdate());
-  DCHECK(!object.DescendantShouldCheckGeometryForPaintInvalidation());
-  DCHECK(!object.ShouldCheckGeometryForPaintInvalidation());
+  DCHECK(!object.DescendantShouldCheckLayoutForPaintInvalidation());
+  DCHECK(!object.ShouldCheckLayoutForPaintInvalidation());
   NOTREACHED() << "Unknown reason.";
 }
 #endif
@@ -378,28 +381,42 @@ FragmentData* PrePaintTreeWalk::GetOrCreateFragmentData(
 
   if (pre_paint_info.is_first_for_node) {
     if (allow_update) {
-      if (fragment_data->FragmentID() < fragment_id)
+      if (fragment_data->FragmentID() < fragment_id) {
         fragment_data->ClearNextFragment();
-    } else {
-      DCHECK_EQ(fragment_data->FragmentID(), fragment_id);
+      } else {
+        // We're at the first fragment. Mark all additional FragmentData
+        // objects, so that we can tell that they have been kept from a previous
+        // pre-paint pass.
+        for (FragmentData* next = fragment_data->NextFragment(); next;
+             next = next->NextFragment())
+          next->SetNeedsUpdate(true);
+      }
     }
   } else {
     FragmentData* last_fragment = nullptr;
+    // If fragment_data->NeedsUpdate() is true, a fragment ID mismatch is
+    // possible. Otherwise just loop through the FragmentData entries until we
+    // find the matching ID (or reach the end). The IDs are in ascending order,
+    // but they may not always be contiguous, as some nodes may lack a fragment
+    // representation certain fragmentainers.
     do {
-      if (fragment_data->FragmentID() >= fragment_id)
+      if (fragment_data->FragmentID() == fragment_id)
         break;
+      if (fragment_data->NeedsUpdate()) {
+        // Fragment ID mismatch. In some cases (typically when out-of-flow
+        // layout inserts fragmentainers on its own) we might skip a container
+        // in a given fragmentainer. We can re-use this FragmentData entry and
+        // just update the fragment ID. The important thing here is that we stop
+        // even if the ID is lower than what we're looking for.
+        DCHECK(allow_update);
+        break;
+      }
+      DCHECK_LT(fragment_data->FragmentID(), fragment_id);
       last_fragment = fragment_data;
       fragment_data = fragment_data->NextFragment();
     } while (fragment_data);
-    if (fragment_data) {
-      if (fragment_data->FragmentID() != fragment_id) {
-        // There are entries for fragmentainers after this one, but none for
-        // this one. Remove the fragment tail.
-        DCHECK(allow_update);
-        DCHECK_GT(fragment_data->FragmentID(), fragment_id);
-        fragment_data->ClearNextFragment();
-      }
-    } else {
+
+    if (!fragment_data) {
       // We don't need any additional fragments for culled inlines - unless this
       // is the highlighted link (in which case even culled inlines get paint
       // effects).
@@ -408,6 +425,13 @@ FragmentData* PrePaintTreeWalk::GetOrCreateFragmentData(
         return nullptr;
 
       DCHECK(allow_update);
+
+      // When we add FragmentData entries, we need to make sure that we update
+      // paint properties. The object may not have been marked for an update, if
+      // the reason for creating an additional FragmentData was that the
+      // fragmentainer block-size shrunk, for instance.
+      if (!last_fragment->NextFragment())
+        object.GetMutableForPainting().SetOnlyThisNeedsPaintPropertyUpdate();
       fragment_data = &last_fragment->EnsureNextFragment();
     }
   }
@@ -422,11 +446,12 @@ FragmentData* PrePaintTreeWalk::GetOrCreateFragmentData(
   }
 
   if (allow_update) {
+    fragment_data->SetNeedsUpdate(false);
     fragment_data->SetFragmentID(fragment_id);
-
     if (needs_paint_properties)
       fragment_data->EnsurePaintProperties();
   } else {
+    DCHECK(!fragment_data->NeedsUpdate());
     DCHECK_EQ(fragment_data->FragmentID(), fragment_id);
     DCHECK(!needs_paint_properties || fragment_data->PaintProperties());
   }
@@ -962,18 +987,24 @@ void PrePaintTreeWalk::WalkChildren(
     if (traversable_fragment) {
       if (!box->IsLayoutFlowThread() &&
           (!box->IsLayoutNGObject() || !box->PhysicalFragmentCount())) {
-        // Leave LayoutNGBoxFragment-accompanied child LayoutObject traversal,
-        // since this object doesn't support that (or has no fragments (happens
-        // for table columns)). We need to switch back to legacy LayoutObject
-        // traversal for its children. We're then also assuming that we're
-        // either not block-fragmenting, or that this is monolithic content. We
-        // may re-enter LayoutNGBoxFragment-accompanied traversal if we get to a
-        // descendant that supports that.
-        DCHECK(
-            !box->FlowThreadContainingBlock() ||
-            (box->GetNGPaginationBreakability() == LayoutBox::kForbidBreaks));
+        // We can traverse PhysicalFragments in LayoutMedia though it's not
+        // a LayoutNGObject.
+        if (!RuntimeEnabledFeatures::LayoutMediaNGContainerEnabled() ||
+            !box->IsMedia()) {
+          // Leave LayoutNGBoxFragment-accompanied child LayoutObject
+          // traversal, since this object doesn't support that (or has no
+          // fragments (happens for table columns)). We need to switch back to
+          // legacy LayoutObject traversal for its children. We're then also
+          // assuming that we're either not block-fragmenting, or that this is
+          // monolithic content. We may re-enter
+          // LayoutNGBoxFragment-accompanied traversal if we get to a
+          // descendant that supports that.
+          DCHECK(
+              !box->FlowThreadContainingBlock() ||
+              (box->GetNGPaginationBreakability() == LayoutBox::kForbidBreaks));
 
-        traversable_fragment = nullptr;
+          traversable_fragment = nullptr;
+        }
       }
     } else if (box->PhysicalFragmentCount()) {
       // Enter LayoutNGBoxFragment-accompanied child LayoutObject traversal if
@@ -1108,25 +1139,38 @@ void PrePaintTreeWalk::Walk(const LayoutObject& object,
             DynamicTo<LayoutEmbeddedContent>(object)) {
       if (auto* embedded_view =
               layout_embedded_content->GetEmbeddedContentView()) {
-        if (context.tree_builder_context) {
-          auto& current = context.tree_builder_context->fragments[0].current;
-          current.paint_offset = PhysicalOffset(ToRoundedPoint(
-              current.paint_offset +
-              layout_embedded_content->ReplacedContentRect().offset -
-              PhysicalOffset(embedded_view->FrameRect().origin())));
-          // Subpixel accumulation doesn't propagate across embedded view.
-          current.directly_composited_container_paint_offset_subpixel_delta =
-              PhysicalOffset();
-        }
-        if (embedded_view->IsLocalFrameView()) {
-          Walk(*To<LocalFrameView>(embedded_view), context);
-        } else if (embedded_view->IsPluginView()) {
-          // If it is a webview plugin, walk into the content frame view.
-          if (auto* plugin_content_frame_view =
-                  FindWebViewPluginContentFrameView(*layout_embedded_content))
-            Walk(*plugin_content_frame_view, context);
-        } else {
-          // We need to do nothing for RemoteFrameView. See crbug.com/579281.
+        // Embedded content is monolithic and will normally not generate
+        // multiple fragments. However, if this is inside of a repeated table
+        // section or repeated fixed positioned element (printing), it may
+        // generate multiple fragments. In such cases, only update when at the
+        // first fragment if the underlying implementation doesn't support
+        // multiple fragments. We are only going to paint/hit-test the first
+        // fragment, and we need to make sure that the paint offsets inside the
+        // child view are with respect to the first fragment.
+        if (!physical_fragment || physical_fragment->IsFirstForNode() ||
+            CanPaintMultipleFragments(*physical_fragment)) {
+          if (context.tree_builder_context) {
+            auto& current = context.tree_builder_context->fragments[0].current;
+            current.paint_offset = PhysicalOffset(ToRoundedPoint(
+                current.paint_offset +
+                layout_embedded_content->ReplacedContentRect().offset -
+                PhysicalOffset(embedded_view->FrameRect().origin())));
+            // Subpixel accumulation doesn't propagate across embedded view.
+            current.directly_composited_container_paint_offset_subpixel_delta =
+                PhysicalOffset();
+          }
+          if (embedded_view->IsLocalFrameView()) {
+            Walk(*To<LocalFrameView>(embedded_view), context);
+          } else if (embedded_view->IsPluginView()) {
+            // If it is a webview plugin, walk into the content frame view.
+            if (auto* plugin_content_frame_view =
+                    FindWebViewPluginContentFrameView(
+                        *layout_embedded_content)) {
+              Walk(*plugin_content_frame_view, context);
+            }
+          } else {
+            // We need to do nothing for RemoteFrameView. See crbug.com/579281.
+          }
         }
       }
     }

@@ -8,8 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
-#include "base/memory/ref_counted.h"
+#include "base/functional/callback.h"
 #include "base/time/time.h"
 #include "base/token.h"
 #include "media/capture/video/video_capture_feedback.h"

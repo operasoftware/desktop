@@ -30,18 +30,12 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
-#include "third_party/blink/renderer/core/html/content_editables_controller.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
 
 namespace blink {
-
-namespace {
-const char kDocumentStateVersionMarker[] = "Version";
-const char kDocumentStateVersion[] = "1";
-}  // namespace
 
 static int64_t GenerateSequenceNumber() {
   // Initialize to the current time to reduce the likelihood of generating
@@ -117,83 +111,28 @@ void HistoryItem::SetScrollAnchorData(
   view_state_->scroll_anchor_data_ = scroll_anchor_data;
 }
 
-void HistoryItem::SetFormState(const Vector<String>& state) {
-  form_state_ = state;
-}
-
-const Vector<String>& HistoryItem::FormState() {
-  if (document_forms_state_)
-    form_state_ = document_forms_state_->ToStateVector();
-  return form_state_;
-}
-
-void HistoryItem::ClearFormState() {
-  form_state_.clear();
-  document_forms_state_.Clear();
-}
-
-void HistoryItem::SetContentEditablesState(ContentEditablesState* state) {
-  content_editables_state_ = state;
-}
-
-const Vector<String>& HistoryItem::GetContentEditablesState() {
-  if (content_editables_state_)
-    content_editables_state_vector_ = content_editables_state_->ToStateVector();
-
-  return content_editables_state_vector_;
-}
-
-void HistoryItem::ClearContentEditablesState() {
-  content_editables_state_.Clear();
-  content_editables_state_vector_.clear();
-}
-
 void HistoryItem::SetDocumentState(const Vector<String>& state) {
-  if (state.size() > 1 && state[0] == kDocumentStateVersionMarker &&
-      state[1].ToUInt() > 0) {
-    unsigned int form_state_size = state[2].ToUInt();
-    DCHECK_LT(form_state_size, state.size());
-    unsigned int end_form_state_idx = 2 + form_state_size;
-    unsigned int content_editables_state_size =
-        state[end_form_state_idx + 1].ToUInt();
-    DCHECK_EQ(form_state_size + content_editables_state_size + 4, state.size());
-    form_state_.clear();
-    if (form_state_size > 0)
-      form_state_.AppendRange(&state[3], &state[end_form_state_idx + 1]);
-    content_editables_state_.Clear();
-    if (content_editables_state_size)
-      content_editables_state_vector_.AppendRange(
-          &state[end_form_state_idx + 2], state.end());
-  } else {
-    form_state_ = state;
-  }
+  DCHECK(!document_state_);
+  document_state_vector_ = state;
 }
 
-void HistoryItem::SetFormState(DocumentFormsState* state) {
-  document_forms_state_ = state;
+void HistoryItem::SetDocumentState(DocumentState* state) {
+  document_state_ = state;
+}
+
+const Vector<String>& HistoryItem::GetDocumentState() {
+  if (document_state_)
+    document_state_vector_ = document_state_->ToStateVector();
+  return document_state_vector_;
 }
 
 Vector<String> HistoryItem::GetReferencedFilePaths() {
-  return FormController::GetReferencedFilePaths(FormState());
-}
-
-void HistoryItem::GetDocumentState(Vector<String>* state) {
-  // Update states.
-  FormState();
-  GetContentEditablesState();
-
-  state->clear();
-  state->push_back(kDocumentStateVersionMarker);
-  state->push_back(kDocumentStateVersion);
-  state->push_back(String::Number(form_state_.size()));
-  state->AppendVector(form_state_);
-  state->push_back(String::Number(content_editables_state_vector_.size()));
-  state->AppendVector(content_editables_state_vector_);
+  return FormController::GetReferencedFilePaths(GetDocumentState());
 }
 
 void HistoryItem::ClearDocumentState() {
-  form_state_.clear();
-  document_forms_state_.Clear();
+  document_state_.Clear();
+  document_state_vector_.clear();
 }
 
 void HistoryItem::SetStateObject(scoped_refptr<SerializedScriptValue> object) {
@@ -237,8 +176,7 @@ ResourceRequest HistoryItem::GenerateResourceRequest(
 }
 
 void HistoryItem::Trace(Visitor* visitor) const {
-  visitor->Trace(document_forms_state_);
-  visitor->Trace(content_editables_state_);
+  visitor->Trace(document_state_);
 }
 
 }  // namespace blink

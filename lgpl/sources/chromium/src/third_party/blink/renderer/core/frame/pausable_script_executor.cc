@@ -7,8 +7,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/callback.h"
 #include "base/check.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
@@ -320,7 +320,7 @@ PausableScriptExecutor::~PausableScriptExecutor() = default;
 void PausableScriptExecutor::Run() {
   ExecutionContext* context = GetExecutionContext();
   DCHECK(context);
-  if (!context->IsContextPaused()) {
+  if (!context->IsContextFrozenOrPaused()) {
     ExecuteAndDestroySelf();
     return;
   }

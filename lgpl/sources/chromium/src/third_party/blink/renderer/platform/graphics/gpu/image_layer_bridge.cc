@@ -151,11 +151,19 @@ bool ImageLayerBridge::PrepareTransferableResource(
 
   const bool gpu_compositing = SharedGpuContext::IsGpuCompositingEnabled();
 
-  const ImageOrientation origin = image_->IsOriginTopLeft()
-                                      ? ImageOrientationEnum::kOriginTopLeft
-                                      : ImageOrientationEnum::kOriginBottomLeft;
-  const bool image_flipped = image_->CurrentFrameOrientation() != origin;
-  layer_->SetFlipped(image_flipped);
+  if (!gpu_compositing) {
+    // Readback if needed and retain the readback in image_ to prevent future
+    // readbacks.
+    // Note: Switching to unaccelerated may change the value of
+    // image_->IsOriginTopLeft(), so it is important to make the switch before
+    // calling IsOriginTopLeft().
+    image_ = image_->MakeUnaccelerated();
+    if (!image_) {
+      return false;
+    }
+  }
+
+  layer_->SetFlipped(!image_->IsOriginTopLeft());
 
   if (gpu_compositing) {
     scoped_refptr<StaticBitmapImage> image_for_compositor =
@@ -204,12 +212,6 @@ bool ImageLayerBridge::PrepareTransferableResource(
                               std::move(image_for_compositor));
     *out_release_callback = std::move(func);
   } else {
-    // Readback if needed and retain the readback in image_ to prevent future
-    // readbacks
-    image_ = image_->MakeUnaccelerated();
-    if (!image_)
-      return false;
-
     sk_sp<SkImage> sk_image =
         image_->PaintImageForCurrentFrame().GetSwSkImage();
     if (!sk_image)
@@ -220,8 +222,14 @@ bool ImageLayerBridge::PrepareTransferableResource(
     // Always convert to N32 format.  This is a constraint of the software
     // compositor.
     constexpr SkColorType dst_color_type = kN32_SkColorType;
-    viz::ResourceFormat resource_format =
-        viz::SkColorTypeToResourceFormat(dst_color_type);
+    // TODO(vasilyt): this used to be
+    // viz::SkColorTypeToResourceFormat(dst_color_type), but on some
+    // platforms (including Mac), kN32_SkColorType is BGRA8888 which
+    // is disallowed as a bitmap format. Deeper refactorings are
+    // needed to fix this properly; in the meantime, force the use of
+    // viz::RGBA_8888 as the resource format. This addresses assertion
+    // failures when serializing these bitmaps to the GPU process.
+    viz::ResourceFormat resource_format = viz::RGBA_8888;
     RegisteredBitmap registered =
         CreateOrRecycleBitmap(size, resource_format, bitmap_registrar);
 

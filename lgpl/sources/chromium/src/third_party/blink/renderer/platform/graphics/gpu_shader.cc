@@ -6,33 +6,35 @@
 
 #include "third_party/blink/renderer/platform/graphics/gpu_shader.h"
 
+#include <utility>
+
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/types/expected.h"
-#include "cc/paint/paint_filter.h"
+#include "cc/paint/gpu_shader_program.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 namespace {
-String FormatUniformError(const cc::GpuShaderPaintFilter::UniformError& error) {
+String FormatUniformError(const cc::GpuShaderProgram::UniformError& error) {
   switch (error.type()) {
-    case cc::GpuShaderPaintFilter::UniformError::kErrorUnknownUniform:
+    case cc::GpuShaderProgram::UniformError::kErrorUnknownUniform:
       return String::Format(
           "Unexpected uniform: \x1B[41;93;4m%s\x1B[m.\n\nAllowed "
           "uniforms:\n-----------------\n%s",
           error.name().c_str(),
-          base::JoinString(cc::GpuShaderPaintFilter::GetAllSupportedUniforms(),
+          base::JoinString(cc::GpuShaderProgram::GetAllSupportedUniforms(),
                            "\n")
               .c_str());
-    case cc::GpuShaderPaintFilter::UniformError::kTypeMismatch:
+    case cc::GpuShaderProgram::UniformError::kTypeMismatch:
       return String::Format(
           "Invalid uniform type for \x1B[41;93;4m%s\x1B[m. Expected "
           "\x1B[42;93;4m%s\x1B[m but got "
           "\x1B[41;93;4m%s\x1B[m",
           error.name().c_str(), error.excpected_type().c_str(),
           error.actual_type().c_str());
-    case cc::GpuShaderPaintFilter::UniformError::kErrorNone:
+    case cc::GpuShaderProgram::UniformError::kErrorNone:
       NOTREACHED();
       return String();
   }
@@ -40,7 +42,8 @@ String FormatUniformError(const cc::GpuShaderPaintFilter::UniformError& error) {
 
 }  // namespace
 
-GpuShader::GpuShader() = default;
+GpuShader::GpuShader(cc::GpuShaderSource source, uint32_t uniforms)
+    : shader_source_(std::move(source)), uniforms_(uniforms) {}
 
 GpuShader::~GpuShader() = default;
 
@@ -53,40 +56,36 @@ base::expected<std::unique_ptr<GpuShader>, String> GpuShader::MakeFromSource(
                "disabled."));
   }
 
-  auto shader_source = source.Utf8();
-  cc::GpuShaderPaintFilter filter(shader_source);
-  auto status = filter.CompileAndBindUniforms();
+  auto shader_source = cc::GpuShaderSource(SkString(source.Utf8()));
+  auto program = cc::GpuShaderProgram::Make(std::move(shader_source));
 
-  if (!status.IsSuccess()) {
-    switch (status.status()) {
-      case cc::GpuShaderPaintFilter::CompilationStatus::kErrorParser:
-        return base::unexpected(String(status.parser_error()));
-      case cc::GpuShaderPaintFilter::CompilationStatus::kErrorUniforms:
-        return base::unexpected(FormatUniformError(status.uniform_error()));
-      case cc::GpuShaderPaintFilter::CompilationStatus::kSuccess:
-        NOTREACHED();
-        break;
+  if (program->error().has_value()) {
+    const auto& error = program->error().value();
+    switch (error.type()) {
+      case cc::GpuShaderProgram::Error::kErrorParser:
+        return base::unexpected(String(error.parser_error()));
+      case cc::GpuShaderProgram::Error::kErrorUniforms:
+        return base::unexpected(FormatUniformError(error.uniform_error()));
     }
   }
 
-  DCHECK(filter.valid());
-
-  auto shader = std::make_unique<GpuShader>();
-  shader->shader_source_ = std::move(shader_source);
-  shader->uniforms_ = filter.uniforms();
-  return std::move(shader);
+  return std::make_unique<GpuShader>(
+      cc::GpuShaderSource(SkString(source.Utf8())), program->uniforms_flags());
 }
 
 bool GpuShader::NeedsCompositingLayer() const {
-  static constexpr cc::GpuShaderPaintFilter::ShaderUniforms
-      kUniformForcesCompositingLayer =
-          cc::GpuShaderPaintFilter::kUniformMousePosition |
-          cc::GpuShaderPaintFilter::kUniformAnimationFrame;
-  return uniforms_ & kUniformForcesCompositingLayer;
+  // TODO(kubal): Re-enable this once blink painting issues are fixed
+  //              See DNA-103201 - for now we always force compositing layer.
+  // static constexpr cc::GpuShaderPaintFilter::ShaderUniforms
+  //     kUniformForcesCompositingLayer =
+  //         cc::GpuShaderPaintFilter::kUniformMousePosition |
+  //         cc::GpuShaderPaintFilter::kUniformAnimationFrame;
+  // return uniforms_ & kUniformForcesCompositingLayer;
+  return true;
 }
 
 bool GpuShader::NeedsMouseInput() const {
-  return uniforms_ & cc::GpuShaderPaintFilter::kUniformMousePosition;
+  return uniforms_ & cc::GpuShaderProgram::kUniformMousePosition;
 }
 
 }  // namespace blink

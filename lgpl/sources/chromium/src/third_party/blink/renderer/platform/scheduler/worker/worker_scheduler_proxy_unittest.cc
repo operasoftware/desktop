@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/platform/scheduler/worker/worker_scheduler_proxy.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequence_manager/test/sequence_manager_for_test.h"
@@ -12,6 +12,7 @@
 #include "base/test/task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/platform/scheduler/common/task_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/page_scheduler_impl.h"
@@ -127,12 +128,13 @@ class WorkerSchedulerProxyTest : public testing::Test {
             base::sequence_manager::SequenceManagerForTest::Create(
                 nullptr,
                 task_environment_.GetMainThreadTaskRunner(),
-                task_environment_.GetMockTickClock()))),
+                task_environment_.GetMockTickClock(),
+                base::sequence_manager::SequenceManager::Settings::Builder()
+                    .SetPrioritySettings(CreatePrioritySettings())
+                    .Build()))),
         agent_group_scheduler_(
             main_thread_scheduler_->CreateAgentGroupScheduler()),
-        page_scheduler_(
-            agent_group_scheduler_->AsAgentGroupScheduler().CreatePageScheduler(
-                nullptr)),
+        page_scheduler_(agent_group_scheduler_->CreatePageScheduler(nullptr)),
         frame_scheduler_(page_scheduler_->CreateFrameScheduler(
             nullptr,
             /*is_in_embedded_frame_tree=*/false,
@@ -141,14 +143,13 @@ class WorkerSchedulerProxyTest : public testing::Test {
   ~WorkerSchedulerProxyTest() override {
     frame_scheduler_.reset();
     page_scheduler_.reset();
-    agent_group_scheduler_.reset();
     main_thread_scheduler_->Shutdown();
   }
 
  protected:
   base::test::TaskEnvironment task_environment_;
   std::unique_ptr<MainThreadSchedulerImpl> main_thread_scheduler_;
-  std::unique_ptr<WebAgentGroupScheduler> agent_group_scheduler_;
+  Persistent<AgentGroupScheduler> agent_group_scheduler_;
   std::unique_ptr<PageScheduler> page_scheduler_;
   std::unique_ptr<FrameScheduler> frame_scheduler_;
 };

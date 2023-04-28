@@ -50,6 +50,7 @@
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/page/page.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/permissions_policy/document_policy_feature.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
@@ -83,7 +84,7 @@
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
-#include "third_party/blink/renderer/platform/wtf/gc_plugin_ignore.h"
+#include "third_party/blink/renderer/platform/wtf/gc_plugin.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 
@@ -124,12 +125,14 @@ namespace blink {
 class Agent;
 class AnchorElementInteractionTracker;
 class AnimationClock;
+class AriaNotificationOptions;
 class AXContext;
 class AXObjectCache;
 class Attr;
 class BeforeUnloadEventListener;
 class CDATASection;
 class CSSStyleSheet;
+class CSSToggleInference;
 class CanvasFontCache;
 class ChromeClient;
 class Comment;
@@ -140,8 +143,6 @@ class DocumentData;
 class ElementIntersectionObserverData;
 class ComputedStyle;
 class ConsoleMessage;
-class ContentEditablesController;
-class ContentEditablesState;
 class ContextFeatures;
 class CookieJar;
 class DOMImplementation;
@@ -212,12 +213,12 @@ class Range;
 class RenderBlockingResourceManager;
 class ResizeObserver;
 class ResourceFetcher;
-class ResourceResponse;
 class RootScrollerController;
 class SVGDocumentExtensions;
 class SVGUseElement;
 class ScriptElementBase;
 class ScriptPromise;
+class ScriptPromiseResolver;
 class ScriptRegexp;
 class ScriptRunner;
 class ScriptRunnerDelayer;
@@ -266,6 +267,7 @@ enum NodeListInvalidationType : int {
   kInvalidateForFormControls,
   kInvalidateOnHRefAttrChange,
   kInvalidateOnAnyAttrChange,
+  kInvalidateOnPopoverInvokerAttrChange,
 };
 const int kNumNodeListInvalidationTypes = kInvalidateOnAnyAttrChange + 1;
 
@@ -354,7 +356,7 @@ class CORE_EXPORT Document : public ContainerNode,
   ~Document() override;
 
   // Constructs a Document instance without a subclass for testing.
-  static Document* CreateForTest(ExecutionContext* execution_context = nullptr);
+  static Document* CreateForTest(ExecutionContext& execution_context);
 
   static Range* CreateRangeAdjustedToTreeScope(const TreeScope&,
                                                const Position&);
@@ -546,6 +548,7 @@ class CORE_EXPORT Document : public ContainerNode,
   HTMLCollection* WindowNamedItems(const AtomicString& name);
   DocumentNameCollection* DocumentNamedItems(const AtomicString& name);
   HTMLCollection* DocumentAllNamedItems(const AtomicString& name);
+  HTMLCollection* PopoverInvokers();
 
   // The unassociated listed elements are listed elements that are not
   // associated to a <form> element.
@@ -623,9 +626,6 @@ class CORE_EXPORT Document : public ContainerNode,
   FormController& GetFormController();
   DocumentState* GetDocumentState() const;
   void SetStateForNewControls(const Vector<String>&);
-  ContentEditablesController* GetContentEditablesController();
-  ContentEditablesState* GetContentEditableElementsState() const;
-  void SetStateForNewContentEditableElements(const Vector<String>&);
 
   LocalFrameView* View() const;   // can be null
   LocalFrame* GetFrame() const;   // can be null
@@ -716,10 +716,6 @@ class CORE_EXPORT Document : public ContainerNode,
   };
   void UpdateStyleAndLayoutForNode(const Node*, DocumentUpdateReason);
   void UpdateStyleAndLayoutForRange(const Range*, DocumentUpdateReason);
-  void IncLayoutCallsCounter() { ++layout_calls_counter_; }
-  void IncLayoutCallsCounterNG() { ++layout_calls_counter_ng_; }
-  void IncLayoutBlockCounter() { ++layout_blocks_counter_; }
-  void IncLayoutBlockCounterNG() { ++layout_blocks_counter_ng_; }
 
   scoped_refptr<const ComputedStyle> StyleForPage(uint32_t page_index);
 
@@ -760,7 +756,6 @@ class CORE_EXPORT Document : public ContainerNode,
   // AXContext associated with this document. When all associated
   // AXContexts are deleted, the AXObjectCache will be removed.
   AXObjectCache* ExistingAXObjectCache() const;
-  bool HasAXObjectCache() const;
   Document& AXObjectCacheOwner() const;
   void ClearAXObjectCache();
 
@@ -872,8 +867,9 @@ class CORE_EXPORT Document : public ContainerNode,
   // Document base URL.
   // https://html.spec.whatwg.org/C/#document-base-url
   const KURL& BaseURL() const;
-  void SetBaseURLOverride(const KURL&);
+  void SetBaseURLOverride(const KURL&, bool base_url_is_the_location = false);
   const KURL& BaseURLOverride() const { return base_url_override_; }
+  bool BaseURLIsTheLocation() const { return base_url_is_the_location_; }
   KURL ValidBaseElementURL() const;
   const AtomicString& BaseTarget() const { return base_target_; }
   void ProcessBaseElement();
@@ -889,8 +885,6 @@ class CORE_EXPORT Document : public ContainerNode,
   // Creates URL based on passed relative url and passed base URL override.
   KURL CompleteURLWithOverride(const String&,
                                const KURL& base_url_override) const;
-
-  const KURL& WebBundleClaimedUrl() const { return web_bundle_claimed_url_; }
 
   const KURL& UrlBeforeDocumentOpen() const {
     return url_before_document_open_;
@@ -1210,19 +1204,23 @@ class CORE_EXPORT Document : public ContainerNode,
   ScriptPromise requestStorageAccess(ScriptState* script_state);
   ScriptPromise requestStorageAccessForOrigin(ScriptState* script_state,
                                               const AtomicString& site);
+  // Returns whether the window has obtained storage access. Must be called on
+  // active documents.
+  bool HasStorageAccess() const;
 
   // Fragment directive API, currently used to feature detect text-fragments.
   // https://wicg.github.io/scroll-to-text-fragment/#feature-detectability
   FragmentDirective& fragmentDirective() const;
 
-  // Sends a query via Mojo to ask whether the user has any trust tokens. This
-  // can reject on permissions errors (e.g. associating |issuer| with the
-  // top-level origin would exceed the top-level origin's limit on the number of
-  // associated issuers) or on other internal errors (e.g. the network service
-  // is unavailable).
-  ScriptPromise hasTrustToken(ScriptState* script_state,
-                              const String& issuer,
-                              ExceptionState&);
+  // Sends a query via Mojo to ask whether the user has any private
+  // tokens. This can reject on permissions errors (e.g. associating |issuer|
+  // with the top-level origin would exceed the top-level origin's limit on the
+  // number of associated issuers) or on other internal errors (e.g. the network
+  // service is unavailable).
+  ScriptPromise hasPrivateToken(ScriptState* script_state,
+                                const String& issuer,
+                                const String& type,
+                                ExceptionState&);
 
   // Sends a query via Mojo to ask whether the user has a redemption record.
   // This can reject on permissions errors (e.g. associating |issuer| with the
@@ -1231,7 +1229,10 @@ class CORE_EXPORT Document : public ContainerNode,
   // is unavailable).
   ScriptPromise hasRedemptionRecord(ScriptState* script_state,
                                     const String& issuer,
+                                    const String& type,
                                     ExceptionState&);
+
+  void ariaNotify(const String announcement, const AriaNotificationOptions*);
 
   // The following implements the rule from HTML 4 for what valid names are.
   // To get this right for all the XML cases, we probably have to improve this
@@ -1304,8 +1305,8 @@ class CORE_EXPORT Document : public ContainerNode,
   // See `execution_context_` for details.
   ExecutionContext* GetExecutionContext() const final;
 
-  // Return the agent. Can only be null in unit tests.
-  Agent* GetAgent() const;
+  // Return the agent.
+  Agent& GetAgent() const;
 
   ScriptRunner* GetScriptRunner() { return script_runner_.Get(); }
   const base::ElapsedTimer& GetStartTime() const { return start_time_; }
@@ -1480,8 +1481,6 @@ class CORE_EXPORT Document : public ContainerNode,
   // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#the-embed-element
   void DelayLoadEventUntilLayoutTreeUpdate();
 
-  const EventPath::NodePath& GetOrCalculateEventNodePath(Node& node);
-
   const DocumentTiming& GetTiming() const { return document_timing_; }
 
   bool ShouldMarkFontPerformance() const {
@@ -1544,34 +1543,40 @@ class CORE_EXPORT Document : public ContainerNode,
   void AttachCompositorTimeline(cc::AnimationTimeline*) const;
 
   void AddToTopLayer(Element*, const Element* before = nullptr);
-  void RemoveFromTopLayer(Element*);
+  void RemoveFromTopLayerImmediately(Element*);
   const HeapVector<Member<Element>>& TopLayerElements() const {
     return top_layer_elements_;
   }
+  void ScheduleForTopLayerRemoval(Element*);
+  void RemoveFinishedTopLayerElements();
 
   HTMLDialogElement* ActiveModalDialog() const;
 
-  Element* PopupHintShowing() const { return popup_hint_showing_; }
-  void SetPopupHintShowing(Element* element) { popup_hint_showing_ = element; }
-  HeapVector<Member<Element>>& PopupStack() { return popup_stack_; }
-  const HeapVector<Member<Element>>& PopupStack() const { return popup_stack_; }
-  bool PopupAutoShowing() const { return !popup_stack_.empty(); }
-  Element* TopmostPopupAutoOrHint() const;
-  HeapHashSet<Member<Element>>& PopupsWaitingToHide() {
-    return popups_waiting_to_hide_;
+  HeapVector<Member<HTMLElement>>& PopoverStack() { return popover_stack_; }
+  const HeapVector<Member<HTMLElement>>& PopoverStack() const {
+    return popover_stack_;
   }
-  const Element* PopUpMousedownTarget() const {
-    return pop_up_mousedown_target_;
+  bool PopoverAutoShowing() const { return !popover_stack_.empty(); }
+  HTMLElement* TopmostPopover() const;
+  HeapHashSet<Member<HTMLElement>>& PopoversWaitingToHide() {
+    return popovers_waiting_to_hide_;
   }
-  void SetPopUpMousedownTarget(const Element*);
+  const HTMLElement* PopoverPointerdownTarget() const {
+    return popover_pointerdown_target_;
+  }
+  void SetPopoverPointerdownTarget(const HTMLElement*);
 
+  HeapHashSet<WeakMember<Element>>& ElementsWithCSSToggles() {
+    return elements_with_css_toggles_;
+  }
   // Add an element to the set of elements that, because of CSS toggle
   // creation, need style recalc done later.
   void AddToRecalcStyleForToggle(Element* element);
-
   // Call SetNeedsStyleRecalc for elements from AddToRecalcStyleForToggle;
   // return whether any calls were made.
   bool SetNeedsStyleRecalcForToggles();
+  CSSToggleInference* GetCSSToggleInference() { return css_toggle_inference_; }
+  CSSToggleInference& EnsureCSSToggleInference();
 
   // A non-null template_document_host_ implies that |this| was created by
   // EnsureTemplateDocument().
@@ -1640,12 +1645,13 @@ class CORE_EXPORT Document : public ContainerNode,
   static void SetForceSynchronousParsingForTesting(bool);
   static bool ForceSynchronousParsingForTesting();
 
+#if DCHECK_IS_ON()
   void IncrementNodeCount() { node_count_++; }
   void DecrementNodeCount() {
     DCHECK_GT(node_count_, 0);
     node_count_--;
   }
-  int NodeCount() const { return node_count_; }
+#endif  // DCHECK_IS_ON()
 
   SnapCoordinator& GetSnapCoordinator();
   void PerformScrollSnappingTasks();
@@ -1772,7 +1778,7 @@ class CORE_EXPORT Document : public ContainerNode,
   bool IsAccessibilityEnabled() const { return !ax_contexts_.empty(); }
 
   void DispatchHandleLoadStart();
-  void DispatchHandleLoadOrLayoutComplete();
+  void DispatchHandleLoadComplete();
 
   bool HaveRenderBlockingStylesheetsLoaded() const;
   bool HaveRenderBlockingResourcesLoaded() const;
@@ -1931,15 +1937,14 @@ class CORE_EXPORT Document : public ContainerNode,
 
   void WriteIntoTrace(perfetto::TracedValue ctx) const;
 
-  // TODO(https://crbug.com/1296161): Delete this function.
-  void CheckPartitionedCookiesOriginTrial(const ResourceResponse& response);
-
   void IncrementIgnoreDestructiveWriteModuleScriptCount() {
     ignore_destructive_write_module_script_count_++;
   }
   unsigned GetIgnoreDestructiveWriteModuleScriptCount() {
     return ignore_destructive_write_module_script_count_;
   }
+
+  void ResetAgent(Agent& agent);
 
  protected:
   void ClearXMLVersion() { xml_version_ = String(); }
@@ -1969,7 +1974,9 @@ class CORE_EXPORT Document : public ContainerNode,
   friend class NthIndexCache;
   friend class CheckPseudoHasCacheScope;
   friend class CanvasRenderingAPIUkmMetricsTest;
+  friend class MobileFriendlinessCheckerTest;
   friend class OffscreenCanvasRenderingAPIUkmMetricsTest;
+  friend class TapFriendlinessCheckerTest;
   FRIEND_TEST_ALL_PREFIXES(LazyLoadAutomaticImagesTest,
                            LoadAllImagesIfPrinting);
   FRIEND_TEST_ALL_PREFIXES(FrameFetchContextSubresourceFilterTest,
@@ -2133,10 +2140,32 @@ class CORE_EXPORT Document : public ContainerNode,
   void DisplayNoneChangedForFrame();
 
   // Handles a connection error to |trust_token_query_answerer_| by rejecting
-  // all pending promises created by |hasTrustToken| and |hasRedemptionRecord|.
+  // all pending promises created by |hasPrivateToken| and
+  // |hasRedemptionRecord|.
   void TrustTokenQueryAnswererConnectionError();
 
   void RunPostPrerenderingActivationSteps();
+
+  // Resolves/rejects the promise if an existing permission grant can
+  // approve/deny; otherwise rejects if without user gesture, or
+  // resolves/rejects based on the requested status.
+  void OnGotExistingStorageAccessPermissionState(
+      ScriptPromiseResolver* resolver,
+      bool has_user_gesture,
+      mojom::blink::PermissionStatus previous_status);
+
+  // Wraps `ProcessStorageAccessPermissionState` to handle the requested
+  // permission status.
+  void OnRequestedStorageAccessPermissionState(
+      ScriptPromiseResolver* resolver,
+      mojom::blink::PermissionStatus status);
+
+  // Resolves the promise if the `status` can approve; rejects the promise
+  // otherwise, and consumes user activation.
+  void ProcessStorageAccessPermissionState(
+      ScriptPromiseResolver* resolver,
+      bool use_existing_status,
+      mojom::blink::PermissionStatus status);
 
   const DocumentToken token_;
 
@@ -2173,16 +2202,15 @@ class CORE_EXPORT Document : public ContainerNode,
   Member<LocalDOMWindow> dom_window_;
 
   // For Documents given a dom_window_ at creation that are not Shutdown(),
-  // execution_context_ and dom_window_ will be equal.
+  // execution_context_ and dom_window_ will be equal and non-null.
   // For Documents given a dom_window_ at creation that are Shutdown(),
-  // execution_context_ will be nullptr.
+  // execution_context_ and dom_window_ will both be nullptr.
   // For Documents not given a dom_window_ at creation, execution_context_
   // will be the LocalDOMWindow where script will execute (which may be nullptr
   // in unit tests).
   Member<ExecutionContext> execution_context_;
 
-  // Documents should always have an agent except those created with
-  // DocumentInit::ForTest.
+  // Documents should always have an agent.
   Member<Agent> agent_;
 
   Member<ResourceFetcher> fetcher_;
@@ -2199,9 +2227,11 @@ class CORE_EXPORT Document : public ContainerNode,
   KURL base_url_;  // Node.baseURI: The URL to use when resolving relative URLs.
   KURL base_url_override_;  // An alternative base URL that takes precedence
                             // over base_url_ (but not base_element_url_).
+  bool base_url_is_the_location_ = false;  // Whether base url should be treated
+                                           // as document location
 
   // Used in FallbackBaseURL() to provide the base URL for srcdoc documents,
-  // which is the parent's base URL at the time the navigation was initiated.
+  // which is the initiator's base URL at the time the navigation was initiated.
   // Separate from the base_url_* fields because the fallback base URL should
   // not take precedence over things like <base>.
   // Note: this currently is only used when IsolateSandboxedIframes is enabled.
@@ -2209,8 +2239,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   KURL base_element_url_;   // The URL set by the <base> element.
   KURL cookie_url_;         // The URL to use for cookie access.
-
-  KURL web_bundle_claimed_url_;
 
   KURL url_before_document_open_;
 
@@ -2287,7 +2315,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   Member<StyleEngine> style_engine_;
   Member<StyleSheetList> style_sheet_list_;
-  Member<ContentEditablesController> content_editables_controller_;
 
   Member<FormController> form_controller_;
 
@@ -2403,20 +2430,25 @@ class CORE_EXPORT Document : public ContainerNode,
   // stack and is thus the one that will be visually on top.
   HeapVector<Member<Element>> top_layer_elements_;
 
-  // The stack of currently-displayed `popup=auto` elements. Elements in the
-  // stack go from earliest (bottom-most) to latest (top-most).
-  HeapVector<Member<Element>> popup_stack_;
-  // The `popup=hint` that is currently showing, if any.
-  Member<Element> popup_hint_showing_;
-  // The pop-up (if any) that received the most recent mousedown event.
-  Member<const Element> pop_up_mousedown_target_;
-  // A set of popups for which hidePopUp() has been called, but animations are
-  // still running.
-  HeapHashSet<Member<Element>> popups_waiting_to_hide_;
+  // top_layer_elements_ to be removed when top-layer computes to none.
+  HeapHashSet<Member<Element>> top_layer_elements_pending_removal_;
 
+  // The stack of currently-displayed `popover=auto` elements. Elements in the
+  // stack go from earliest (bottom-most) to latest (top-most).
+  HeapVector<Member<HTMLElement>> popover_stack_;
+  // The popover (if any) that received the most recent pointerdown event.
+  Member<const HTMLElement> popover_pointerdown_target_;
+  // A set of popovers for which hidePopover() has been called, but animations
+  // are still running.
+  HeapHashSet<Member<HTMLElement>> popovers_waiting_to_hide_;
+
+  // Elements that have CSS Toggles.
+  HeapHashSet<WeakMember<Element>> elements_with_css_toggles_;
   // Elements that need to be restyled because a toggle was created on them,
   // or a prior sibling, during the previous restyle.
   HeapHashSet<Member<Element>> elements_needing_style_recalc_for_toggle_;
+  // The inference engine for CSS toggles.
+  Member<CSSToggleInference> css_toggle_inference_;
 
   int load_event_delay_count_;
 
@@ -2468,7 +2500,9 @@ class CORE_EXPORT Document : public ContainerNode,
 
   Member<IntersectionObserverController> intersection_observer_controller_;
 
-  int node_count_;
+#if DCHECK_IS_ON()
+  int node_count_ = 0;
+#endif
 
   Member<SnapCoordinator> snap_coordinator_;
 
@@ -2484,16 +2518,6 @@ class CORE_EXPORT Document : public ContainerNode,
   // Tracks and reports metrics of attempted font match attempts (both
   // successful and not successful) by the page.
   std::unique_ptr<FontMatchingMetrics> font_matching_metrics_;
-
-  // For a given node, cache the vector of nodes that defines its EventPath so
-  // all events dispatched on this node won't get recalculated. This cache uses
-  // a LRU strategy and gets cleared when the DOM tree version changes.
-  uint64_t event_node_path_dom_tree_version_;
-  using EventNodePathCache =
-      HeapHashMap<Member<Node>, Member<EventPath::NodePath>>;
-  using EventNodePathCacheKeyList = HeapLinkedHashSet<Member<Node>>;
-  EventNodePathCache event_node_path_cache_;
-  EventNodePathCacheKeyList event_node_path_cache_key_list_;
 
 #if DCHECK_IS_ON()
   unsigned slot_assignment_recalc_forbidden_recursion_depth_ = 0;
@@ -2513,20 +2537,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   // The number of canvas elements on the document
   int num_canvases_ = 0;
-
-  // The number of LayoutObject::UpdateLayout() calls for both of the legacy
-  // layout and LayoutNG.
-  uint32_t layout_calls_counter_ = 0;
-
-  // The number of LayoutObject::UpdateLayout() calls for LayoutNG.
-  uint32_t layout_calls_counter_ng_ = 0;
-
-  // The number of LayoutBlock instances for both of the legacy layout
-  // and LayoutNG.
-  uint32_t layout_blocks_counter_ = 0;
-
-  // The number of LayoutNGMixin<LayoutBlock> instances
-  uint32_t layout_blocks_counter_ng_ = 0;
 
   bool deferred_compositor_commit_is_allowed_ = false;
 
@@ -2586,11 +2596,6 @@ class CORE_EXPORT Document : public ContainerNode,
   bool had_find_in_page_beforematch_expanded_hidden_matchable_ = false;
 
   bool dir_attribute_dirty_ = false;
-
-  // To reduce the API noisiness an explicit deny decision will set a
-  // flag that auto rejects the promise without the need for an IPC
-  // call or potential user prompt.
-  bool expressly_denied_storage_access_ = false;
 
   // True if the developer supplied a media query indicating that
   // the site has support for reduced motion.

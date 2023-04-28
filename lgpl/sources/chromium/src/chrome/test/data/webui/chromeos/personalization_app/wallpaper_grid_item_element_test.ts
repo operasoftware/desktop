@@ -6,8 +6,9 @@ import 'chrome://personalization/strings.m.js';
 import 'chrome://webui-test/mojo_webui_test_support.js';
 
 import {WallpaperGridItem} from 'chrome://personalization/js/personalization_app.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {Url} from 'chrome://resources/mojo/url/mojom/url.mojom-webui.js';
-import {assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {assertDeepEquals, assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 
 import {createSvgDataUrl, initElement, teardownElement} from './personalization_app_test_utils.js';
@@ -38,7 +39,14 @@ suite('WallpaperGridItemTest', function() {
         'placeholder attribute is set when no src is supplied');
 
     assertEquals(
-        querySelector('img'), null, 'no image is shown in empty state');
+        null, querySelector('img'), 'no image is shown in empty state');
+
+    wallpaperGridItemElement.primaryText = 'cow';
+    wallpaperGridItemElement.secondaryText = 'moo';
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertEquals(null, querySelector('#textShadow'), 'no text shadow shown');
+    assertEquals(null, querySelector('#text'), 'no text shown');
   });
 
   test('displays single image', async () => {
@@ -48,7 +56,7 @@ suite('WallpaperGridItemTest', function() {
     wallpaperGridItemElement = initElement(WallpaperGridItem, {src});
     const images =
         wallpaperGridItemElement!.shadowRoot!.querySelectorAll('img');
-    assertEquals(images.length, 1, 'only one image is shown');
+    assertEquals(1, images.length, 'only one image is shown');
     const img = images[0];
     assertTrue(img!.hasAttribute('hidden'), 'image should be hidden at first');
     assertTrue(
@@ -62,11 +70,11 @@ suite('WallpaperGridItemTest', function() {
 
     // Verify state. Note that |img| is shown as |imageSrc| has already loaded.
     assertEquals(
-        img?.getAttribute('auto-src'), src.url, 'auto-src set to correct url');
+        src.url, img?.getAttribute('auto-src'), 'auto-src set to correct url');
     assertEquals(
-        img?.getAttribute('aria-hidden'), 'true', 'img is always aria-hidden');
+        'true', img?.getAttribute('aria-hidden'), 'img is always aria-hidden');
     assertEquals(
-        img?.hasAttribute('clear-src'), true, 'clear-src attribute always set');
+        true, img?.hasAttribute('clear-src'), 'clear-src attribute always set');
     assertFalse(
         img!.hasAttribute('hidden'),
         'no longer hidden because image has loaded');
@@ -82,7 +90,7 @@ suite('WallpaperGridItemTest', function() {
     await waitAfterNextRender(wallpaperGridItemElement);
 
     const images = wallpaperGridItemElement.shadowRoot?.querySelectorAll('img');
-    assertEquals(images?.length, src.length, 'correct number of images shown');
+    assertEquals(src.length, images?.length, 'correct number of images shown');
     for (const image of images!) {
       assertFalse(
           image.hasAttribute('is-google-photos'), 'is-google-photos not set');
@@ -93,7 +101,7 @@ suite('WallpaperGridItemTest', function() {
     const isGooglePhotosImages =
         wallpaperGridItemElement.shadowRoot?.querySelectorAll('img');
     assertEquals(
-        isGooglePhotosImages?.length, src.length,
+        src.length, isGooglePhotosImages?.length,
         'still correct number of images');
     for (const image of isGooglePhotosImages!) {
       assertTrue(
@@ -114,7 +122,7 @@ suite('WallpaperGridItemTest', function() {
 
     const images =
         wallpaperGridItemElement!.shadowRoot!.querySelectorAll('img');
-    assertEquals(images.length, 1, 'only one image is shown');
+    assertEquals(1, images.length, 'only one image is shown');
     const img = images[0];
 
     // Update state. Note that |img| is hidden as |imageSrc| hasn't yet loaded.
@@ -159,41 +167,53 @@ suite('WallpaperGridItemTest', function() {
 
     const images =
         wallpaperGridItemElement!.shadowRoot!.querySelectorAll('img');
-    assertEquals(images.length, 2, 'only first two images displayed');
+    assertEquals(2, images.length, 'only first two images displayed');
 
     images.forEach((img, index) => {
       assertEquals(
-          img.getAttribute('auto-src'), src[index]?.url,
+          src[index]?.url, img.getAttribute('auto-src'),
           `url matches at index ${index}`);
     });
   });
 
   test('displays primary text', async () => {
     const primaryText = 'foo';
+    const src = {url: createSvgDataUrl('0')};
 
     // Initialize |wallpaperGridItemElement|.
-    wallpaperGridItemElement = initElement(WallpaperGridItem, {primaryText});
+    wallpaperGridItemElement =
+        initElement(WallpaperGridItem, {primaryText, src});
     await waitAfterNextRender(wallpaperGridItemElement);
 
     // Verify state.
-    assertNotEquals(querySelector('.text'), null);
-    assertEquals(querySelector('.primary-text')?.innerHTML, primaryText);
-    assertEquals(querySelector('.secondary-text'), null);
+    assertNotEquals(
+        null, querySelector('#textShadow'), 'text shadow is present');
+    assertNotEquals(null, querySelector('#text'), '#text element exists');
+    assertEquals(
+        primaryText, querySelector('.primary-text')?.innerHTML,
+        'primary text is correct');
+    assertEquals(
+        null, querySelector('.secondary-text'), 'secondary text not shown');
   });
 
   test('displays secondary text', async () => {
     const secondaryText = 'foo';
+    const src = {url: createSvgDataUrl('0')};
 
     // Initialize |wallpaperGridItemElement|.
-    wallpaperGridItemElement = initElement(WallpaperGridItem, {secondaryText});
+    wallpaperGridItemElement =
+        initElement(WallpaperGridItem, {secondaryText, src});
     await waitAfterNextRender(wallpaperGridItemElement);
 
     // Verify state.
-    assertNotEquals(querySelector('.text'), null, 'text container is present');
-    assertEquals(querySelector('.primary-text'), null, 'primary text is null');
+    assertNotEquals(
+        null, querySelector('#textShadow'), 'text shadow is present');
+    assertNotEquals(null, querySelector('#text'), 'text container is present');
+    assertEquals(null, querySelector('.primary-text'), 'primary text is null');
     assertEquals(
+        secondaryText,
         querySelector<HTMLParagraphElement>('.secondary-text')?.innerText,
-        secondaryText, 'secondary text is correct string');
+        'secondary text is correct string');
   });
 
   test('sets aria-selected based on selected property', async () => {
@@ -203,10 +223,10 @@ suite('WallpaperGridItemTest', function() {
 
     // Verify state.
     assertEquals(
-        wallpaperGridItemElement.ariaSelected, null,
+        null, wallpaperGridItemElement.ariaSelected,
         'aria selected attribute is initially missing');
     assertEquals(
-        getComputedStyle(querySelector('iron-icon')!).display, 'none',
+        'none', getComputedStyle(querySelector('iron-icon')!).display,
         'iron-icon is display none when aria-selected is missing');
 
     // Select |wallpaperGridItemElement| while it is still loading in
@@ -214,10 +234,10 @@ suite('WallpaperGridItemTest', function() {
     wallpaperGridItemElement.selected = true;
     await waitAfterNextRender(wallpaperGridItemElement);
     assertEquals(
-        wallpaperGridItemElement.ariaSelected, 'true',
+        'true', wallpaperGridItemElement.ariaSelected,
         'aria selected attribute set to true when selected is true');
     assertEquals(
-        getComputedStyle(querySelector('iron-icon')!).display, 'none',
+        'none', getComputedStyle(querySelector('iron-icon')!).display,
         'iron-icon is still display none while image is loading');
     assertTrue(
         wallpaperGridItemElement.hasAttribute('placeholder'),
@@ -228,10 +248,10 @@ suite('WallpaperGridItemTest', function() {
     await waitAfterNextRender(wallpaperGridItemElement);
 
     assertEquals(
-        wallpaperGridItemElement.ariaSelected, 'true',
+        'true', wallpaperGridItemElement.ariaSelected,
         'aria selected attribute is still true');
     assertNotEquals(
-        getComputedStyle(querySelector('iron-icon')!).display, 'none',
+        'none', getComputedStyle(querySelector('iron-icon')!).display,
         'iron-icon is not display none when aria selected is true');
     assertFalse(
         wallpaperGridItemElement.hasAttribute('placeholder'),
@@ -241,10 +261,123 @@ suite('WallpaperGridItemTest', function() {
     wallpaperGridItemElement.selected = false;
     await waitAfterNextRender(wallpaperGridItemElement);
     assertEquals(
-        wallpaperGridItemElement.ariaSelected, 'false',
+        'false', wallpaperGridItemElement.ariaSelected,
         'aria selected back to false');
     assertEquals(
-        getComputedStyle(querySelector('iron-icon')!).display, 'none',
+        'none', getComputedStyle(querySelector('iron-icon')!).display,
         'iron-icon is display none when aria selected is false');
+  });
+
+  test('sets aria-disabled attribute', async () => {
+    wallpaperGridItemElement = initElement(WallpaperGridItem);
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertEquals(
+        'false', wallpaperGridItemElement.getAttribute('aria-disabled'),
+        'aria-disabled defaults to false');
+
+    wallpaperGridItemElement.disabled = true;
+    await waitAfterNextRender(wallpaperGridItemElement);
+    assertEquals(
+        'true', wallpaperGridItemElement.getAttribute('aria-disabled'),
+        'disabled sets aria-disabled attribute');
+
+    wallpaperGridItemElement.disabled = false;
+    await waitAfterNextRender(wallpaperGridItemElement);
+    assertEquals(
+        'false', wallpaperGridItemElement.getAttribute('aria-disabled'),
+        'disabled false sets aria-disabled attribute false');
+  });
+
+  test('collage shows up to four images', async () => {
+    const src: Url[] =
+        [0, 1, 2, 3, 4, 5].map(i => ({url: createSvgDataUrl(`${i}`)}));
+    wallpaperGridItemElement = initElement(WallpaperGridItem, {src});
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertEquals(
+        2, wallpaperGridItemElement.shadowRoot!.querySelectorAll('img').length,
+        'only 2 images shown by default');
+
+    wallpaperGridItemElement.collage = true;
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    const images = Array.from(
+        wallpaperGridItemElement.shadowRoot!.querySelectorAll('img'));
+    assertEquals(4, images.length, 'collage shows 4 images');
+    assertDeepEquals(
+        src.slice(0, 4).map(({url}) => url), images.map(img => img.src),
+        'first four image urls are shown');
+  });
+
+  test('shows an info icon for infoText', async () => {
+    loadTimeData.overrideValues({isPersonalizationJellyEnabled: true});
+
+    wallpaperGridItemElement = initElement(
+        WallpaperGridItem,
+        {infoText: 'some text', src: {url: createSvgDataUrl('test')}});
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertEquals(
+        'some text',
+        wallpaperGridItemElement.shadowRoot!.getElementById('infoIcon')!.title,
+        'icon exists and has title attribute');
+  });
+
+  test('no info icon if infoText is empty string', async () => {
+    loadTimeData.overrideValues({isPersonalizationJellyEnabled: true});
+
+    wallpaperGridItemElement = initElement(
+        WallpaperGridItem,
+        {infoText: '', src: {url: createSvgDataUrl('test')}});
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertFalse(wallpaperGridItemElement.hasAttribute('placeholder'));
+
+    assertEquals(
+        null, wallpaperGridItemElement.shadowRoot!.getElementById('infoIcon'),
+        'no info text set');
+
+    wallpaperGridItemElement.infoText = 'description';
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertEquals(
+        'description',
+        wallpaperGridItemElement.shadowRoot!.getElementById('infoIcon')!.title,
+        'correct title text now set');
+  });
+
+  test('no info icon if placeholder', async () => {
+    loadTimeData.overrideValues({isPersonalizationJellyEnabled: true});
+    wallpaperGridItemElement =
+        initElement(WallpaperGridItem, {infoText: 'some text'});
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertTrue(wallpaperGridItemElement.hasAttribute('placeholder'));
+
+    assertEquals(
+        null, wallpaperGridItemElement.shadowRoot!.getElementById('infoIcon'),
+        'no info text shown if placeholder');
+
+    wallpaperGridItemElement.src = {url: createSvgDataUrl('testing')};
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertEquals(
+        'some text',
+        wallpaperGridItemElement.shadowRoot!.getElementById('infoIcon')!.title,
+        'correct title text now set');
+  });
+
+  test('no info icon if isPersonalizationJellyEnabled false', async () => {
+    loadTimeData.overrideValues({isPersonalizationJellyEnabled: false});
+
+    wallpaperGridItemElement = initElement(
+        WallpaperGridItem,
+        {infoText: 'some text', src: {url: createSvgDataUrl('test')}});
+    await waitAfterNextRender(wallpaperGridItemElement);
+
+    assertEquals(
+        null, wallpaperGridItemElement.shadowRoot!.getElementById('infoIcon'),
+        'icon does not exist');
   });
 });

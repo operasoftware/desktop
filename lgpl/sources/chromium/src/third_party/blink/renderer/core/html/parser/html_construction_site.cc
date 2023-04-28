@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/html/parser/html_construction_site.h"
 
 #include <limits>
+
 #include "third_party/blink/renderer/core/dom/comment.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/document_type.h"
@@ -65,12 +66,11 @@
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 
 namespace blink {
-
-static const unsigned kMaximumHTMLParserDOMTreeDepth = 512;
 
 void HTMLConstructionSite::SetAttributes(Element* element,
                                          AtomicHTMLToken* token) {
@@ -90,17 +90,21 @@ void HTMLConstructionSite::SetAttributes(Element* element,
 }
 
 static bool HasImpliedEndTag(const HTMLStackItem* item) {
-  if (item->NamespaceURI() != html_names::xhtmlNamespaceURI)
-    return false;
-
-  auto tag = item->GetHTMLTag();
-  return tag == html_names::HTMLTag::kDd || tag == html_names::HTMLTag::kDt ||
-         tag == html_names::HTMLTag::kLi ||
-         tag == html_names::HTMLTag::kOption ||
-         tag == html_names::HTMLTag::kOptgroup ||
-         tag == html_names::HTMLTag::kP || tag == html_names::HTMLTag::kRb ||
-         tag == html_names::HTMLTag::kRp || tag == html_names::HTMLTag::kRt ||
-         tag == html_names::HTMLTag::kRTC;
+  switch (item->GetHTMLTag()) {
+    case html_names::HTMLTag::kDd:
+    case html_names::HTMLTag::kDt:
+    case html_names::HTMLTag::kLi:
+    case html_names::HTMLTag::kOption:
+    case html_names::HTMLTag::kOptgroup:
+    case html_names::HTMLTag::kP:
+    case html_names::HTMLTag::kRb:
+    case html_names::HTMLTag::kRp:
+    case html_names::HTMLTag::kRt:
+    case html_names::HTMLTag::kRTC:
+      return item->IsHTMLNamespace();
+    default:
+      return false;
+  }
 }
 
 static bool ShouldUseLengthLimit(const ContainerNode& node) {
@@ -126,8 +130,73 @@ static unsigned NextTextBreakPositionForContainer(
   return std::min(current_position + *length_limit, string_length);
 }
 
-static inline bool IsAllWhitespace(const String& string) {
-  return string.IsAllSpecialCharacters<IsHTMLSpace<UChar>>();
+static inline WhitespaceMode RecomputeWhiteSpaceMode(
+    const StringView& string_view) {
+  DCHECK(!string_view.empty());
+  if (string_view[0] != '\n') {
+    return string_view.IsAllSpecialCharacters<IsHTMLSpace<UChar>>()
+               ? WhitespaceMode::kAllWhitespace
+               : WhitespaceMode::kNotAllWhitespace;
+  }
+
+  auto check_whitespace = [](auto* buffer, size_t length) {
+    WhitespaceMode result = WhitespaceMode::kNewlineThenWhitespace;
+    for (size_t i = 1; i < length; ++i) {
+      if (LIKELY(buffer[i] == ' ')) {
+        continue;
+      } else if (IsHTMLSpecialWhitespace(buffer[i])) {
+        result = WhitespaceMode::kAllWhitespace;
+      } else {
+        return WhitespaceMode::kNotAllWhitespace;
+      }
+    }
+    return result;
+  };
+
+  if (string_view.Is8Bit()) {
+    return check_whitespace(string_view.Characters8(), string_view.length());
+  } else {
+    return check_whitespace(string_view.Characters16(), string_view.length());
+  }
+}
+
+enum class RecomputeMode {
+  kDontRecompute,
+  kRecomputeIfNeeded,
+};
+
+// Strings composed entirely of whitespace are likely to be repeated. Turn them
+// into AtomicString so we share a single string for each.
+static String CheckWhitespaceAndConvertToString(const StringView& string,
+                                                WhitespaceMode whitespace_mode,
+                                                RecomputeMode recompute_mode) {
+  switch (whitespace_mode) {
+    case WhitespaceMode::kNewlineThenWhitespace:
+      DCHECK(WTF::NewlineThenWhitespaceStringsTable::IsNewlineThenWhitespaces(
+          string));
+      if (string.length() <
+          WTF::NewlineThenWhitespaceStringsTable::kTableSize) {
+        return WTF::NewlineThenWhitespaceStringsTable::GetStringForLength(
+            string.length());
+      }
+      [[fallthrough]];
+    case WhitespaceMode::kAllWhitespace:
+      return string.ToAtomicString().GetString();
+    case WhitespaceMode::kNotAllWhitespace:
+      // Other strings are pretty random and unlikely to repeat.
+      return string.ToString();
+    case WhitespaceMode::kWhitespaceUnknown:
+      DCHECK_EQ(RecomputeMode::kRecomputeIfNeeded, recompute_mode);
+      return CheckWhitespaceAndConvertToString(string,
+                                               RecomputeWhiteSpaceMode(string),
+                                               RecomputeMode::kDontRecompute);
+  }
+}
+
+static String TryCanonicalizeString(const StringView& string,
+                                    WhitespaceMode mode) {
+  return CheckWhitespaceAndConvertToString(string, mode,
+                                           RecomputeMode::kRecomputeIfNeeded);
 }
 
 static inline void Insert(HTMLConstructionSiteTask& task) {
@@ -273,12 +342,6 @@ void HTMLConstructionSite::FlushPendingText() {
   if (pending_text_.IsEmpty())
     return;
 
-  PendingText pending_text;
-  // Hold onto the current pending text on the stack so that queueTask doesn't
-  // recurse infinitely.
-  pending_text_.Swap(pending_text);
-  DCHECK(pending_text_.IsEmpty());
-
   // Splitting text nodes into smaller chunks contradicts HTML5 spec, but is
   // necessary for performance, see:
   // https://bugs.webkit.org/show_bug.cgi?id=55898
@@ -289,10 +352,10 @@ void HTMLConstructionSite::FlushPendingText() {
   absl::optional<unsigned> length_limit;
 
   unsigned current_position = 0;
-  const StringBuilder& string = pending_text.string_builder;
+  const StringBuilder& string = pending_text_.string_builder;
   while (current_position < string.length()) {
     unsigned proposed_break_index = NextTextBreakPositionForContainer(
-        *pending_text.parent, current_position, string.length(), length_limit);
+        *pending_text_.parent, current_position, string.length(), length_limit);
     unsigned break_index =
         FindBreakIndexBetween(string, current_position, proposed_break_index);
     DCHECK_LE(break_index, string.length());
@@ -301,32 +364,31 @@ void HTMLConstructionSite::FlushPendingText() {
       // case, just keep the entire string.
       break_index = string.length();
     }
-    String substring =
-        string.Substring(current_position, break_index - current_position);
-    // Strings composed entirely of whitespace are likely to be repeated. Turn
-    // them into AtomicString so we share a single string for each.
-    if (pending_text.whitespace_mode == kAllWhitespace ||
-        (pending_text.whitespace_mode == kWhitespaceUnknown &&
-         IsAllWhitespace(substring))) {
-      substring = AtomicString(substring).GetString();
-    }
+    StringView substring_view =
+        string.SubstringView(current_position, break_index - current_position);
+    String substring = canonicalize_whitespace_strings_
+                           ? TryCanonicalizeString(
+                                 substring_view, pending_text_.whitespace_mode)
+                           : substring_view.ToString();
 
     DCHECK_GT(break_index, current_position);
     DCHECK_EQ(break_index - current_position, substring.length());
     HTMLConstructionSiteTask task(HTMLConstructionSiteTask::kInsertText);
-    task.parent = pending_text.parent;
-    task.next_child = pending_text.next_child;
+    task.parent = pending_text_.parent;
+    task.next_child = pending_text_.next_child;
     task.child = Text::Create(task.parent->GetDocument(), std::move(substring));
-    QueueTask(task);
+    QueueTask(task, false);
     DCHECK_EQ(To<Text>(task.child.Get())->length(),
               break_index - current_position);
     current_position = break_index;
   }
+  pending_text_.Discard();
 }
 
-void HTMLConstructionSite::QueueTask(const HTMLConstructionSiteTask& task) {
-  FlushPendingText();
-  DCHECK(pending_text_.IsEmpty());
+void HTMLConstructionSite::QueueTask(const HTMLConstructionSiteTask& task,
+                                     bool flush_pending_text) {
+  if (flush_pending_text)
+    FlushPendingText();
   task_queue_.push_back(task);
 }
 
@@ -356,7 +418,7 @@ void HTMLConstructionSite::AttachLater(ContainerNode* parent,
     task.parent = task.parent->parentNode();
 
   DCHECK(task.parent);
-  QueueTask(task);
+  QueueTask(task, true);
 }
 
 void HTMLConstructionSite::ExecuteQueuedTasks() {
@@ -397,7 +459,9 @@ HTMLConstructionSite::HTMLConstructionSite(
           ScriptingContentIsAllowed(parser_content_policy)),
       is_parsing_fragment_(false),
       redirect_attach_to_foster_parent_(false),
-      in_quirks_mode_(document.InQuirksMode()) {
+      in_quirks_mode_(document.InQuirksMode()),
+      canonicalize_whitespace_strings_(
+          RuntimeEnabledFeatures::CanonicalizeWhitespaceStringsEnabled()) {
   DCHECK(document_->IsHTMLDocument() || document_->IsXHTMLDocument());
 }
 
@@ -743,11 +807,57 @@ void HTMLConstructionSite::InsertHTMLFormElement(AtomicHTMLToken* token,
 void HTMLConstructionSite::InsertHTMLTemplateElement(
     AtomicHTMLToken* token,
     DeclarativeShadowRootType declarative_shadow_root_type) {
+  // Regardless of the state of the StreamingDeclarativeShadowDOM feature, the
+  // template element is always created. If the feature is enabled, and if the
+  // template is a valid declarative Shadow Root (has a valid attribute value
+  // and parent element), then the template is only added to the stack of open
+  // elements, but is not attached to the DOM tree.
   auto* template_element = To<HTMLTemplateElement>(
       CreateElement(token, html_names::xhtmlNamespaceURI));
   template_element->SetDeclarativeShadowRootType(declarative_shadow_root_type);
-  AttachLater(CurrentNode(), template_element);
-  open_elements_.Push(HTMLStackItem::Create(template_element, token));
+  HTMLStackItem* template_stack_item =
+      HTMLStackItem::Create(template_element, token);
+  bool should_attach_template = true;
+  if (declarative_shadow_root_type ==
+          DeclarativeShadowRootType::kStreamingOpen ||
+      declarative_shadow_root_type ==
+          DeclarativeShadowRootType::kStreamingClosed) {
+    DCHECK(RuntimeEnabledFeatures::StreamingDeclarativeShadowDOMEnabled());
+    // Attach the shadow root now
+    auto focus_delegation = template_stack_item->GetAttributeItem(
+                                html_names::kShadowrootdelegatesfocusAttr)
+                                ? FocusDelegation::kDelegateFocus
+                                : FocusDelegation::kNone;
+    // TODO(crbug.com/1063157): Add an attribute for imperative slot
+    // assignment.
+    auto slot_assignment_mode = SlotAssignmentMode::kNamed;
+    HTMLStackItem* shadow_host_stack_item = open_elements_.TopStackItem();
+    Element* host = shadow_host_stack_item->GetElement();
+    ShadowRootType type = declarative_shadow_root_type ==
+                                  DeclarativeShadowRootType::kStreamingOpen
+                              ? ShadowRootType::kOpen
+                              : ShadowRootType::kClosed;
+    bool success = host->AttachDeclarativeShadowRoot(
+        template_element, type, focus_delegation, slot_assignment_mode);
+    if (success) {
+      DCHECK(host->AuthorShadowRoot());
+      UseCounter::Count(host->GetDocument(),
+                        WebFeature::kStreamingDeclarativeShadowDOM);
+      should_attach_template = false;
+      template_element->SetDeclarativeShadowRoot(*host->AuthorShadowRoot());
+    } else {
+      // If the shadow root attachment fails, e.g. if the host element isn't a
+      // valid shadow host, then we leave should_attach_template true, so that
+      // a "normal" template element gets attached to the DOM tree.
+      template_element->SetDeclarativeShadowRootType(
+          DeclarativeShadowRootType::kNone);
+    }
+  }
+  if (should_attach_template) {
+    // Attach a normal template element.
+    AttachLater(CurrentNode(), template_element);
+  }
+  open_elements_.Push(template_stack_item);
 }
 
 void HTMLConstructionSite::InsertHTMLElement(AtomicHTMLToken* token) {
@@ -773,7 +883,7 @@ void HTMLConstructionSite::InsertFormattingElement(AtomicHTMLToken* token) {
   // Possible active formatting elements include:
   // a, b, big, code, em, font, i, nobr, s, small, strike, strong, tt, and u.
   InsertHTMLElement(token);
-  active_formatting_elements_.Append(CurrentElementRecord()->StackItem());
+  active_formatting_elements_.Append(CurrentStackItem());
 }
 
 void HTMLConstructionSite::InsertScriptElement(AtomicHTMLToken* token) {
@@ -852,25 +962,16 @@ void HTMLConstructionSite::InsertTextNode(const StringView& string,
                        whitespace_mode);
 }
 
-void HTMLConstructionSite::Reparent(HTMLElementStack::ElementRecord* new_parent,
-                                    HTMLElementStack::ElementRecord* child) {
-  HTMLConstructionSiteTask task(HTMLConstructionSiteTask::kReparent);
-  task.parent = new_parent->GetNode();
-  task.child = child->GetNode();
-  QueueTask(task);
-}
-
-void HTMLConstructionSite::Reparent(HTMLElementStack::ElementRecord* new_parent,
+void HTMLConstructionSite::Reparent(HTMLStackItem* new_parent,
                                     HTMLStackItem* child) {
   HTMLConstructionSiteTask task(HTMLConstructionSiteTask::kReparent);
   task.parent = new_parent->GetNode();
   task.child = child->GetNode();
-  QueueTask(task);
+  QueueTask(task, true);
 }
 
-void HTMLConstructionSite::InsertAlreadyParsedChild(
-    HTMLStackItem* new_parent,
-    HTMLElementStack::ElementRecord* child) {
+void HTMLConstructionSite::InsertAlreadyParsedChild(HTMLStackItem* new_parent,
+                                                    HTMLStackItem* child) {
   if (new_parent->CausesFosterParenting()) {
     FosterParent(child->GetNode());
     return;
@@ -880,16 +981,15 @@ void HTMLConstructionSite::InsertAlreadyParsedChild(
       HTMLConstructionSiteTask::kInsertAlreadyParsedChild);
   task.parent = new_parent->GetNode();
   task.child = child->GetNode();
-  QueueTask(task);
+  QueueTask(task, true);
 }
 
-void HTMLConstructionSite::TakeAllChildren(
-    HTMLStackItem* new_parent,
-    HTMLElementStack::ElementRecord* old_parent) {
+void HTMLConstructionSite::TakeAllChildren(HTMLStackItem* new_parent,
+                                           HTMLStackItem* old_parent) {
   HTMLConstructionSiteTask task(HTMLConstructionSiteTask::kTakeAllChildren);
   task.parent = new_parent->GetNode();
   task.child = old_parent->GetNode();
-  QueueTask(task);
+  QueueTask(task, true);
 }
 
 CreateElementFlags HTMLConstructionSite::GetCreateElementFlags() const {
@@ -982,7 +1082,7 @@ Element* HTMLConstructionSite::CreateElement(
     // checkpoints, but note the spec is different--it talks about the
     // JavaScript stack, not the script nesting level.
     if (0u == reentry_permit_->ScriptNestingLevel())
-      document.GetAgent()->event_loop()->PerformMicrotaskCheckpoint();
+      document.GetAgent().event_loop()->PerformMicrotaskCheckpoint();
 
     // "6.3 Push a new element queue onto the custom element
     // reactions stack."
@@ -1154,15 +1254,16 @@ bool HTMLConstructionSite::InQuirksMode() {
 // https://html.spec.whatwg.org/C/#appropriate-place-for-inserting-a-node
 void HTMLConstructionSite::FindFosterSite(HTMLConstructionSiteTask& task) {
   // 2.1
-  HTMLElementStack::ElementRecord* last_template =
+  HTMLStackItem* last_template =
       open_elements_.Topmost(html_names::HTMLTag::kTemplate);
 
   // 2.2
-  HTMLElementStack::ElementRecord* last_table =
+  HTMLStackItem* last_table =
       open_elements_.Topmost(html_names::HTMLTag::kTable);
 
   // 2.3
-  if (last_template && (!last_table || last_template->IsAbove(last_table))) {
+  if (last_template &&
+      (!last_table || last_template->IsAboveItemInStack(last_table))) {
     task.parent = last_template->GetElement();
     return;
   }
@@ -1182,7 +1283,7 @@ void HTMLConstructionSite::FindFosterSite(HTMLConstructionSiteTask& task) {
   }
 
   // 2.6, 2.7
-  task.parent = last_table->Next()->GetElement();
+  task.parent = last_table->NextItemInStack()->GetElement();
 }
 
 bool HTMLConstructionSite::ShouldFosterParent() const {
@@ -1196,7 +1297,7 @@ void HTMLConstructionSite::FosterParent(Node* node) {
   FindFosterSite(task);
   task.child = node;
   DCHECK(task.parent);
-  QueueTask(task);
+  QueueTask(task, true);
 }
 
 void HTMLConstructionSite::PendingText::Trace(Visitor* visitor) const {

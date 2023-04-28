@@ -70,6 +70,7 @@ export class TestService extends TestBrowserProxy implements ServiceInterface {
       'updateAllExtensions',
       'updateExtensionCommandKeybinding',
       'updateExtensionCommandScope',
+      'updateSiteAccess',
     ]);
   }
 
@@ -218,12 +219,15 @@ export class TestService extends TestBrowserProxy implements ServiceInterface {
     this.methodCalled('openUrl', url);
   }
 
-  packExtension(
-      rootPath: string, keyPath: string, flag?: number,
-      _callback?:
-          (response: chrome.developerPrivate.PackDirectoryResponse) => void):
-      void {
+  packExtension(rootPath: string, keyPath: string, flag?: number) {
     this.methodCalled('packExtension', [rootPath, keyPath, flag]);
+    return Promise.resolve({
+      message: '',
+      item_path: '',
+      pem_path: '',
+      override_flags: 0,
+      status: chrome.developerPrivate.PackStatus.ERROR,
+    });
   }
 
   repairItem(id: string): void {
@@ -355,5 +359,12 @@ export class TestService extends TestBrowserProxy implements ServiceInterface {
   getMatchingExtensionsForSite(site: string) {
     this.methodCalled('getMatchingExtensionsForSite', site);
     return Promise.resolve(this.matchingExtensionsInfo!);
+  }
+
+  updateSiteAccess(
+      site: string,
+      updates: chrome.developerPrivate.ExtensionSiteAccessUpdate[]) {
+    this.methodCalled('updateSiteAccess', site, updates);
+    return Promise.resolve();
   }
 }

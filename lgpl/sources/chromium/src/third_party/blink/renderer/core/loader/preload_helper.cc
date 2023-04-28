@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/loader/preload_helper.h"
 
-#include "net/http/structured_headers.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -38,17 +37,12 @@
 #include "third_party/blink/renderer/core/loader/resource/image_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/link_prefetch_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/script_resource.h"
-#include "third_party/blink/renderer/core/loader/resource/speculation_rules_resource.h"
-#include "third_party/blink/renderer/core/loader/speculation_rule_loader.h"
 #include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
 #include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
-#include "third_party/blink/renderer/core/speculation_rules/document_speculation_rules.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/json/json_parser.h"
-#include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -175,15 +169,15 @@ void PreloadHelper::DnsPrefetchIfNeeded(
       if (settings->GetLogDnsPrefetchAndPreconnect()) {
         SendMessageToConsoleForPossiblyNullDocument(
             MakeGarbageCollected<ConsoleMessage>(
-                mojom::ConsoleMessageSource::kOther,
-                mojom::ConsoleMessageLevel::kVerbose,
+                mojom::blink::ConsoleMessageSource::kOther,
+                mojom::blink::ConsoleMessageLevel::kVerbose,
                 String("DNS prefetch triggered for " + params.href.Host())),
             document, frame);
       }
       WebPrescientNetworking* web_prescient_networking =
           frame ? frame->PrescientNetworking() : nullptr;
       if (web_prescient_networking) {
-        web_prescient_networking->PrefetchDNS(params.href.Host());
+        web_prescient_networking->PrefetchDNS(params.href);
       }
     }
   }
@@ -206,15 +200,15 @@ void PreloadHelper::PreconnectIfNeeded(
     if (settings && settings->GetLogDnsPrefetchAndPreconnect()) {
       SendMessageToConsoleForPossiblyNullDocument(
           MakeGarbageCollected<ConsoleMessage>(
-              mojom::ConsoleMessageSource::kOther,
-              mojom::ConsoleMessageLevel::kVerbose,
+              mojom::blink::ConsoleMessageSource::kOther,
+              mojom::blink::ConsoleMessageLevel::kVerbose,
               String("Preconnect triggered for ") + params.href.GetString()),
           document, frame);
       if (params.cross_origin != kCrossOriginAttributeNotSet) {
         SendMessageToConsoleForPossiblyNullDocument(
             MakeGarbageCollected<ConsoleMessage>(
-                mojom::ConsoleMessageSource::kOther,
-                mojom::ConsoleMessageLevel::kVerbose,
+                mojom::blink::ConsoleMessageSource::kOther,
+                mojom::blink::ConsoleMessageLevel::kVerbose,
                 String("Preconnect CORS setting is ") +
                     String(
                         (params.cross_origin == kCrossOriginAttributeAnonymous)
@@ -287,8 +281,8 @@ void PreloadHelper::PreloadIfNeeded(
   UseCounter::Count(document, WebFeature::kLinkRelPreload);
   if (!url.IsValid() || url.IsEmpty()) {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kOther,
-        mojom::ConsoleMessageLevel::kWarning,
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
         String("<link rel=preload> has an invalid `href` value")));
     return;
   }
@@ -336,8 +330,8 @@ void PreloadHelper::PreloadIfNeeded(
   }
   if (!IsSupportedType(resource_type.value(), params.type)) {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kOther,
-        mojom::ConsoleMessageLevel::kWarning,
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
         String("<link rel=preload> has an unsupported `type` value")));
     return;
   }
@@ -389,8 +383,8 @@ void PreloadHelper::PreloadIfNeeded(
   } else {
     if (!integrity_attr.empty()) {
       document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-          mojom::ConsoleMessageSource::kOther,
-          mojom::ConsoleMessageLevel::kWarning,
+          mojom::blink::ConsoleMessageSource::kOther,
+          mojom::blink::ConsoleMessageLevel::kWarning,
           String("The `integrity` attribute is currently ignored for preload "
                  "destinations that do not support subresource integrity. See "
                  "https://crbug.com/981419 for more information")));
@@ -400,10 +394,29 @@ void PreloadHelper::PreloadIfNeeded(
   link_fetch_params.SetContentSecurityPolicyNonce(params.nonce);
   Settings* settings = document.GetSettings();
   if (settings && settings->GetLogPreload()) {
+    String message = "Preload triggered for " + url.Host() + url.GetPath();
+    String fetch_priority_message;
+    if (!params.fetch_priority_hint.empty()) {
+      mojom::blink::FetchPriorityHint hint =
+          GetFetchPriorityAttributeValue(params.fetch_priority_hint);
+      switch (hint) {
+        case mojom::blink::FetchPriorityHint::kLow:
+          fetch_priority_message = " with fetchpriority hint 'low'";
+          break;
+        case mojom::blink::FetchPriorityHint::kHigh:
+          fetch_priority_message = " with fetchpriority hint 'high'";
+          break;
+        case mojom::blink::FetchPriorityHint::kAuto:
+          fetch_priority_message = " with fetchpriority hint 'auto'";
+          break;
+        default:
+          NOTREACHED();
+      }
+    }
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kOther,
-        mojom::ConsoleMessageLevel::kVerbose,
-        String("Preload triggered for " + url.Host() + url.GetPath())));
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kVerbose,
+        message + fetch_priority_message));
   }
   link_fetch_params.SetLinkPreload(true);
   link_fetch_params.SetRenderBlockingBehavior(
@@ -412,9 +425,7 @@ void PreloadHelper::PreloadIfNeeded(
     if (RenderBlockingResourceManager* manager =
             document.GetRenderBlockingResourceManager()) {
       if (EqualIgnoringASCIICase(params.as, "font")) {
-        manager->AddPendingPreload(
-            *pending_preload,
-            RenderBlockingResourceManager::PreloadType::kShortBlockingFont);
+        manager->AddPendingFontPreload(*pending_preload);
       }
     }
   }
@@ -440,8 +451,8 @@ void PreloadHelper::ModulePreloadIfNeeded(
   // [spec text]
   if (params.href.IsEmpty()) {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kOther,
-        mojom::ConsoleMessageLevel::kWarning,
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
         "<link rel=modulepreload> has no `href` value"));
     return;
   }
@@ -465,8 +476,8 @@ void PreloadHelper::ModulePreloadIfNeeded(
   // Currently we only support as="script".
   if (!params.as.empty() && params.as != "script") {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kOther,
-        mojom::ConsoleMessageLevel::kWarning,
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
         String("<link rel=modulepreload> has an invalid `as` value " +
                params.as)));
     // This triggers the same logic as Step 11 asynchronously, which will fire
@@ -490,8 +501,8 @@ void PreloadHelper::ModulePreloadIfNeeded(
   // |href| is already resolved in caller side.
   if (!params.href.IsValid()) {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kOther,
-        mojom::ConsoleMessageLevel::kWarning,
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
         "<link rel=modulepreload> has an invalid `href` value " +
             params.href.GetString()));
     return;
@@ -560,8 +571,8 @@ void PreloadHelper::ModulePreloadIfNeeded(
   Settings* settings = document.GetSettings();
   if (settings && settings->GetLogPreload()) {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kOther,
-        mojom::ConsoleMessageLevel::kVerbose,
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kVerbose,
         "Module preload triggered for " + params.href.Host() +
             params.href.GetPath()));
   }
@@ -632,83 +643,6 @@ void PreloadHelper::PrefetchIfNeeded(const LinkLoadParameters& params,
       LinkPrefetchResource::Fetch(link_fetch_params, document.Fetcher());
   if (pending_preload)
     pending_preload->AddResource(resource);
-}
-
-void PreloadHelper::LoadSpeculationRuleLinkFromHeader(
-    const String& header_value,
-    Document* document,
-    LocalFrame& frame) {
-  DCHECK(document);
-  if (header_value.empty())
-    return;
-
-  auto parsed_header = net::structured_headers::ParseList(header_value.Utf8());
-  if (!parsed_header.has_value()) {
-    SendMessageToConsoleForPossiblyNullDocument(
-        MakeGarbageCollected<ConsoleMessage>(
-            mojom::blink::ConsoleMessageSource::kOther,
-            mojom::blink::ConsoleMessageLevel::kWarning,
-            String("Cannot parse Speculation-Rules header value.")),
-        document, &frame);
-    return;
-  }
-
-  for (auto const& parsed_item : parsed_header.value()) {
-    // Only strings are valid list members.
-    if (parsed_item.member.size() != 1u ||
-        !parsed_item.member[0].item.is_string()) {
-      SendMessageToConsoleForPossiblyNullDocument(
-          MakeGarbageCollected<ConsoleMessage>(
-              mojom::blink::ConsoleMessageSource::kOther,
-              mojom::blink::ConsoleMessageLevel::kWarning,
-              String("Only strings are valid in Speculation-Rules header value "
-                     "and inner lists are ignored.")),
-          document, &frame);
-      continue;
-    }
-    const auto& url_str = String(parsed_item.member[0].item.GetString());
-    KURL speculation_rule_url(document->BaseURL(), url_str);
-    if (url_str.empty() || !speculation_rule_url.IsValid()) {
-      SendMessageToConsoleForPossiblyNullDocument(
-          MakeGarbageCollected<ConsoleMessage>(
-              mojom::blink::ConsoleMessageSource::kOther,
-              mojom::blink::ConsoleMessageLevel::kWarning,
-              String("URL \"" + url_str +
-                     "\" found in Speculation-Rules header is invalid.")),
-          document, &frame);
-      continue;
-    }
-
-    ResourceRequest resource_request(speculation_rule_url);
-
-    resource_request.SetPrefetchMaybeForTopLevelNavigation(false);
-    resource_request.SetFetchPriorityHint(
-        mojom::blink::FetchPriorityHint::kLow);
-
-    // Always use CORS. Adopt new best practices for subresources: CORS requests
-    // with same-origin credentials only.
-    auto* origin = document->GetExecutionContext()->GetSecurityOrigin();
-    resource_request.SetMode(network::mojom::RequestMode::kCors);
-    resource_request.SetCredentialsMode(
-        network::mojom::CredentialsMode::kSameOrigin);
-    resource_request.RemoveUserAndPassFromURL();
-    resource_request.SetRequestorOrigin(origin);
-    resource_request.SetHTTPOrigin(origin);
-
-    ResourceLoaderOptions options(
-        document->GetExecutionContext()->GetCurrentWorld());
-    options.initiator_info.name = fetch_initiator_type_names::kOther;
-
-    FetchParameters speculation_rule_params(std::move(resource_request),
-                                            options);
-
-    SpeculationRulesResource* resource = SpeculationRulesResource::Fetch(
-        speculation_rule_params, document->Fetcher());
-
-    SpeculationRuleLoader* speculation_rule_loader =
-        MakeGarbageCollected<SpeculationRuleLoader>(*document);
-    speculation_rule_loader->LoadResource(resource, speculation_rule_url);
-  }
 }
 
 void PreloadHelper::LoadLinksFromHeader(
@@ -847,7 +781,7 @@ Resource* PreloadHelper::StartPreload(ResourceType type,
       resource = FontResource::Fetch(params, resource_fetcher, nullptr);
       if (document.GetRenderBlockingResourceManager()) {
         document.GetRenderBlockingResourceManager()
-            ->EnsureStartFontPreloadTimer();
+            ->EnsureStartFontPreloadMaxBlockingTimer();
       }
       break;
     case ResourceType::kAudio:

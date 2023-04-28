@@ -458,7 +458,7 @@ absl::optional<PhysicalRect> NGInkOverflow::ComputeTextInkOverflow(
 
   // Following effects, such as shadows, operate on the text decorations,
   // so compute text decoration overflow first.
-  if (!style.AppliedTextDecorations().empty() && scaled_font.PrimaryFont()) {
+  if (style.HasAppliedTextDecorations() && scaled_font.PrimaryFont()) {
     LayoutRect decoration_rect = ComputeTextDecorationOverflow(
         style, scaled_font, rect_in_container.offset, ink_overflow,
         inline_context);
@@ -526,7 +526,7 @@ LayoutRect NGInkOverflow::ComputeTextDecorationOverflow(
     const PhysicalOffset& offset_in_container,
     const LayoutRect& ink_overflow,
     const NGInlinePaintContext* inline_context) {
-  DCHECK(!style.AppliedTextDecorations().empty());
+  DCHECK(style.HasAppliedTextDecorations());
   // Ideally we should pass MinimumThickness1(false) if this function is
   // called for NGFragmentItem::kSvgText. However it requires to add arguments
   // to some functions.
@@ -535,11 +535,11 @@ LayoutRect NGInkOverflow::ComputeTextDecorationOverflow(
   const MinimumThickness1 kMinimumThicknessIsOne(true);
   TextDecorationInfo decoration_info(
       offset_in_container, ink_overflow.Width(), style, inline_context,
-      /* selection_text_decoration */ absl::nullopt, &scaled_font,
-      kMinimumThicknessIsOne);
+      /* selection_text_decoration */ absl::nullopt, /* decoration_override */
+      nullptr, &scaled_font, kMinimumThicknessIsOne);
   NGTextDecorationOffset decoration_offset(decoration_info.TargetStyle(),
                                            style);
-  const Vector<AppliedTextDecoration>& decorations =
+  const Vector<AppliedTextDecoration, 1>& decorations =
       style.AppliedTextDecorations();
 
   gfx::RectF accumulated_bound;

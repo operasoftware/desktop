@@ -4,8 +4,6 @@
 
 #include "third_party/blink/renderer/platform/peerconnection/rtc_platform_sw_video_supported_formats.h"
 
-#include "base/features/feature_utils.h"
-#include "base/features/submodule_features.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "media/base/video_codecs.h"
@@ -13,11 +11,10 @@
 #include "third_party/webrtc/media/base/media_constants.h"
 
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#include "media/base/platform_mime_util.h"
 #if BUILDFLAG(IS_MAC)
 #include "media/video/vt_video_encoder.h"
-#elif BUILDFLAG(IS_WIN)
-#include "base/win/windows_version.h"
-#endif
+#endif  // BUILDFLAG(IS_MAC)
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
 namespace blink {
@@ -90,20 +87,15 @@ std::vector<webrtc::SdpVideoFormat> GetPlatformSWCodecSupportedFormats(
   DVLOG(3) << __func__ << " encoder=" << encoder;
   std::vector<webrtc::SdpVideoFormat> supported_formats;
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-  if (base::IsFeatureEnabled(
-          base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac) ||
-      base::IsFeatureEnabled(
-          base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin)) {
+  const bool has_platform_support =
+      encoder ? media::platform_mime_util::IsPlatformVideoEncoderAvailable()
+              : media::platform_mime_util::IsPlatformVideoDecoderAvailable();
+  if (has_platform_support) {
     for (const char* packetization_mode : {"0", "1"}) {
       for (const auto profile : kSupportedProfiles) {
 #if BUILDFLAG(IS_MAC)
         if (encoder && !media::VTVideoEncoder::IsNoDelayEncodingSupported(
                            profile.media_profile)) {
-          continue;
-        }
-#elif BUILDFLAG(IS_WIN)
-        if (encoder && profile.media_profile == media::H264PROFILE_HIGH &&
-            base::win::GetVersion() < base::win::Version::WIN8) {
           continue;
         }
 #endif

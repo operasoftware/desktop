@@ -27,7 +27,7 @@
 
 #include <algorithm>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_util.h"
@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/case_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "third_party/blink/renderer/platform/wtf/text/copy_lchars_from_uchar_source.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
@@ -141,6 +142,13 @@ String String::UpperASCII() const {
   if (!impl_)
     return String();
   return impl_->UpperASCII();
+}
+
+unsigned String::LengthWithStrippedWhiteSpace() const {
+  if (!impl_) {
+    return 0;
+  }
+  return impl_->LengthWithStrippedWhiteSpace();
 }
 
 String String::StripWhiteSpace() const {

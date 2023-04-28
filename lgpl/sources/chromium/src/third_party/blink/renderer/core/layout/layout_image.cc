@@ -44,9 +44,9 @@
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
-#include "third_party/blink/renderer/core/paint/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/image_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/timing/image_element_timing.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -204,7 +204,7 @@ void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
     }
   }
 
-  SetShouldDoFullPaintInvalidationWithoutGeometryChange(
+  SetShouldDoFullPaintInvalidationWithoutLayoutChange(
       PaintInvalidationReason::kImage);
 
   if (defer == CanDeferInvalidation::kYes && ImageResource() &&
@@ -280,12 +280,6 @@ bool LayoutImage::ComputeBackgroundIsKnownToBeObscured() const {
     return false;
 
   return ForegroundIsKnownToBeOpaqueInRect(BackgroundPaintedExtent(), 0);
-}
-
-LayoutUnit LayoutImage::MinimumReplacedHeight() const {
-  NOT_DESTROYED();
-  return image_resource_->ErrorOccurred() ? IntrinsicSize().Height()
-                                          : LayoutUnit();
 }
 
 HTMLMapElement* LayoutImage::ImageMap() const {
@@ -469,21 +463,23 @@ void LayoutImage::UpdateAfterLayout() {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, image_element->IsDefaultIntrinsicSize());
     image_element->SetAutoSizesUsecounter();
-
-    // Scope to the outermost frame to avoid counting image ads that are
-    // (likely) already in ad iframes. Exclude image ads that are invisible or
-    // too small (e.g. tracking pixels).
-    if (!image_ad_use_counter_recorded_ && image_element->IsAdRelated() &&
-        GetDocument().IsInOutermostMainFrame() &&
-        image_element->LayoutBoxWidth() > 1 &&
-        image_element->LayoutBoxHeight() > 1) {
-      UseCounter::Count(GetDocument(), WebFeature::kImageAd);
-      image_ad_use_counter_recorded_ = true;
-    }
   } else if (auto* video_element = DynamicTo<HTMLVideoElement>(node)) {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, video_element->IsDefaultIntrinsicSize());
   }
+}
+
+void LayoutImage::MutableForPainting::UpdatePaintedRect(
+    const PhysicalRect& paint_rect) {
+  // As an optimization for sprite sheets, an image may use the cull rect when
+  // generating the display item. We need to invalidate the display item if
+  // this rect changes.
+  auto& image = To<LayoutImage>(layout_object_);
+  if (image.last_paint_rect_ != paint_rect) {
+    static_cast<const DisplayItemClient&>(layout_object_).Invalidate();
+  }
+
+  image.last_paint_rect_ = paint_rect;
 }
 
 }  // namespace blink

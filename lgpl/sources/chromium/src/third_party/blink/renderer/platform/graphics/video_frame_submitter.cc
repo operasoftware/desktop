@@ -6,20 +6,21 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/sequenced_task_runner_handle.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "cc/metrics/video_playback_roughness_reporter.h"
 #include "components/power_scheduler/power_mode.h"
 #include "components/power_scheduler/power_mode_arbiter.h"
 #include "components/power_scheduler/power_mode_voter.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/resources/resource_id.h"
 #include "components/viz/common/resources/returned_resource.h"
 #include "components/viz/common/surfaces/frame_sink_bundle_id.h"
@@ -31,6 +32,7 @@
 #include "services/viz/public/mojom/compositing/frame_sink_bundle.mojom-blink.h"
 #include "services/viz/public/mojom/hit_test/hit_test_region_list.mojom-blink.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/frame_sinks/embedded_frame_sink.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -142,6 +144,17 @@ class VideoFrameSubmitter::FrameSinkBundleProxy
     }
     bundle_->DidDeleteSharedBitmap(frame_sink_id_.sink_id(), id);
   }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  void DidAllocateSharedShaderSource(base::ReadOnlySharedMemoryRegion region,
+                                     const gpu::Mailbox& id) override {
+    NOTREACHED();
+  }
+
+  void DidDeleteSharedShaderSource(const gpu::Mailbox& id) override {
+    NOTREACHED();
+  }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   void InitializeCompositorFrameSinkType(
       viz::mojom::blink::CompositorFrameSinkType type) override {
@@ -331,7 +344,17 @@ void VideoFrameSubmitter::DidReceiveCompositorFrameAck(
 
 void VideoFrameSubmitter::OnBeginFrame(
     const viz::BeginFrameArgs& args,
-    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>& timing_details) {
+    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>& timing_details,
+    bool frame_ack,
+    WTF::Vector<viz::ReturnedResource> resources) {
+  if (features::IsOnBeginFrameAcksEnabled()) {
+    if (frame_ack) {
+      DidReceiveCompositorFrameAck(std::move(resources));
+    } else if (!resources.empty()) {
+      ReclaimResources(std::move(resources));
+    }
+  }
+
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   TRACE_EVENT0("media", "VideoFrameSubmitter::OnBeginFrame");
 
@@ -347,7 +370,7 @@ void VideoFrameSubmitter::OnBeginFrame(
       continue;
     auto& feedback =
         timing_details.find(frame_token)->value.presentation_feedback;
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX)
     // TODO: On Linux failure flag is unreliable, and perfectly rendered frames
     // are reported as failures all the time.
     bool presentation_failure = false;
@@ -484,7 +507,7 @@ void VideoFrameSubmitter::OnReceivedContextProvider(
   if (!MaybeAcceptContextProvider(std::move(context_provider))) {
     constexpr base::TimeDelta kGetContextProviderRetryTimeout =
         base::Milliseconds(150);
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(
             context_provider_callback_, context_provider_,
@@ -508,7 +531,7 @@ bool VideoFrameSubmitter::MaybeAcceptContextProvider(
   }
 
   context_provider_ = std::move(context_provider);
-  if (context_provider_->BindToCurrentThread() !=
+  if (context_provider_->BindToCurrentSequence() !=
       gpu::ContextResult::kSuccess) {
     return false;
   }

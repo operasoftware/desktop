@@ -206,8 +206,36 @@ enum AVPixelFormat {
     AV_PIX_FMT_GBRAP16BE,    ///< planar GBRA 4:4:4:4 64bpp, big-endian
     AV_PIX_FMT_GBRAP16LE,    ///< planar GBRA 4:4:4:4 64bpp, little-endian
     /**
-     *  HW acceleration through QSV, data[3] contains a pointer to the
-     *  mfxFrameSurface1 structure.
+     * HW acceleration through QSV, data[3] contains a pointer to the
+     * mfxFrameSurface1 structure.
+     *
+     * Before FFmpeg 5.0:
+     * mfxFrameSurface1.Data.MemId contains a pointer when importing
+     * the following frames as QSV frames:
+     *
+     * VAAPI:
+     * mfxFrameSurface1.Data.MemId contains a pointer to VASurfaceID
+     *
+     * DXVA2:
+     * mfxFrameSurface1.Data.MemId contains a pointer to IDirect3DSurface9
+     *
+     * FFmpeg 5.0 and above:
+     * mfxFrameSurface1.Data.MemId contains a pointer to the mfxHDLPair
+     * structure when importing the following frames as QSV frames:
+     *
+     * VAAPI:
+     * mfxHDLPair.first contains a VASurfaceID pointer.
+     * mfxHDLPair.second is always MFX_INFINITE.
+     *
+     * DXVA2:
+     * mfxHDLPair.first contains IDirect3DSurface9 pointer.
+     * mfxHDLPair.second is always MFX_INFINITE.
+     *
+     * D3D11:
+     * mfxHDLPair.first contains a ID3D11Texture2D pointer.
+     * mfxHDLPair.second contains the texture array index of the frame if the
+     * ID3D11Texture2D is an array texture, or always MFX_INFINITE if it is a
+     * normal texture.
      */
     AV_PIX_FMT_QSV,
     /**
@@ -386,6 +414,12 @@ enum AVPixelFormat {
     AV_PIX_FMT_XV36BE,      ///< packed XVYU 4:4:4, 48bpp, data in the high bits, zeros in the low bits, big-endian, variant of Y412 where alpha channel is left undefined
     AV_PIX_FMT_XV36LE,      ///< packed XVYU 4:4:4, 48bpp, data in the high bits, zeros in the low bits, little-endian, variant of Y412 where alpha channel is left undefined
 
+    AV_PIX_FMT_RGBF32BE,    ///< IEEE-754 single precision packed RGB 32:32:32, 96bpp, RGBRGB..., big-endian
+    AV_PIX_FMT_RGBF32LE,    ///< IEEE-754 single precision packed RGB 32:32:32, 96bpp, RGBRGB..., little-endian
+
+    AV_PIX_FMT_RGBAF32BE,   ///< IEEE-754 single precision packed RGBA 32:32:32:32, 128bpp, RGBARGBA..., big-endian
+    AV_PIX_FMT_RGBAF32LE,   ///< IEEE-754 single precision packed RGBA 32:32:32:32, 128bpp, RGBARGBA..., little-endian
+
     AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };
 
@@ -488,6 +522,9 @@ enum AVPixelFormat {
 #define AV_PIX_FMT_P416       AV_PIX_FMT_NE(P416BE, P416LE)
 
 #define AV_PIX_FMT_RGBAF16    AV_PIX_FMT_NE(RGBAF16BE, RGBAF16LE)
+
+#define AV_PIX_FMT_RGBF32     AV_PIX_FMT_NE(RGBF32BE, RGBF32LE)
+#define AV_PIX_FMT_RGBAF32    AV_PIX_FMT_NE(RGBAF32BE, RGBAF32LE)
 
 /**
   * Chromaticity coordinates of the source primaries.

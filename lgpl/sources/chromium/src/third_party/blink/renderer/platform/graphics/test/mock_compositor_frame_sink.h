@@ -61,6 +61,12 @@ class MockCompositorFrameSink : public viz::mojom::blink::CompositorFrameSink {
   MOCK_METHOD2(DidAllocateSharedBitmap,
                void(base::ReadOnlySharedMemoryRegion, const gpu::Mailbox&));
   MOCK_METHOD1(DidDeleteSharedBitmap, void(const gpu::Mailbox&));
+#if BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
+  MOCK_METHOD2(DidAllocateSharedShaderSource,
+               void(base::ReadOnlySharedMemoryRegion region,
+                    const gpu::Mailbox& id));
+  MOCK_METHOD1(DidDeleteSharedShaderSource, void(const gpu::Mailbox& id));
+#endif  // BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
   MOCK_METHOD1(SetPreferredFrameInterval, void(base::TimeDelta));
   MOCK_METHOD1(InitializeCompositorFrameSinkType,
                void(viz::mojom::CompositorFrameSinkType));

@@ -6,10 +6,10 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/containers/adapters.h"
 #include "base/cxx17_backports.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/task/single_thread_task_runner.h"
@@ -169,9 +169,9 @@ void MultiBufferDataSource::CreateResourceLoader(int64_t first_byte_position,
 
   SetReader(new MultiBufferReader(
       url_data_->multibuffer(), first_byte_position, last_byte_position,
+      is_client_audio_element_,
       base::BindRepeating(&MultiBufferDataSource::ProgressCallback, weak_ptr_),
       render_task_runner_));
-  reader_->SetIsClientAudioElement(is_client_audio_element_);
   UpdateBufferSizes();
 }
 
@@ -183,6 +183,7 @@ void MultiBufferDataSource::CreateResourceLoader_Locked(
 
   reader_ = std::make_unique<MultiBufferReader>(
       url_data_->multibuffer(), first_byte_position, last_byte_position,
+      is_client_audio_element_,
       base::BindRepeating(&MultiBufferDataSource::ProgressCallback, weak_ptr_),
       render_task_runner_);
   UpdateBufferSizes();
@@ -218,7 +219,7 @@ void MultiBufferDataSource::Initialize(InitializeCB init_cb) {
 
 void MultiBufferDataSource::OnRedirected(
     const scoped_refptr<UrlData>& new_destination) {
-  if (!new_destination) {
+  if (!new_destination || !url_data_) {
     // A failure occurred.
     failed_ = true;
     if (init_cb_) {
@@ -268,7 +269,7 @@ void MultiBufferDataSource::OnRedirected(
     redirect_cb_.Run();
 }
 
-void MultiBufferDataSource::SetPreload(Preload preload) {
+void MultiBufferDataSource::SetPreload(media::DataSource::Preload preload) {
   DVLOG(1) << __func__ << "(" << preload << ")";
   DCHECK(render_task_runner_->BelongsToCurrentThread());
   preload_ = preload;
@@ -298,11 +299,20 @@ bool MultiBufferDataSource::PassedTimingAllowOriginCheck() {
   return url_data_->passed_timing_allow_origin_check();
 }
 
+bool MultiBufferDataSource::WouldTaintOrigin() {
+  // When the resource is redirected to another origin we think of it as
+  // tainted. This is actually not specified, and is under discussion.
+  // See https://github.com/whatwg/fetch/issues/737.
+  if (!HasSingleOrigin() && cors_mode() == UrlData::CORS_UNSPECIFIED)
+    return true;
+  return IsCorsCrossOrigin();
+}
+
 UrlData::CorsMode MultiBufferDataSource::cors_mode() const {
   return url_data_->cors_mode();
 }
 
-void MultiBufferDataSource::MediaPlaybackRateChanged(double playback_rate) {
+void MultiBufferDataSource::OnMediaPlaybackRateChanged(double playback_rate) {
   DCHECK(render_task_runner_->BelongsToCurrentThread());
   if (playback_rate < 0 || playback_rate == playback_rate_)
     return;
@@ -312,7 +322,7 @@ void MultiBufferDataSource::MediaPlaybackRateChanged(double playback_rate) {
   UpdateBufferSizes();
 }
 
-void MultiBufferDataSource::MediaIsPlaying() {
+void MultiBufferDataSource::OnMediaIsPlaying() {
   DCHECK(render_task_runner_->BelongsToCurrentThread());
 
   // Always clear this since it can be set by OnBufferingHaveEnough() calls at

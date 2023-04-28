@@ -6,13 +6,14 @@
 
 #include <utility>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "components/viz/common/resources/resource_format_utils.h"
+#include "components/viz/common/resources/shared_image_format.h"
 #include "components/viz/common/resources/transferable_resource.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
@@ -32,6 +33,7 @@
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_gpu.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
@@ -46,7 +48,8 @@ CanvasResource::CanvasResource(base::WeakPtr<CanvasResourceProvider> provider,
                                cc::PaintFlags::FilterQuality filter_quality,
                                const SkColorInfo& info)
     : owning_thread_ref_(base::PlatformThread::CurrentRef()),
-      owning_thread_task_runner_(Thread::Current()->GetDeprecatedTaskRunner()),
+      owning_thread_task_runner_(
+          ThreadScheduler::Current()->CleanupTaskRunner()),
       provider_(std::move(provider)),
       info_(info),
       filter_quality_(filter_quality) {}
@@ -128,7 +131,12 @@ static void ReleaseFrameResources(
     scoped_refptr<CanvasResource>&& resource,
     const gpu::SyncToken& sync_token,
     bool lost_resource) {
-  if (!resource)
+  // If there is a LastUnrefCallback, we need to abort because recycling the
+  // resource now will prevent the LastUnrefCallback from ever being called.
+  // In such cases, ReleaseFrameResources will be called again when
+  // CanvasResourceDispatcher destroys the corresponding FrameResource object,
+  // at which time this resource will be safely recycled.
+  if (!resource || resource->HasLastUnrefCallback())
     return;
 
   resource->WaitSyncToken(sync_token);
@@ -142,8 +150,9 @@ static void ReleaseFrameResources(
   if (lost_resource)
     resource->NotifyResourceLost();
   if (resource_provider && !lost_resource && resource->IsRecycleable() &&
-      resource->HasOneRef())
+      resource->HasOneRef()) {
     resource_provider->RecycleResource(std::move(resource));
+  }
 }
 
 bool CanvasResource::PrepareTransferableResource(
@@ -444,8 +453,9 @@ CanvasResourceRasterSharedImage::CanvasResourceRasterSharedImage(
         surface_origin, surface_alpha_type, shared_image_usage_flags);
   } else {
     shared_image_mailbox = shared_image_interface->CreateSharedImage(
-        GetResourceFormat(), Size(), GetColorSpace(), surface_origin,
-        surface_alpha_type, shared_image_usage_flags, gpu::kNullSurfaceHandle);
+        viz::SharedImageFormat::SinglePlane(GetResourceFormat()), Size(),
+        GetColorSpace(), surface_origin, surface_alpha_type,
+        shared_image_usage_flags, gpu::kNullSurfaceHandle);
   }
 
   // Wait for the mailbox to be ready to be used.
@@ -1038,10 +1048,10 @@ void CanvasResourceSwapChain::PresentSwapChain() {
   // front buffer contains the content we just rendered, and it needs to be
   // copied into the back buffer to support a retained mode like canvas expects.
   // The wait sync token ensure that the present executes before we do the copy.
-  raster_interface->CopySubTexture(front_buffer_mailbox_, back_buffer_mailbox_,
-                                   GL_TEXTURE_2D, 0, 0, 0, 0, size_.width(),
-                                   size_.height(), false /* unpack_flip_y */,
-                                   false /* unpack_premultiply_alpha */);
+  raster_interface->CopySharedImage(front_buffer_mailbox_, back_buffer_mailbox_,
+                                    GL_TEXTURE_2D, 0, 0, 0, 0, size_.width(),
+                                    size_.height(), false /* unpack_flip_y */,
+                                    false /* unpack_premultiply_alpha */);
   // Don't generate sync token here so that the copy is not on critical path.
 }
 

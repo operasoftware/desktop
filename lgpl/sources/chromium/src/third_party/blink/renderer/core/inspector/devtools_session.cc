@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/devtools_agent.h"
@@ -73,6 +75,18 @@ class DevToolsSession::IOSession : public mojom::blink::DevToolsSession {
   void BindInterface(
       mojo::PendingReceiver<mojom::blink::DevToolsSession> receiver) {
     receiver_.Bind(std::move(receiver), io_task_runner_);
+
+    // We set the disconnect handler for the IO session to detach the devtools
+    // session from its V8 session. This is necessary to unpause and detach
+    // the main thread session if the main thread is blocked in
+    // an instrumentation pause.
+    receiver_.set_disconnect_handler(WTF::BindOnce(
+        [](scoped_refptr<InspectorTaskRunner> inspector_task_runner,
+           CrossThreadWeakPersistent<::blink::DevToolsSession> session) {
+          inspector_task_runner->AppendTask(CrossThreadBindOnce(
+              &::blink::DevToolsSession::DetachFromV8, session));
+        },
+        inspector_task_runner_, session_));
   }
 
   void DeleteSoon() { io_task_runner_->DeleteSoon(FROM_HERE, this); }
@@ -122,6 +136,7 @@ DevToolsSession::DevToolsSession(
     bool client_expects_binary_responses,
     bool client_is_trusted,
     const String& session_id,
+    bool session_waits_for_debugger,
     scoped_refptr<base::SequencedTaskRunner> mojo_task_runner)
     : agent_(agent),
       inspector_backend_dispatcher_(new protocol::UberDispatcher(this)),
@@ -130,7 +145,8 @@ DevToolsSession::DevToolsSession(
       client_is_trusted_(client_is_trusted),
       v8_session_state_(kV8StateKey),
       v8_session_state_cbor_(&v8_session_state_, /*default_value=*/{}),
-      session_id_(session_id) {
+      session_id_(session_id),
+      session_waits_for_debugger_(session_waits_for_debugger) {
   receiver_.Bind(std::move(main_receiver), mojo_task_runner);
 
   io_session_ = new IOSession(
@@ -162,7 +178,10 @@ void DevToolsSession::ConnectToV8(v8_inspector::V8Inspector* inspector,
       context_group_id, this,
       v8_inspector::StringView(cbor.data(), cbor.size()),
       client_is_trusted_ ? v8_inspector::V8Inspector::kFullyTrusted
-                         : v8_inspector::V8Inspector::kUntrusted);
+                         : v8_inspector::V8Inspector::kUntrusted,
+      session_waits_for_debugger_
+          ? v8_inspector::V8Inspector::kWaitingForDebugger
+          : v8_inspector::V8Inspector::kNotWaitingForDebugger);
 }
 
 bool DevToolsSession::IsDetached() {
@@ -191,6 +210,12 @@ void DevToolsSession::Detach() {
   agents_.clear();
   v8_session_.reset();
   agent_->client_->DebuggerTaskFinished();
+}
+
+void DevToolsSession::DetachFromV8() {
+  if (v8_session_) {
+    v8_session_->stop();
+  }
 }
 
 void DevToolsSession::DispatchProtocolCommand(

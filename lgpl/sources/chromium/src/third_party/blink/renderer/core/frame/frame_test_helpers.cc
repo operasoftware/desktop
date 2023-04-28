@@ -33,8 +33,9 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "cc/test/test_ukm_recorder_factory.h"
 #include "cc/trees/layer_tree_host.h"
@@ -48,6 +49,7 @@
 #include "third_party/blink/public/common/frame/fenced_frame_sandbox_flags.h"
 #include "third_party/blink/public/common/frame/frame_policy.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame_replication_state.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame_replication_state.mojom.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom-blink.h"
@@ -58,11 +60,12 @@
 #include "third_party/blink/public/platform/interface_registry.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
+#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
+#include "third_party/blink/public/test/test_web_frame_helper.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
@@ -72,6 +75,7 @@
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/frame/web_remote_frame_impl.h"
+#include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/fake_web_plugin.h"
@@ -81,6 +85,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/widget/input/widget_input_handler_manager.h"
 #include "third_party/blink/renderer/platform/widget/widget_base.h"
@@ -114,7 +119,7 @@ namespace {
 void RunServeAsyncRequestsTask(scoped_refptr<base::TaskRunner> task_runner) {
   // TODO(kinuko,toyoshim): Create a mock factory and use it instead of
   // getting the platform's one. (crbug.com/751425)
-  WebURLLoaderMockFactory::GetSingletonInstance()->ServeAsynchronousRequests();
+  URLLoaderMockFactory::GetSingletonInstance()->ServeAsynchronousRequests();
   if (TestWebFrameClient::IsLoading()) {
     task_runner->PostTask(
         FROM_HERE, WTF::BindOnce(&RunServeAsyncRequestsTask, task_runner));
@@ -182,7 +187,8 @@ void LoadFrameDontWait(WebLocalFrame* frame, const WebURL& url) {
   } else {
     auto params = std::make_unique<WebNavigationParams>();
     params->url = url;
-    params->storage_key = BlinkStorageKey(SecurityOrigin::Create(url));
+    params->storage_key =
+        BlinkStorageKey::CreateFirstParty(SecurityOrigin::Create(url));
     params->navigation_timings.navigation_start = base::TimeTicks::Now();
     params->navigation_timings.fetch_start = base::TimeTicks::Now();
     params->is_browser_initiated = true;
@@ -254,7 +260,7 @@ void FillNavigationParamsResponse(WebNavigationParams* params) {
   // Empty documents and srcdoc will be handled by DocumentLoader.
   if (DocumentLoader::WillLoadUrlAsEmpty(kurl) || kurl.IsAboutSrcdocURL())
     return;
-  WebURLLoaderMockFactory::GetSingletonInstance()->FillNavigationParamsResponse(
+  URLLoaderMockFactory::GetSingletonInstance()->FillNavigationParamsResponse(
       params);
 
   // Parse Content Security Policy response headers into the policy container,
@@ -339,12 +345,14 @@ WebRemoteFrameImpl* CreateRemoteChild(
 
   auto* frame = To<WebRemoteFrameImpl>(parent).CreateRemoteChild(
       mojom::blink::TreeScopeType::kDocument, RemoteFrameToken(),
-      /*devtools_frame_token=*/base::UnguessableToken(), /*opener=*/nullptr,
+      /*is_loading=*/false,
+      /*devtools_frame_token=*/base::UnguessableToken(),
+      /*opener=*/nullptr,
       CreateStubRemoteIfNeeded<mojom::blink::RemoteFrameHost>(
           mojo::NullAssociatedRemote()),
       mojo::AssociatedRemote<mojom::blink::RemoteFrame>()
           .BindNewEndpointAndPassDedicatedReceiver(),
-      std::move(replicated_state));
+      std::move(replicated_state), mojom::blink::FrameOwnerProperties::New());
   return frame;
 }
 
@@ -369,20 +377,20 @@ void SwapRemoteFrame(
 WebViewHelper::WebViewHelper(
     CreateTestWebFrameWidgetCallback create_web_frame_callback)
     : web_view_(nullptr),
-      agent_group_scheduler_(blink::ThreadScheduler::Current()
-                                 ->ToMainThreadScheduler()
-                                 ->CreateAgentGroupScheduler()),
+      agent_group_scheduler_(
+          scheduler::WebThreadScheduler::MainThreadScheduler()
+              ->CreateWebAgentGroupScheduler()),
       platform_(Platform::Current()) {
   DocumentLoader::DisableCodeCacheForTesting();
   CreateTestWebFrameWidgetCallback create_callback =
       std::move(create_web_frame_callback);
   if (!create_callback) {
     create_callback =
-        base::BindRepeating(&WebViewHelper::CreateTestWebFrameWidget<>);
+        WTF::BindRepeating(&WebViewHelper::CreateTestWebFrameWidget<>);
   }
   // Due to return type differences we need to bind the RepeatingCallback
   // in a wrapper.
-  create_widget_callback_wrapper_ = base::BindRepeating(
+  create_widget_callback_wrapper_ = WTF::BindRepeating(
       [](const CreateTestWebFrameWidgetCallback& create_test_web_widget,
          base::PassKey<WebLocalFrame> pass_key,
          CrossVariantMojoAssociatedRemote<
@@ -479,6 +487,12 @@ WebViewImpl* WebViewHelper::InitializeAndLoad(
   return GetWebView();
 }
 
+WebViewImpl* WebViewHelper::InitializePlaceholderRemote() {
+  return InitializeRemoteWithOpenerAndAssociatedRemoteAndReceivers(
+      nullptr, nullptr, nullptr, mojo::NullAssociatedRemote(),
+      mojo::NullAssociatedReceiver());
+}
+
 WebViewImpl* WebViewHelper::InitializeRemote(
     scoped_refptr<SecurityOrigin> security_origin,
     WebViewClient* web_view_client) {
@@ -489,6 +503,22 @@ WebViewImpl* WebViewHelper::InitializeRemoteWithOpener(
     WebFrame* opener,
     scoped_refptr<SecurityOrigin> security_origin,
     WebViewClient* web_view_client) {
+  return InitializeRemoteWithOpenerAndAssociatedRemoteAndReceivers(
+      opener, security_origin, web_view_client,
+      CreateStubRemoteIfNeeded<mojom::blink::RemoteFrameHost>(
+          mojo::NullAssociatedRemote()),
+      mojo::AssociatedRemote<mojom::blink::RemoteFrame>()
+          .BindNewEndpointAndPassDedicatedReceiver());
+}
+
+WebViewImpl*
+WebViewHelper::InitializeRemoteWithOpenerAndAssociatedRemoteAndReceivers(
+    WebFrame* opener,
+    scoped_refptr<SecurityOrigin> security_origin,
+    WebViewClient* web_view_client,
+    mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
+        remote_frame_host,
+    mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame> receiver) {
   Reset();
 
   InitializeWebView(web_view_client, nullptr, absl::nullopt);
@@ -499,12 +529,9 @@ WebViewImpl* WebViewHelper::InitializeRemoteWithOpener(
   replication_state->origin = security_origin;
 
   WebRemoteFrameImpl::CreateMainFrame(
-      web_view_, RemoteFrameToken(),
+      web_view_, RemoteFrameToken(), /*is_loading=*/false,
       /*devtools_frame_token=*/base::UnguessableToken(), opener,
-      CreateStubRemoteIfNeeded<mojom::blink::RemoteFrameHost>(
-          mojo::NullAssociatedRemote()),
-      mojo::AssociatedRemote<mojom::blink::RemoteFrame>()
-          .BindNewEndpointAndPassDedicatedReceiver(),
+      std::move(remote_frame_host), std::move(receiver),
       std::move(replication_state));
   return web_view_;
 }
@@ -551,7 +578,7 @@ WebLocalFrameImpl* WebViewHelper::CreateProvisional(
   client = CreateDefaultClientIfNeeded(client, owned_client);
   auto* frame = To<WebLocalFrameImpl>(WebLocalFrame::CreateProvisional(
       client, nullptr, LocalFrameToken(), &old_frame, FramePolicy(),
-      WebFrame::ToCoreFrame(old_frame)->Tree().GetName()));
+      WebFrame::ToCoreFrame(old_frame)->Tree().GetName(), old_frame.View()));
   client->Bind(frame, std::move(owned_client));
 
   // Create a widget, if necessary.
@@ -605,8 +632,8 @@ TestWebFrameWidget* WebViewHelper::CreateFrameWidgetAndInitializeCompositing(
       GetSynchronousSingleThreadLayerTreeSettings();
   display::ScreenInfos initial_screen_infos(
       frame_widget->GetInitialScreenInfo());
-  frame_widget->InitializeCompositing(
-      *agent_group_scheduler_, initial_screen_infos, &layer_tree_settings);
+  frame_widget->InitializeCompositing(initial_screen_infos,
+                                      &layer_tree_settings);
   // This runs WidgetInputHandlerManager::InitOnInputHandlingThread, which will
   // set up the InputHandlerProxy.
   frame_widget->FlushInputHandlerTasks();
@@ -736,6 +763,7 @@ WebLocalFrame* TestWebFrameClient::CreateChildFrame(
     const WebFrameOwnerProperties&,
     FrameOwnerElementType,
     WebPolicyContainerBindParams policy_container_bind_params,
+    ukm::SourceId document_ukm_source_id,
     FinishChildFrameCreationFn finish_creation) {
   MockPolicyContainerHost mock_policy_container_host;
   mock_policy_container_host.BindWithNewEndpoint(
@@ -768,6 +796,10 @@ bool TestWebFrameClient::SwapIn(WebFrame* previous_frame) {
   return result;
 }
 
+std::unique_ptr<URLLoader> TestWebFrameClient::CreateURLLoaderForTesting() {
+  return URLLoaderMockFactory::GetSingletonInstance()->CreateURLLoader();
+}
+
 void TestWebFrameClient::BeginNavigation(
     std::unique_ptr<WebNavigationInfo> info) {
   navigation_callback_.Cancel();
@@ -781,8 +813,8 @@ void TestWebFrameClient::BeginNavigation(
     return;
 
   navigation_callback_.Reset(
-      base::BindOnce(&TestWebFrameClient::CommitNavigation,
-                     weak_factory_.GetWeakPtr(), std::move(info)));
+      WTF::BindOnce(&TestWebFrameClient::CommitNavigation,
+                    weak_factory_.GetWeakPtr(), std::move(info)));
   frame_->GetTaskRunner(blink::TaskType::kInternalLoading)
       ->PostTask(FROM_HERE, navigation_callback_.callback());
 }
@@ -795,10 +827,9 @@ void TestWebFrameClient::CommitNavigation(
 
   KURL url = info->url_request.Url();
   if (url.IsAboutSrcdocURL()) {
-    // If we are loading an about:srcdoc frame in a Blink unit test, then we are
-    // guaranteed to have a local parent.
-    blink::WebLocalFrame* parent = frame_->Parent()->ToWebLocalFrame();
-    params->fallback_srcdoc_base_url = parent->GetDocument().BaseURL();
+    params->fallback_srcdoc_base_url = info->requestor_base_url;
+    TestWebFrameHelper::FillStaticResponseForSrcdocNavigation(frame_,
+                                                              params.get());
   }
 
   MockPolicyContainerHost mock_policy_container_host;
@@ -898,17 +929,16 @@ void TestWebFrameWidget::DispatchThroughCcInputHandler(
   GetWidgetInputHandlerManager()->DispatchEvent(
       std::make_unique<WebCoalescedInputEvent>(event.Clone(),
                                                ui::LatencyInfo()),
-      base::BindOnce(
-          [](WeakMember<TestWebFrameWidget> widget,
-             mojom::blink::InputEventResultSource, const ui::LatencyInfo&,
-             mojom::blink::InputEventResultState,
+      WTF::BindOnce(
+          [](TestWebFrameWidget* widget, mojom::blink::InputEventResultSource,
+             const ui::LatencyInfo&, mojom::blink::InputEventResultState,
              mojom::blink::DidOverscrollParamsPtr overscroll,
              mojom::blink::TouchActionOptionalPtr,
              mojom::blink::ScrollResultDataPtr) {
             if (widget)
               widget->last_overscroll_ = std::move(overscroll);
           },
-          this));
+          WrapWeakPersistent(this)));
   FlushInputHandlerTasks();
 }
 

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import {AppManagementStore, updateSelectedAppId} from 'chrome://os-settings/chromeos/os_settings.js';
+import {AppType, InstallSource} from 'chrome://resources/cr_components/app_management/app_management.mojom-webui.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 
 import {replaceBody, replaceStore, setupFakeHandler} from './test_util.js';
@@ -21,14 +22,13 @@ suite('<app-management-app-details-item>', () => {
     flushTasks();
   });
 
-  test('PWA type', async function() {
-    const options = {
-      type: apps.mojom.AppType.kWeb,
-      installSource: apps.mojom.InstallSource.kUnknown,
-    };
-
-    // Add PWA app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
+  /**
+   * @param {Object} appOptions
+   * @param {string} [appName="app"]
+   **/
+  async function addApp(appOptions, appName = 'app') {
+    // Add an app, and make it the currently selected app.
+    const app = await fakeHandler.addApp(appName, appOptions);
 
     AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
 
@@ -41,200 +41,125 @@ suite('<app-management-app-details-item>', () => {
     replaceBody(appDetailsItem);
     fakeHandler.flushPipesForTesting();
     flushTasks();
+  }
 
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#type-and-source'));
+  test('PWA type from unknown source', async function() {
+    await addApp({
+      type: AppType.kWeb,
+      installSource: InstallSource.kUnknown,
+    });
+
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSource'));
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#type-and-source')
+        appDetailsItem.shadowRoot.querySelector('#typeAndSource')
             .textContent.trim(),
         'Web App');
   });
 
-  test('Android type', async function() {
-    const options = {
-      type: apps.mojom.AppType.kArc,
-      installSource: apps.mojom.InstallSource.kUnknown,
-    };
+  test('PWA type from browser', async function() {
+    const publisherId = 'https://google.com/';
+    await addApp({
+      type: AppType.kWeb,
+      installSource: InstallSource.kBrowser,
+      publisherId,
+    });
 
-    // Add Android app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#type-and-source'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSourceText'));
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#type-and-source')
+        appDetailsItem.shadowRoot.querySelector('#typeAndSourceText')
+            .textContent.trim(),
+        'Web App installed from Chrome browser');
+
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#infoIconTooltip')
+                     .querySelector('#tooltipText'));
+    assertEquals(
+        appDetailsItem.shadowRoot.querySelector('#infoIconTooltip')
+            .querySelector('#tooltipText')
+            .textContent.trim(),
+        publisherId);
+  });
+
+  test('Android type', async function() {
+    await addApp({
+      type: AppType.kArc,
+      installSource: InstallSource.kUnknown,
+    });
+
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSource'));
+    assertEquals(
+        appDetailsItem.shadowRoot.querySelector('#typeAndSource')
             .textContent.trim(),
         'Android App');
   });
 
   test('Chrome type', async function() {
-    const options = {
-      type: apps.mojom.AppType.kChromeApp,
-      installSource: apps.mojom.InstallSource.kUnknown,
-    };
+    await addApp({
+      type: AppType.kChromeApp,
+      installSource: InstallSource.kUnknown,
+    });
 
-    // Add Chrome app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#type-and-source'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSource'));
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#type-and-source')
+        appDetailsItem.shadowRoot.querySelector('#typeAndSource')
             .textContent.trim(),
         'Chrome App');
   });
 
   test('Chrome App from web store', async function() {
-    const options = {
-      type: apps.mojom.AppType.kChromeApp,
-      installSource: apps.mojom.InstallSource.kChromeWebStore,
-    };
+    await addApp({
+      type: AppType.kChromeApp,
+      installSource: InstallSource.kChromeWebStore,
+    });
 
-    // Add Chrome app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#type-and-source'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSource'));
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#type-and-source')
+        appDetailsItem.shadowRoot.querySelector('#typeAndSource')
             .textContent.trim(),
         'Chrome App installed from <a href="#">Chrome Web Store</a>');
   });
 
   test('Android App from play store', async function() {
-    const options = {
-      type: apps.mojom.AppType.kArc,
-      installSource: apps.mojom.InstallSource.kPlayStore,
-    };
+    await addApp({
+      type: AppType.kArc,
+      installSource: InstallSource.kPlayStore,
+    });
 
-    // Add Chrome app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#type-and-source'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSource'));
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#type-and-source')
+        appDetailsItem.shadowRoot.querySelector('#typeAndSource')
             .textContent.trim(),
         'Android App installed from <a href="#">Google Play Store</a>');
   });
 
   test('System type', async function() {
-    const options = {
-      type: apps.mojom.AppType.kSystemWeb,
-    };
+    await addApp({
+      type: AppType.kSystemWeb,
+    });
 
-    // Add System app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#type-and-source'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSource'));
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#type-and-source')
+        appDetailsItem.shadowRoot.querySelector('#typeAndSource')
             .textContent.trim(),
         'System App');
   });
 
-  test('system install source', async function() {
-    const options = {
-      installSource: apps.mojom.InstallSource.kSystem,
-    };
+  test('System install source', async function() {
+    await addApp({
+      installSource: InstallSource.kSystem,
+    });
 
-    // Add System app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#type-and-source'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#typeAndSource'));
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#type-and-source')
+        appDetailsItem.shadowRoot.querySelector('#typeAndSource')
             .textContent.trim(),
         'ChromeOS System App');
   });
 
   test('Chrome app version', async function() {
-    const options = {
-      type: apps.mojom.AppType.kChromeApp,
+    await addApp({
+      type: AppType.kChromeApp,
       version: '17.2',
-    };
-
-    // Add Chrome app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
+    });
 
     assertEquals(
         appDetailsItem.shadowRoot.querySelector('#version').textContent.trim(),
@@ -242,25 +167,10 @@ suite('<app-management-app-details-item>', () => {
   });
 
   test('Android app version', async function() {
-    const options = {
-      type: apps.mojom.AppType.kArc,
+    await addApp({
+      type: AppType.kArc,
       version: '13.1.52',
-    };
-
-    // Add Android app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
+    });
 
     assertEquals(
         appDetailsItem.shadowRoot.querySelector('#version').innerText.trim(),
@@ -268,65 +178,38 @@ suite('<app-management-app-details-item>', () => {
   });
 
   test('Android type storage', async function() {
-    const options = {
-      type: apps.mojom.AppType.kArc,
-      installSource: apps.mojom.InstallSource.kUnknown,
+    await addApp({
+      type: AppType.kArc,
+      installSource: InstallSource.kUnknown,
       appSize: '17 MB',
-    };
+    });
 
-    const options2 = {
-      type: apps.mojom.AppType.kArc,
-      installSource: apps.mojom.InstallSource.kUnknown,
-      appSize: '17 MB',
-      dataSize: '124.6 GB',
-    };
-
-    // Add Android app, and make it the currently selected app.
-    const app = await fakeHandler.addApp('app', options);
-    const app2 = await fakeHandler.addApp('app2', options2);
-
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app.id));
-
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app.id]);
-
-    appDetailsItem.app = app;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#storage-title'));
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#app-size'));
-    assertFalse(!!appDetailsItem.shadowRoot.querySelector('#data-size'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#storageTitle'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#appSize'));
+    assertFalse(!!appDetailsItem.shadowRoot.querySelector('#dataSize'));
 
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#app-size').textContent.trim(),
+        appDetailsItem.shadowRoot.querySelector('#appSize').textContent.trim(),
         'App size: 17 MB');
 
-    AppManagementStore.getInstance().dispatch(updateSelectedAppId(app2.id));
+    await addApp(
+        {
+          type: AppType.kArc,
+          installSource: InstallSource.kUnknown,
+          appSize: '17 MB',
+          dataSize: '124.6 GB',
+        },
+        'app2');
 
-    await fakeHandler.flushPipesForTesting();
-
-    assertTrue(!!AppManagementStore.getInstance().data.apps[app2.id]);
-
-    appDetailsItem.app = app2;
-
-    replaceBody(appDetailsItem);
-    fakeHandler.flushPipesForTesting();
-    flushTasks();
-
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#storage-title'));
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#app-size'));
-    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#data-size'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#storageTitle'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#appSize'));
+    assertTrue(!!appDetailsItem.shadowRoot.querySelector('#dataSize'));
 
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#app-size').textContent.trim(),
+        appDetailsItem.shadowRoot.querySelector('#appSize').textContent.trim(),
         'App size: 17 MB');
     assertEquals(
-        appDetailsItem.shadowRoot.querySelector('#data-size')
-            .textContent.trim(),
+        appDetailsItem.shadowRoot.querySelector('#dataSize').textContent.trim(),
         'Data stored in app: 124.6 GB');
   });
 });

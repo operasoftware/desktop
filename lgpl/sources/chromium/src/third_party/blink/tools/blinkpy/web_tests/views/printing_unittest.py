@@ -32,7 +32,6 @@ import sys
 import unittest
 
 from blinkpy.common.host_mock import MockHost
-from blinkpy.web_tests.models import test_expectations
 from blinkpy.web_tests.models import test_failures
 from blinkpy.web_tests.models import test_results
 from blinkpy.web_tests.models.typ_types import ResultType
@@ -104,9 +103,9 @@ class Testprinter(unittest.TestCase):
     def get_result(self, test_name, result_type=ResultType.Pass, run_time=0):
         failures = []
         if result_type == ResultType.Timeout:
-            failures = [test_failures.FailureTimeout()]
+            failures = [test_failures.FailureTimeout(None)]
         elif result_type == ResultType.Crash:
-            failures = [test_failures.FailureCrash()]
+            failures = [test_failures.FailureCrash(None)]
         return test_results.TestResult(
             test_name, failures=failures, test_run_time=run_time)
 
@@ -128,7 +127,7 @@ class Testprinter(unittest.TestCase):
         printer._options.seed = 1234
         printer.print_config(self._port)
         self.assertIn("Using port 'test-mac-mac10.10'", err.getvalue())
-        self.assertIn('Test configuration: <mac10.10, x86, release>',
+        self.assertIn('Test configuration: <mac10.10, arm64, release>',
                       err.getvalue())
         self.assertIn('View the test results at file:///tmp', err.getvalue())
         self.assertIn(

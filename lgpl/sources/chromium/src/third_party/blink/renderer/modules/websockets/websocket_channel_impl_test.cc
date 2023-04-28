@@ -8,7 +8,7 @@
 #include <string.h>
 #include <memory>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -102,9 +102,8 @@ class WebSocketChannelImplTestBase : public PageTestBase {
     local_frame_client_ = MakeGarbageCollected<EmptyLocalFrameClient>();
     local_frame_client_->GetBrowserInterfaceBroker().SetBinderForTesting(
         mojom::blink::WebSocketConnector::Name_,
-        base::BindRepeating(
-            &WebSocketChannelImplTestBase::BindWebSocketConnector,
-            GetWeakPtr()));
+        WTF::BindRepeating(&WebSocketChannelImplTestBase::BindWebSocketConnector,
+                  GetWeakPtr()));
 
     PageTestBase::SetupPageWithClients(nullptr /* page_clients */,
                                        local_frame_client_.Get());

@@ -27,10 +27,15 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FILTER_EFFECT_BUILDER_H_
 
 #include "cc/paint/paint_flags.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/skia/include/core/SkTileMode.h"
 #include "ui/gfx/geometry/rect_f.h"
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "include/core/SkColor.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 
@@ -49,7 +54,12 @@ class CORE_EXPORT FilterEffectBuilder final {
                       float zoom,
                       const cc::PaintFlags* fill_flags = nullptr,
                       const cc::PaintFlags* stroke_flags = nullptr,
-                      SkTileMode blur_tile_mode = SkTileMode::kDecal);
+                      SkTileMode blur_tile_mode = SkTileMode::kDecal
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+                      ,
+                      SkColor4f root_view_color = SkColors::kTransparent
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  );    // NOLINT
 
   Filter* BuildReferenceFilter(const ReferenceFilterOperation&,
                                FilterEffect* previous_effect,
@@ -71,6 +81,9 @@ class CORE_EXPORT FilterEffectBuilder final {
   const cc::PaintFlags* fill_flags_;
   const cc::PaintFlags* stroke_flags_;
   const SkTileMode blur_tile_mode_;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  SkColor4f backdrop_color_;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 };
 
 }  // namespace blink

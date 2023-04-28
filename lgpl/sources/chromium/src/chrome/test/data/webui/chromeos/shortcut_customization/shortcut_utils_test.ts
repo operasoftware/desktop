@@ -4,9 +4,13 @@
 
 import 'chrome://webui-test/mojo_webui_test_support.js';
 
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {isCustomizationDisabled} from 'chrome://shortcut-customization/js/shortcut_utils.js';
-import {assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
+import {stringToMojoString16} from 'chrome://shortcut-customization/js/mojo_utils.js';
+import {Accelerator, Modifier, MojoAccelerator, TextAcceleratorPart, TextAcceleratorPartType} from 'chrome://shortcut-customization/js/shortcut_types.js';
+import {areAcceleratorsEqual, getAccelerator, getAcceleratorId, isCustomizationDisabled, isSearchEnabled, isStandardAcceleratorInfo, isTextAcceleratorInfo} from 'chrome://shortcut-customization/js/shortcut_utils.js';
+import {assertDeepEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {createStandardAcceleratorInfo, createTextAcceleratorInfo} from './shortcut_customization_test_util.js';
 
 suite('shortcutUtilsTest', function() {
   test('CustomizationDisabled', async () => {
@@ -17,5 +21,97 @@ suite('shortcutUtilsTest', function() {
   test('CustomizationEnabled', async () => {
     loadTimeData.overrideValues({isCustomizationEnabled: true});
     assertFalse(isCustomizationDisabled());
+  });
+
+  test('SearchDisabled', async () => {
+    loadTimeData.overrideValues({isSearchEnabled: false});
+    assertFalse(isSearchEnabled());
+  });
+
+  test('SearchEnabled', async () => {
+    loadTimeData.overrideValues({isSearchEnabled: true});
+    assertTrue(isSearchEnabled());
+  });
+
+  test('AreAcceleratorsEqual', async () => {
+    const accelShiftC: Accelerator = {
+      modifiers: Modifier.SHIFT,
+      keyCode: 67,  // c
+    };
+    const accelShiftCCopy: Accelerator = {
+      ...accelShiftC,
+    };
+    const accelAltC: Accelerator = {
+      modifiers: Modifier.ALT,
+      keyCode: 67,  // c
+    };
+    const accelShiftD: Accelerator = {
+      modifiers: Modifier.SHIFT,
+      keyCode: 68,  // d
+    };
+
+    // Compare the same accelerator.
+    assertTrue(areAcceleratorsEqual(accelShiftC, accelShiftC));
+
+    // Compare accelerators with the same properties.
+    assertTrue(areAcceleratorsEqual(accelShiftC, accelShiftCCopy));
+
+    // Compare accelerators with different modifiers.
+    assertFalse(areAcceleratorsEqual(accelShiftC, accelAltC));
+
+    // Compare accelerators with different key and keyDisplay.
+    assertFalse(areAcceleratorsEqual(accelShiftC, accelShiftD));
+  });
+
+  test('AreAcceleratorsEqualMojo', async () => {
+    const accelShiftC: Accelerator = {
+      modifiers: Modifier.SHIFT,
+      keyCode: 67,  // c
+    };
+    const accelShiftCMojo: MojoAccelerator = {
+      modifiers: Modifier.SHIFT,
+      keyCode: 67,  // c
+      keyState: 0,
+      timeStamp: {internalValue: BigInt(0)},
+    };
+
+    // Accelerators and MojoAccelerators are comparable,
+    // and shouldn't throw an error.
+    assertTrue(areAcceleratorsEqual(accelShiftC, accelShiftCMojo));
+  });
+
+  test('GetAcceleratorId', async () => {
+    assertEquals(`${0}-${80}`, getAcceleratorId(0, 80));
+    assertEquals(`${0}-${80}`, getAcceleratorId('0', '80'));
+  });
+
+  test('isTextAcceleratorInfo', async () => {
+    const textAcceleratorParts: TextAcceleratorPart[] =
+        [{text: stringToMojoString16('a'), type: TextAcceleratorPartType.kKey}];
+    const textAccelerator = createTextAcceleratorInfo(textAcceleratorParts);
+    assertTrue(isTextAcceleratorInfo(textAccelerator));
+    assertFalse(isStandardAcceleratorInfo(textAccelerator));
+  });
+
+  test('isStandardAcceleratorInfo', async () => {
+    const standardAccelerator = createStandardAcceleratorInfo(
+        Modifier.ALT,
+        /*keyCode=*/ 221,
+        /*keyDisplay=*/ ']');
+    assertTrue(isStandardAcceleratorInfo(standardAccelerator));
+    assertFalse(isTextAcceleratorInfo(standardAccelerator));
+  });
+
+  test('GetAccelerator', async () => {
+    const acceleratorInfo = createStandardAcceleratorInfo(
+        Modifier.ALT,
+        /*keyCode=*/ 221,
+        /*keyDisplay=*/ ']');
+    const expectedAccelerator: Accelerator = {
+      modifiers: Modifier.ALT,
+      keyCode: 221,  // c
+    };
+    const actualAccelerator = getAccelerator(acceleratorInfo);
+    assertDeepEquals(expectedAccelerator, actualAccelerator);
   });
 });

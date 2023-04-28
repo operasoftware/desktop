@@ -24,15 +24,13 @@ go to https://bugs.chromium.org and use the
 
 ## Staged / Incremental Rollout
 
-The Sanitizer API is scheduled to be launched in stages. The API availability
+An initial version of the Sanitizer API is enabled by default. Additional
+features are scheduled to be launched in stages. The API availability
 can be controlled via flags:
 
-* `--enable-blink-features=SanitizerAPIv0`: This includes the basic Sanitizer
-  API with configuration and the `Element.setHTML` method, but not the
-  `.sanitizeFor` or `.sanitize` methods. This flag is on by default.
-* `--enable-blink-features=SanitizerAPI`: This includes `SanitizerAPv0`
-  plus the sanitization methods of the `Sanitizer` object, as specified
-  as of 04/2022. These APIs are likely to change.
+* `--enable-blink-features=SanitizerAPI`: This includes the sanitization
+  methods of the `Sanitizer` object, as specified as of 04/2022.
+These APIs are likely to change.
 
 The general `--enable-experimental-web-platform-features` flag implies the full
 `--enable-blink-features=SanitizerAPI` feature set.
@@ -42,13 +40,6 @@ The general `--enable-experimental-web-platform-features` flag implies the full
 The current implementation matches the specification as of 04/2022 and will be
 updated as the specification develops. Known omissions relative to the
 current spec are:
-
-* Namespace support: Support for namespaced elements and attributes is
-  presently behind a separate flag,
-  `--enable-blink-features=SanitizerAPINamespacesForTesting`. The current
-  spec draft specifies the mechanism, but neither a default nor a baseline
-  configurations. The flag uses a temporary baseline list which has not yet
-  been vetted.
 
 * Secure context: The current spec draft requires a secure context. This
   might change. Our implementation presently follows the draft.

@@ -34,6 +34,7 @@
 
 #include "base/time/time.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -45,6 +46,7 @@
 #include "third_party/blink/renderer/core/timing/performance_event_timing.h"
 #include "third_party/blink/renderer/core/timing/performance_navigation.h"
 #include "third_party/blink/renderer/core/timing/performance_timing.h"
+#include "third_party/blink/renderer/core/timing/performance_timing_for_reporting.h"
 #include "third_party/blink/renderer/core/timing/responsiveness_metrics.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
@@ -110,11 +112,13 @@ class CORE_EXPORT WindowPerformance final : public Performance,
   ExecutionContext* GetExecutionContext() const override;
 
   PerformanceTiming* timing() const override;
+  PerformanceTimingForReporting* timingForReporting() const;
   PerformanceNavigation* navigation() const override;
 
   MemoryInfo* memory(ScriptState*) const override;
 
   EventCounts* eventCounts() override;
+  uint64_t interactionCount() const override;
 
   bool FirstInputDetected() const { return !!first_input_timing_; }
 
@@ -138,6 +142,8 @@ class CORE_EXPORT WindowPerformance final : public Performance,
                         const AtomicString& id,
                         Element*);
 
+  void OnBodyLoadFinished(int64_t encoded_body_size, int64_t decoded_body_size);
+
   void AddLayoutShiftEntry(LayoutShift*);
   void AddVisibilityStateEntry(bool is_visible, base::TimeTicks start_time);
   void AddSoftNavigationEntry(const AtomicString& name,
@@ -147,13 +153,15 @@ class CORE_EXPORT WindowPerformance final : public Performance,
   void PageVisibilityChanged() override;
 
   void OnLargestContentfulPaintUpdated(
-      base::TimeTicks paint_time,
+      base::TimeTicks start_time,
+      base::TimeTicks render_time,
       uint64_t paint_size,
       base::TimeTicks load_time,
       base::TimeTicks first_animated_frame_time,
       const AtomicString& id,
       const String& url,
-      Element*);
+      Element*,
+      bool is_triggered_by_soft_navigation);
 
   void Trace(Visitor*) const override;
 
@@ -168,9 +176,10 @@ class CORE_EXPORT WindowPerformance final : public Performance,
   }
   const Event* GetCurrentEventTimingEvent() { return current_event_; }
 
- private:
-  PerformanceNavigationTiming* CreateNavigationTimingInstance() override;
+  void CreateNavigationTimingInstance(
+      mojom::blink::ResourceTimingInfoPtr navigation_resource_timing);
 
+ private:
   static std::pair<AtomicString, DOMWindow*> SanitizedAttribution(
       ExecutionContext*,
       bool has_multiple_contexts,
@@ -223,6 +232,7 @@ class CORE_EXPORT WindowPerformance final : public Performance,
   Member<EventCounts> event_counts_;
   mutable Member<PerformanceNavigation> navigation_;
   mutable Member<PerformanceTiming> timing_;
+  mutable Member<PerformanceTimingForReporting> timing_for_reporting_;
   absl::optional<base::TimeDelta> pending_pointer_down_input_delay_;
   absl::optional<base::TimeDelta> pending_pointer_down_processing_time_;
   absl::optional<base::TimeDelta> pending_pointer_down_time_to_next_paint_;

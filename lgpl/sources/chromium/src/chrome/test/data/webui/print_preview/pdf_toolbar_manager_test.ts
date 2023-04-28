@@ -2,12 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://print/pdf/elements/viewer-zoom-toolbar.js';
-import {ViewerZoomToolbarElement} from 'chrome://print/pdf/elements/viewer-zoom-toolbar.js';
-
-import {ToolbarManager} from 'chrome://print/pdf/toolbar_manager.js';
+import {ToolbarManager, ViewerZoomToolbarElement} from 'chrome://print/pdf/pdf_print_wrapper.js';
 import {assert} from 'chrome://resources/js/assert_ts.js';
-
 import {assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 class MockWindow {
@@ -126,8 +122,7 @@ suite(pdf_toolbar_manager_test.suiteName, function() {
   let callCount: number = 0;
 
   setup(function() {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
     mockWindow = new MockWindow(1920, 1080);
     zoomToolbar = document.createElement('viewer-zoom-toolbar');

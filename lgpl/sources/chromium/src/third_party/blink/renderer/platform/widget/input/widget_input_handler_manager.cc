@@ -6,12 +6,13 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "cc/base/features.h"
 #include "cc/metrics/event_metrics.h"
@@ -426,9 +427,7 @@ void WidgetInputHandlerManager::GenerateScrollBeginAndSendToMainThread(
 }
 
 void WidgetInputHandlerManager::SetAllowedTouchAction(
-    cc::TouchAction touch_action,
-    uint32_t unique_touch_event_id,
-    InputHandlerProxy::EventDisposition event_disposition) {
+    cc::TouchAction touch_action) {
   compositor_allowed_touch_action_ = touch_action;
 }
 
@@ -472,38 +471,51 @@ void WidgetInputHandlerManager::ObserveGestureEventOnMainThread(
 }
 
 void WidgetInputHandlerManager::LogInputTimingUMA() {
-  if (!have_emitted_uma_) {
-    InitialInputTiming lifecycle_state = InitialInputTiming::kBeforeLifecycle;
-    if (!(suppressing_input_events_state_ &
-          (unsigned)SuppressingInputEventsBits::kDeferMainFrameUpdates)) {
-      if (suppressing_input_events_state_ &
-          (unsigned)SuppressingInputEventsBits::kDeferCommits) {
-        lifecycle_state = InitialInputTiming::kBeforeCommit;
-      } else if (suppressing_input_events_state_ &
-                 (unsigned)SuppressingInputEventsBits::kHasNotPainted) {
-        lifecycle_state = InitialInputTiming::kBeforeFirstPaint;
-      } else {
-        lifecycle_state = InitialInputTiming::kAfterFirstPaint;
-      }
-    }
-    UMA_HISTOGRAM_ENUMERATION("PaintHolding.InputTiming3", lifecycle_state);
-    have_emitted_uma_ = true;
+  bool should_emit_uma;
+  {
+    base::AutoLock lock(uma_data_lock_);
+    should_emit_uma = !uma_data_.have_emitted_uma_;
+    uma_data_.have_emitted_uma_ = true;
   }
+
+  if (!should_emit_uma)
+    return;
+
+  InitialInputTiming lifecycle_state = InitialInputTiming::kBeforeLifecycle;
+  if (!(suppressing_input_events_state_ &
+        (unsigned)SuppressingInputEventsBits::kDeferMainFrameUpdates)) {
+    if (suppressing_input_events_state_ &
+        (unsigned)SuppressingInputEventsBits::kDeferCommits) {
+      lifecycle_state = InitialInputTiming::kBeforeCommit;
+    } else if (suppressing_input_events_state_ &
+               (unsigned)SuppressingInputEventsBits::kHasNotPainted) {
+      lifecycle_state = InitialInputTiming::kBeforeFirstPaint;
+    } else {
+      lifecycle_state = InitialInputTiming::kAfterFirstPaint;
+    }
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("PaintHolding.InputTiming3", lifecycle_state);
 }
 
 void WidgetInputHandlerManager::RecordMetricsForDroppedEventsBeforePaint(
     const base::TimeTicks& first_paint_time) {
-  // Initialize to 0 timestamp and log 0 if there was no suppressed event or the
-  // most recent suppressed event was before the first_paint_time
+  // Initialize to 0 timestamp and log 0 if there was no suppressed event or
+  // the most recent suppressed event was before the first_paint_time
   auto diff = base::TimeDelta();
-  if (most_recent_suppressed_event_time_ > first_paint_time) {
-    diff = most_recent_suppressed_event_time_ - first_paint_time;
+  int suppressed_events_count = 0;
+  {
+    base::AutoLock lock(uma_data_lock_);
+    if (uma_data_.most_recent_suppressed_event_time_ > first_paint_time)
+      diff = uma_data_.most_recent_suppressed_event_time_ - first_paint_time;
+
+    suppressed_events_count = uma_data_.suppressed_events_count_;
   }
+
   UMA_HISTOGRAM_TIMES("PageLoad.Internal.SuppressedEventsTimingBeforePaint",
                       diff);
-
   UMA_HISTOGRAM_COUNTS("PageLoad.Internal.SuppressedEventsCountBeforePaint",
-                       suppressed_events_count_);
+                       suppressed_events_count);
 }
 
 void WidgetInputHandlerManager::DispatchScrollGestureToCompositor(
@@ -549,8 +561,9 @@ void WidgetInputHandlerManager::DispatchEvent(
     // haven't painted yet.
     if (suppressing_input_events_state_ ==
         static_cast<uint16_t>(SuppressingInputEventsBits::kHasNotPainted)) {
-      most_recent_suppressed_event_time_ = base::TimeTicks::Now();
-      suppressed_events_count_ += 1;
+      base::AutoLock lock(uma_data_lock_);
+      uma_data_.most_recent_suppressed_event_time_ = base::TimeTicks::Now();
+      uma_data_.suppressed_events_count_ += 1;
     }
   }
 
@@ -617,7 +630,9 @@ void WidgetInputHandlerManager::DispatchEvent(
               ? cc::ScrollUpdateEventMetrics::ScrollUpdateType::kContinued
               : cc::ScrollUpdateEventMetrics::ScrollUpdateType::kStarted,
           gesture_event.data.scroll_update.delta_y, event->Event().TimeStamp(),
-          arrived_in_browser_main_timestamp);
+          arrived_in_browser_main_timestamp,
+          base::IdType64<class ui::LatencyInfo>(
+              event->latency_info().trace_id()));
       has_seen_first_gesture_scroll_update_after_begin_ = true;
     } else {
       metrics = cc::ScrollEventMetrics::Create(
@@ -739,9 +754,11 @@ void WidgetInputHandlerManager::WaitForInputProcessed(
 void WidgetInputHandlerManager::DidNavigate() {
   suppressing_input_events_state_ =
       static_cast<uint16_t>(SuppressingInputEventsBits::kHasNotPainted);
-  have_emitted_uma_ = false;
-  most_recent_suppressed_event_time_ = base::TimeTicks();
-  suppressed_events_count_ = 0;
+
+  base::AutoLock lock(uma_data_lock_);
+  uma_data_.have_emitted_uma_ = false;
+  uma_data_.most_recent_suppressed_event_time_ = base::TimeTicks();
+  uma_data_.suppressed_events_count_ = 0;
 }
 
 void WidgetInputHandlerManager::OnDeferMainFrameUpdatesChanged(bool status) {

@@ -9,11 +9,11 @@ import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min
 import {AcceleratorLookupManager} from 'chrome://shortcut-customization/js/accelerator_lookup_manager.js';
 import {AcceleratorSubsectionElement} from 'chrome://shortcut-customization/js/accelerator_subsection.js';
 import {fakeAcceleratorConfig, fakeLayoutInfo} from 'chrome://shortcut-customization/js/fake_data.js';
-import {AcceleratorSource, Modifier} from 'chrome://shortcut-customization/js/shortcut_types.js';
+import {AcceleratorCategory, AcceleratorSource, AcceleratorSubcategory, LayoutInfo, LayoutStyle, Modifier} from 'chrome://shortcut-customization/js/shortcut_types.js';
 import {assertEquals} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 
-import {createUserAccelerator} from './shortcut_customization_test_util.js';
+import {createUserAcceleratorInfo} from './shortcut_customization_test_util.js';
 
 suite('acceleratorSubsectionTest', function() {
   let sectionElement: AcceleratorSubsectionElement|null = null;
@@ -40,26 +40,32 @@ suite('acceleratorSubsectionTest', function() {
   // TODO(jimmyxgong): Update this test after retrieving accelerators is
   // implemented for a subsection.
   test('LoadsBasicSection', async () => {
-    const acceleratorInfo1 = createUserAccelerator(
+    const acceleratorInfo1 = createUserAcceleratorInfo(
         Modifier.CONTROL | Modifier.SHIFT,
         /*key=*/ 71,
         /*keyDisplay=*/ 'g');
 
-    const acceleratorInfo2 = createUserAccelerator(
+    const acceleratorInfo2 = createUserAcceleratorInfo(
         Modifier.CONTROL | Modifier.SHIFT,
         /*key=*/ 67,
         /*keyDisplay=*/ 'c');
 
-    const accelerators = [acceleratorInfo1, acceleratorInfo2];
+    const expectedAccelInfos = [acceleratorInfo1, acceleratorInfo2];
     const description = 'test shortcut';
     const title = 'test title';
+    const expectedLayoutInfo: LayoutInfo = {
+      action: 0,
+      category: AcceleratorCategory.kWindowsAndDesks,
+      description,
+      source: AcceleratorSource.kAsh,
+      style: LayoutStyle.kDefault,
+      subCategory: AcceleratorSubcategory.kWindows,
+    };
 
     sectionElement!.title = title;
-    sectionElement!.acceleratorContainer = [{
-      description: description,
-      acceleratorInfos: accelerators,
-      source: AcceleratorSource.ASH,
-      action: 0,
+    sectionElement!.accelRowDataArray = [{
+      acceleratorInfos: expectedAccelInfos,
+      layoutInfo: expectedLayoutInfo,
     }];
 
     await flush();
@@ -72,8 +78,8 @@ suite('acceleratorSubsectionTest', function() {
   test('LoadCategoryAndConfirmDescriptions', async () => {
     const expectedTitle = 'test title';
     sectionElement!.title = expectedTitle;
-    sectionElement!.category = /*Chromeos*/ 0;
-    sectionElement!.subcategory = /*Window Management*/ 0;
+    sectionElement!.category = AcceleratorCategory.kWindowsAndDesks;
+    sectionElement!.subcategory = AcceleratorSubcategory.kWindows;
 
     await flushTasks();
 

@@ -37,33 +37,33 @@ class ComputedStyle;
 
 class CORE_EXPORT PseudoElement : public Element {
  public:
-  // |document_transition_tag| is used to uniquely identify a pseudo element
+  // |view_transition_name| is used to uniquely identify a pseudo element
   // from a set of pseudo elements which share the same |pseudo_id|. The current
   // usage of this ID is limited to pseudo elements generated for a
-  // DocumentTransition. See
-  // third_party/blink/renderer/core/document_transition/README.md
+  // ViewTransition. See
+  // third_party/blink/renderer/core/view_transition/README.md
   static PseudoElement* Create(
       Element* parent,
       PseudoId pseudo_id,
-      const AtomicString& document_transition_tag = g_null_atom);
+      const AtomicString& view_transition_name = g_null_atom);
 
   PseudoElement(Element*,
                 PseudoId,
-                const AtomicString& document_transition_tag = g_null_atom);
+                const AtomicString& view_transition_name = g_null_atom);
 
-  const AtomicString& document_transition_tag() const {
-    return document_transition_tag_;
+  const AtomicString& view_transition_name() const {
+    return view_transition_name_;
   }
-  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
+  scoped_refptr<const ComputedStyle> CustomStyleForLayoutObject(
       const StyleRecalcContext&) override;
   void AttachLayoutTree(AttachContext&) override;
-  bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
+  bool LayoutObjectIsNeeded(const DisplayStyle&) const override;
   bool CanGeneratePseudoElement(PseudoId) const override;
 
   bool CanStartSelection(SelectionStartPolicy) const override { return false; }
   bool CanContainRangeEndPoint() const override { return false; }
   PseudoId GetPseudoId() const override { return pseudo_id_; }
-  scoped_refptr<ComputedStyle> LayoutStyleForDisplayContents(
+  scoped_refptr<const ComputedStyle> LayoutStyleForDisplayContents(
       const ComputedStyle&);
 
   static AtomicString PseudoElementNameForEvents(Element*);
@@ -96,7 +96,7 @@ class CORE_EXPORT PseudoElement : public Element {
   };
 
   PseudoId pseudo_id_;
-  const AtomicString document_transition_tag_;
+  const AtomicString view_transition_name_;
 };
 
 CORE_EXPORT const QualifiedName& PseudoElementTagName(PseudoId);

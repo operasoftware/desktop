@@ -34,6 +34,7 @@ enum WebGLExtensionName {
   kOESTextureHalfFloatName,
   kOESVertexArrayObjectName,
   kOVRMultiview2Name,
+  kWebGLClipCullDistanceName,
   kWebGLColorBufferFloatName,
   kWebGLCompressedTextureASTCName,
   kWebGLCompressedTextureETCName,
@@ -52,6 +53,7 @@ enum WebGLExtensionName {
   kWebGLMultiDrawInstancedName,
   kWebGLMultiDrawInstancedBaseVertexBaseInstanceName,
   kWebGLMultiviewName,
+  kWebGLProvokingVertexName,
   kWebGLVideoTextureName,
   kWebGLWebCodecsVideoFrameName,
   kWebGLExtensionNameCount,  // Must be the last entry

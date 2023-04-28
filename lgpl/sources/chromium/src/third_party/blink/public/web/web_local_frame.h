@@ -8,8 +8,8 @@
 #include <memory>
 #include <set>
 
-#include "base/callback.h"
 #include "base/containers/span.h"
+#include "base/functional/callback.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/weak_ptr.h"
 #include "base/types/pass_key.h"
@@ -57,6 +57,10 @@
 #include "ui/gfx/range/range.h"
 #include "v8/include/v8-forward.h"
 
+namespace base {
+class SingleThreadTaskRunner;
+}
+
 namespace cc {
 class PaintCanvas;
 }  // namespace cc
@@ -88,7 +92,8 @@ class WebFrameWidget;
 class WebHistoryItem;
 class WebHitTestResult;
 class WebInputMethodController;
-class WebPerformance;
+class WebPerformanceMetricsForReporting;
+class WebPerformanceMetricsForNestedContexts;
 class WebPlugin;
 class WebPrintClient;
 class WebRange;
@@ -164,7 +169,8 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
                                           const LocalFrameToken& frame_token,
                                           WebFrame* previous_web_frame,
                                           const FramePolicy&,
-                                          const WebString& name);
+                                          const WebString& name,
+                                          WebView* web_view);
 
   // Creates a new local child of this frame. Similar to the other methods that
   // create frames, the returned frame should be freed by calling Close() when
@@ -221,8 +227,6 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
   // Sets BackForwardCache NotRestoredReasons for the current frame.
   virtual void SetNotRestoredReasons(
       const mojom::BackForwardCacheNotRestoredReasonsPtr&) = 0;
-  // Returns if the current frame's NotRestoredReasons has any blocking reasons.
-  virtual bool HasBlockingReasons() = 0;
 
   // Hierarchy ----------------------------------------------------------
 
@@ -451,6 +455,11 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
 
   void AddInspectorIssue(mojom::InspectorIssueCode code) {
     AddInspectorIssueImpl(code);
+  }
+
+  void AddGenericIssue(mojom::GenericIssueErrorType error_type,
+                       int violating_node_id) {
+    AddGenericIssueImpl(error_type, violating_node_id);
   }
 
   // Expose modal dialog methods to avoid having to go through JavaScript.
@@ -798,7 +807,10 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
 
   // Performance --------------------------------------------------------
 
-  virtual WebPerformance Performance() const = 0;
+  virtual WebPerformanceMetricsForReporting PerformanceMetricsForReporting()
+      const = 0;
+  virtual WebPerformanceMetricsForNestedContexts
+  PerformanceMetricsForNestedContexts() const = 0;
 
   // Ad Tagging ---------------------------------------------------------
 
@@ -934,6 +946,9 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
   virtual void AddMessageToConsoleImpl(const WebConsoleMessage&,
                                        bool discard_duplicates) = 0;
   virtual void AddInspectorIssueImpl(blink::mojom::InspectorIssueCode code) = 0;
+  virtual void AddGenericIssueImpl(
+      blink::mojom::GenericIssueErrorType error_type,
+      int violating_node_id) = 0;
 
   virtual void CreateFrameWidgetInternal(
       base::PassKey<WebLocalFrame> pass_key,

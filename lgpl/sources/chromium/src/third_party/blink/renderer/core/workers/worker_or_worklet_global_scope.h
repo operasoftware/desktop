@@ -88,7 +88,11 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope
 
   // scheduler::WorkerScheduler::Delegate
   void UpdateBackForwardCacheDisablingFeatures(
-      uint64_t features_mask) override {}
+      uint64_t features_mask,
+      const BFCacheBlockingFeatureAndLocations&
+          non_sticky_features_and_js_locations,
+      const BFCacheBlockingFeatureAndLocations&
+          sticky_features_and_js_locations) override {}
 
   // BackForwardCacheLoaderHelperImpl::Delegate
   void EvictFromBackForwardCache(
@@ -184,6 +188,10 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope
   // code since we don't create a CachedMetadataHandler. We need to fix this by
   // creating a cached metadta handler for all workers.
   virtual CodeCacheHost* GetCodeCacheHost() { return nullptr; }
+
+  // Called after the thread initialization is complete but before the script
+  // has started loading.
+  virtual void WillBeginLoading() {}
 
   Deprecation& GetDeprecation() { return deprecation_; }
 

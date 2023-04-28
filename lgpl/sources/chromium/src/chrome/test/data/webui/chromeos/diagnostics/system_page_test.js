@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'chrome://diagnostics/strings.m.js';
 import 'chrome://diagnostics/system_page.js';
 import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+import 'chrome://resources/mojo/mojo/public/js/mojo_bindings_lite.js';
 
 import {DiagnosticsBrowserProxyImpl} from 'chrome://diagnostics/diagnostics_browser_proxy.js';
 import {NavigationView} from 'chrome://diagnostics/diagnostics_types.js';
@@ -17,11 +19,11 @@ import {RoutineSectionElement} from 'chrome://diagnostics/routine_section.js';
 import {BatteryChargeStatus, BatteryHealth, BatteryInfo, CpuUsage, MemoryUsage, SystemInfo} from 'chrome://diagnostics/system_data_provider.mojom-webui.js';
 import {SystemPageElement} from 'chrome://diagnostics/system_page.js';
 import {RoutineType, StandardRoutineResult} from 'chrome://diagnostics/system_routine_controller.mojom-webui.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 
-import {assertArrayEquals, assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
-import {isVisible} from '../../test_util.js';
+import {assertArrayEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chromeos/chai_assert.js';
+import {isVisible} from '../test_util.js';
 
 import * as dx_utils from './diagnostics_test_utils.js';
 import {TestDiagnosticsBrowserProxy} from './test_diagnostics_browser_proxy.js';
@@ -54,7 +56,7 @@ function assertRunTestButtonsEnabled(cards) {
   });
 }
 
-export function systemPageTestSuite() {
+suite('systemPageTestSuite', function() {
   /** @type {?SystemPageElement} */
   let page = null;
 
@@ -135,7 +137,6 @@ export function systemPageTestSuite() {
             document.createElement('system-page'));
     assertTrue(!!page);
     document.body.appendChild(page);
-    page.isNetworkingEnabled = false;
     return flushTasks();
   }
 
@@ -314,73 +315,6 @@ export function systemPageTestSuite() {
         .then(() => assertTrue(isVisible(getSessionLogButton())));
   });
 
-  // System page is only responsible for banner display when in stand-alone
-  // view.
-  if (!window.isNetworkEnabled) {
-    test('RunningCpuTestsShowsBanner', () => {
-      /** @type {?RoutineSectionElement} */
-      let routineSection;
-      /** @type {!Array<!RoutineType>} */
-      const routines = [
-        RoutineType.kCpuCache,
-      ];
-      routineController.setFakeStandardRoutineResult(
-          RoutineType.kCpuCache, StandardRoutineResult.kTestPassed);
-      return initializeSystemPage(
-                 fakeSystemInfo, fakeBatteryChargeStatus, fakeBatteryHealth,
-                 fakeBatteryInfo, fakeCpuUsage, fakeMemoryUsage)
-          .then(() => {
-            routineSection = dx_utils.getRoutineSection(
-                page.shadowRoot.querySelector('cpu-card'));
-            routineSection.routines = routines;
-            assertFalse(isVisible(getCautionBanner()));
-            return flushTasks();
-          })
-          .then(() => {
-            dx_utils.getRunTestsButtonFromSection(routineSection).click();
-            return flushTasks();
-          })
-          .then(() => {
-            assertTrue(isVisible(getCautionBanner()));
-            return routineController.resolveRoutineForTesting();
-          })
-          .then(() => flushTasks())
-          .then(() => assertFalse(isVisible(getCautionBanner())));
-    });
-
-    test('RunningMemoryTestsShowsBanner', () => {
-      /** @type {?RoutineSectionElement} */
-      let routineSection;
-      /** @type {!Array<!RoutineType>} */
-      const routines = [RoutineType.kMemory];
-      routineController.setFakeStandardRoutineResult(
-          RoutineType.kMemory, StandardRoutineResult.kTestPassed);
-      return initializeSystemPage(
-                 fakeSystemInfo, fakeBatteryChargeStatus, fakeBatteryHealth,
-                 fakeBatteryInfo, fakeCpuUsage, fakeMemoryUsage)
-          .then(() => {
-            routineSection = dx_utils.getRoutineSection(
-                page.shadowRoot.querySelector('memory-card'));
-            routineSection.routines = routines;
-            assertFalse(isVisible(getCautionBanner()));
-            return flushTasks();
-          })
-          .then(() => {
-            dx_utils.getRunTestsButtonFromSection(routineSection).click();
-            return flushTasks();
-          })
-          .then(() => {
-            dx_utils.assertElementContainsText(
-                page.shadowRoot.querySelector('#banner > #bannerMsg'),
-                loadTimeData.getString('memoryBannerMessage'));
-            assertTrue(isVisible(getCautionBanner()));
-            return routineController.resolveRoutineForTesting();
-          })
-          .then(() => flushTasks())
-          .then(() => assertFalse(isVisible(getCautionBanner())));
-    });
-  }
-
   test('RecordNavigationCalled', () => {
     return initializeSystemPage(
                fakeSystemInfo, fakeBatteryChargeStatus, fakeBatteryHealth,
@@ -408,4 +342,4 @@ export function systemPageTestSuite() {
               (DiagnosticsBrowserProxy.getArgs('recordNavigation')[0]));
         });
   });
-}
+});

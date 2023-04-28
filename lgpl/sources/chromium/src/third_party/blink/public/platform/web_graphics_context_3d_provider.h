@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_GRAPHICS_CONTEXT_3D_PROVIDER_H_
 
 #include <cstdint>
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 
 class GrDirectContext;
@@ -49,6 +49,7 @@ class VideoFrame;
 
 namespace gpu {
 struct Capabilities;
+class ContextSupport;
 class GLHelper;
 struct GpuFeatureInfo;
 class InterfaceBase;
@@ -96,8 +97,9 @@ class WebGraphicsContext3DProvider {
   virtual gpu::gles2::GLES2Interface* ContextGL() = 0;
   virtual gpu::raster::RasterInterface* RasterInterface() = 0;
   virtual gpu::webgpu::WebGPUInterface* WebGPUInterface() = 0;
+  virtual gpu::ContextSupport* ContextSupport() = 0;
   virtual bool IsContextLost() = 0;  // Has the GPU driver lost this context?
-  virtual bool BindToCurrentThread() = 0;
+  virtual bool BindToCurrentSequence() = 0;
   virtual GrDirectContext* GetGrContext() = 0;
   virtual const gpu::Capabilities& GetCapabilities() const = 0;
   virtual const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const = 0;

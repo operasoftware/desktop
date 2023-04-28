@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/animation/interpolable_filter.h"
 #include "third_party/blink/renderer/core/animation/list_interpolation_functions.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
@@ -16,6 +17,11 @@
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/animation/interpolable_shader.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 
@@ -35,14 +41,14 @@ const FilterOperations& GetFilterList(const CSSProperty& property,
 }
 
 void SetFilterList(const CSSProperty& property,
-                   ComputedStyle& style,
+                   ComputedStyleBuilder& builder,
                    const FilterOperations& filter_operations) {
   switch (property.PropertyID()) {
     case CSSPropertyID::kBackdropFilter:
-      style.SetBackdropFilter(filter_operations);
+      builder.SetBackdropFilter(filter_operations);
       break;
     case CSSPropertyID::kFilter:
-      style.SetFilter(filter_operations);
+      builder.SetFilter(filter_operations);
       break;
     default:
       NOTREACHED();
@@ -157,7 +163,7 @@ InterpolationValue CSSFilterListInterpolationType::MaybeConvertInherit(
   conversion_checkers.push_back(std::make_unique<InheritedFilterListChecker>(
       CssProperty(), inherited_filter_operations));
   return ConvertFilterList(inherited_filter_operations,
-                           state.Style()->EffectiveZoom());
+                           state.StyleBuilder().EffectiveZoom());
 }
 
 InterpolationValue CSSFilterListInterpolationType::MaybeConvertValue(
@@ -204,6 +210,22 @@ PairwiseInterpolationValue CSSFilterListInterpolationType::MaybeMergeSingles(
     if (To<InterpolableFilter>(start_interpolable_list.Get(i))->GetType() !=
         To<InterpolableFilter>(end_interpolable_list.Get(i))->GetType())
       return nullptr;
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    // Make sure the shader definitions match each other or we cannot
+    // interpolate between them.
+    if (To<InterpolableFilter>(start_interpolable_list.Get(i))->GetType() ==
+        FilterOperation::OperationType::kGpuShader) {
+      auto* start_shader = To<InterpolableShader>(
+          To<InterpolableFilter>(start_interpolable_list.Get(i))->Value());
+      auto* end_shader = To<InterpolableShader>(
+          To<InterpolableFilter>(end_interpolable_list.Get(i))->Value());
+
+      if (!start_shader->IsCompatibleWith(*end_shader)) {
+        return nullptr;
+      }
+    }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   }
 
   if (start_length == end_length) {
@@ -225,14 +247,26 @@ PairwiseInterpolationValue CSSFilterListInterpolationType::MaybeMergeSingles(
   auto extended_interpolable_list =
       std::make_unique<InterpolableList>(longer_length);
   for (wtf_size_t i = 0; i < longer_length; i++) {
-    if (i < shorter_length)
+    if (i < shorter_length) {
       extended_interpolable_list->Set(
           i, std::move(shorter_interpolable_list.GetMutable(i)));
-    else
+    } else {
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+      if (To<InterpolableFilter>(longer_interpolable_list.Get(i))->GetType() ==
+          FilterOperation::OperationType::kGpuShader) {
+        // Shader filters have no initial value. We must clone the source value
+        // or the values won't match.
+        extended_interpolable_list->Set(
+            i,
+            To<InterpolableFilter>(longer_interpolable_list.Get(i))->Clone());
+        continue;
+      }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
       extended_interpolable_list->Set(
           i, InterpolableFilter::CreateInitialValue(
                  To<InterpolableFilter>(longer_interpolable_list.Get(i))
                      ->GetType()));
+    }
   }
   shorter.interpolable_value = std::move(extended_interpolable_list);
 
@@ -264,7 +298,8 @@ void CSSFilterListInterpolationType::ApplyStandardPropertyValue(
         To<InterpolableFilter>(interpolable_list.Get(i))
             ->CreateFilterOperation(CssProperty(), state));
   }
-  SetFilterList(CssProperty(), *state.Style(), std::move(filter_operations));
+  SetFilterList(CssProperty(), state.StyleBuilder(),
+                std::move(filter_operations));
 }
 
 InterpolationValue

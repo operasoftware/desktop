@@ -9,6 +9,7 @@
 
 #include "base/check_op.h"
 #include "base/notreached.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_dtmf_sender_handler.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_encoded_audio_stream_transformer.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_encoded_video_stream_transformer.h"
@@ -301,13 +302,14 @@ class RTCRtpSenderImpl::RTCRtpSenderInternal
   }
 
   void GetStats(RTCStatsReportCallback callback,
-                const Vector<webrtc::NonStandardGroupId>& exposed_group_ids) {
+                const Vector<webrtc::NonStandardGroupId>& exposed_group_ids,
+                bool is_track_stats_deprecation_trial_enabled) {
     PostCrossThreadTask(
         *signaling_task_runner_.get(), FROM_HERE,
         CrossThreadBindOnce(
             &RTCRtpSenderImpl::RTCRtpSenderInternal::GetStatsOnSignalingThread,
             WrapRefCounted(this), CrossThreadBindOnce(std::move(callback)),
-            exposed_group_ids));
+            exposed_group_ids, is_track_stats_deprecation_trial_enabled));
   }
 
   bool RemoveFromPeerConnection(webrtc::PeerConnectionInterface* pc) {
@@ -381,31 +383,28 @@ class RTCRtpSenderImpl::RTCRtpSenderInternal
 
   void GetStatsOnSignalingThread(
       RTCStatsReportCallbackInternal callback,
-      const Vector<webrtc::NonStandardGroupId>& exposed_group_ids) {
+      const Vector<webrtc::NonStandardGroupId>& exposed_group_ids,
+      bool is_track_stats_deprecation_trial_enabled) {
     native_peer_connection_->GetStats(
         rtc::scoped_refptr<webrtc::RtpSenderInterface>(webrtc_sender_.get()),
         CreateRTCStatsCollectorCallback(
             main_task_runner_, ConvertToBaseOnceCallback(std::move(callback)),
-            exposed_group_ids));
+            exposed_group_ids, is_track_stats_deprecation_trial_enabled));
   }
 
   void SetParametersOnSignalingThread(
       webrtc::RtpParameters parameters,
       CrossThreadOnceFunction<void(webrtc::RTCError)> callback) {
     DCHECK(signaling_task_runner_->BelongsToCurrentThread());
-    webrtc::RTCError result = webrtc_sender_->SetParameters(parameters);
-    PostCrossThreadTask(
-        *main_task_runner_.get(), FROM_HERE,
-        CrossThreadBindOnce(
-            &RTCRtpSenderImpl::RTCRtpSenderInternal::SetParametersCallback,
-            WrapRefCounted(this), std::move(result), std::move(callback)));
-  }
 
-  void SetParametersCallback(
-      webrtc::RTCError result,
-      CrossThreadOnceFunction<void(webrtc::RTCError)> callback) {
-    DCHECK(main_task_runner_->BelongsToCurrentThread());
-    std::move(callback).Run(std::move(result));
+    webrtc_sender_->SetParametersAsync(
+        parameters,
+        [callback = std::move(callback),
+         task_runner = main_task_runner_](webrtc::RTCError error) mutable {
+          PostCrossThreadTask(
+              *task_runner.get(), FROM_HERE,
+              CrossThreadBindOnce(std::move(callback), std::move(error)));
+        });
   }
 
   void SetStreamsOnSignalingThread(const Vector<String>& stream_ids) {
@@ -539,8 +538,10 @@ void RTCRtpSenderImpl::SetParameters(
 
 void RTCRtpSenderImpl::GetStats(
     RTCStatsReportCallback callback,
-    const Vector<webrtc::NonStandardGroupId>& exposed_group_ids) {
-  internal_->GetStats(std::move(callback), exposed_group_ids);
+    const Vector<webrtc::NonStandardGroupId>& exposed_group_ids,
+    bool is_track_stats_deprecation_trial_enabled) {
+  internal_->GetStats(std::move(callback), exposed_group_ids,
+                      is_track_stats_deprecation_trial_enabled);
 }
 
 void RTCRtpSenderImpl::SetStreams(const Vector<String>& stream_ids) {

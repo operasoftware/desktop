@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "media/base/audio_bus.h"
@@ -18,10 +18,10 @@
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/modules/mediastream/media_constraints.h"
 #include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
 #include "third_party/blink/renderer/modules/mediastream/testing_platform_support_with_mock_audio_capture_source.h"
 #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
-#include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
@@ -79,10 +79,10 @@ std::tuple<int, int> ComputeExpectedSourceAndOutputBufferSizes(
   }
 }
 
-class FormatCheckingMockAudioSink2 : public WebMediaStreamAudioSink {
+class FormatCheckingMockAudioSink : public WebMediaStreamAudioSink {
  public:
-  FormatCheckingMockAudioSink2() = default;
-  ~FormatCheckingMockAudioSink2() override = default;
+  FormatCheckingMockAudioSink() = default;
+  ~FormatCheckingMockAudioSink() override = default;
 
   void OnData(const media::AudioBus& audio_bus,
               base::TimeTicks estimated_capture_time) override {
@@ -198,6 +198,9 @@ TEST_P(ProcessedLocalAudioSourceTest, VerifyAudioFlowWithoutAudioProcessing) {
   } else if (GetParam() == ProcessingLocation::kAudioServiceAvoidResampling) {
     scoped_feature_list.InitAndEnableFeatureWithParameters(
         media::kChromeWideEchoCancellation, {{"minimize_resampling", "true"}});
+  } else {
+    scoped_feature_list.InitAndDisableFeature(
+        media::kChromeWideEchoCancellation);
   }
 #endif
 
@@ -224,7 +227,7 @@ TEST_P(ProcessedLocalAudioSourceTest, VerifyAudioFlowWithoutAudioProcessing) {
   CheckOutputFormatMatches(audio_source()->GetAudioParameters());
 
   // Connect a sink to the track.
-  auto sink = std::make_unique<FormatCheckingMockAudioSink2>();
+  auto sink = std::make_unique<FormatCheckingMockAudioSink>();
   EXPECT_CALL(*sink, FormatIsSet(_))
       .WillOnce(Invoke(this, &ThisTest::CheckOutputFormatMatches));
   MediaStreamAudioTrack::From(audio_track())->AddSink(sink.get());

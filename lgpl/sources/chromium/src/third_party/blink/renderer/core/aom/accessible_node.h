@@ -7,6 +7,7 @@
 
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -29,7 +30,7 @@ enum class AOMStringProperty {
   kChecked,
   kCurrent,
   kDescription,
-  kHasPopUp,
+  kHasPopup,
   kInvalid,
   kKeyShortcuts,
   kLabel,
@@ -107,7 +108,8 @@ class CORE_EXPORT AOMPropertyClient {
 // Accessibility Object Model node
 // Explainer: https://github.com/WICG/aom/blob/gh-pages/explainer.md
 // Spec: https://wicg.github.io/aom/spec/
-class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
+class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData,
+                                   public ElementRareDataField {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -255,8 +257,8 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   AccessibleNodeList* flowTo() const;
   void setFlowTo(AccessibleNodeList*);
 
-  AtomicString hasPopUp() const;
-  void setHasPopUp(const AtomicString&);
+  AtomicString hasPopup() const;
+  void setHasPopup(const AtomicString&);
 
   absl::optional<bool> hidden() const;
   void setHidden(absl::optional<bool>);

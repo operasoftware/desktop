@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/platform/widget/input/ime_event_guard.h"
 #include "third_party/blink/renderer/platform/widget/widget_base.h"
 #include "third_party/blink/renderer/platform/widget/widget_base_client.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "ui/latency/latency_info.h"
 
 #if BUILDFLAG(IS_ANDROID)
@@ -230,7 +231,7 @@ class WidgetBaseInputHandler::HandlingState {
 
   absl::optional<WebTouchAction>& touch_action() { return touch_action_; }
 
-  std::vector<WidgetBaseInputHandler::InjectScrollGestureParams>&
+  Vector<WidgetBaseInputHandler::InjectScrollGestureParams>&
   injected_scroll_params() {
     return injected_scroll_params_;
   }
@@ -249,7 +250,7 @@ class WidgetBaseInputHandler::HandlingState {
   // Used to hold a sequence of parameters corresponding to scroll gesture
   // events that should be injected once the current input event is done
   // being processed.
-  std::vector<WidgetBaseInputHandler::InjectScrollGestureParams>
+  Vector<WidgetBaseInputHandler::InjectScrollGestureParams>
       injected_scroll_params_;
 
   // Whether the event we are handling is a touch start or move.
@@ -320,7 +321,7 @@ void WidgetBaseInputHandler::HandleInputEvent(
                "WidgetBaseInputHandler::OnHandleInputEvent", "event",
                WebInputEvent::GetName(input_event.GetType()));
   int64_t trace_id = coalesced_event.latency_info().trace_id();
-  TRACE_EVENT("input,benchmark", "LatencyInfo.Flow",
+  TRACE_EVENT("input,benchmark,latencyInfo", "LatencyInfo.Flow",
               [trace_id](perfetto::EventContext ctx) {
                 ChromeLatencyInfo* info =
                     ctx.event()->set_chrome_latency_info();
@@ -598,7 +599,7 @@ void WidgetBaseInputHandler::InjectGestureScrollEvent(
 }
 
 void WidgetBaseInputHandler::HandleInjectedScrollGestures(
-    std::vector<InjectScrollGestureParams> injected_scroll_params,
+    Vector<InjectScrollGestureParams> injected_scroll_params,
     const WebInputEvent& input_event,
     const ui::LatencyInfo& original_latency_info,
     const cc::EventMetrics* original_metrics) {

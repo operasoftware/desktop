@@ -12,8 +12,7 @@
 namespace blink {
 
 OffscreenFontSelector::OffscreenFontSelector(WorkerGlobalScope* worker)
-    : CSSFontSelectorBase(worker->GetTaskRunner(TaskType::kInternalDefault)),
-      worker_(worker) {
+    : worker_(worker) {
   DCHECK(worker);
   font_face_cache_ = MakeGarbageCollected<FontFaceCache>();
   FontCache::Get().AddClient(this);
@@ -56,8 +55,9 @@ scoped_refptr<FontData> OffscreenFontSelector::GetFontData(
   // handed the generic font family name.
   AtomicString settings_family_name =
       FamilyNameFromSettings(font_description, font_family);
-  if (settings_family_name.empty())
+  if (settings_family_name.empty()) {
     return nullptr;
+  }
 
   ReportFontFamilyLookupByGenericFamily(
       family_name, font_description.GetScript(),

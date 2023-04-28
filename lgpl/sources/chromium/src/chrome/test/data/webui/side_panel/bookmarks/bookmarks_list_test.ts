@@ -3,21 +3,18 @@
 // found in the LICENSE file.
 
 import 'chrome://webui-test/mojo_webui_test_support.js';
-import 'chrome://read-later.top-chrome/bookmarks/bookmarks_list.js';
+import 'chrome://bookmarks-side-panel.top-chrome/bookmarks_list.js';
 
-import {BookmarkFolderElement, FOLDER_OPEN_CHANGED_EVENT} from 'chrome://read-later.top-chrome/bookmarks/bookmark_folder.js';
-import {BookmarksApiProxyImpl} from 'chrome://read-later.top-chrome/bookmarks/bookmarks_api_proxy.js';
-import {BookmarksListElement, LOCAL_STORAGE_OPEN_FOLDERS_KEY} from 'chrome://read-later.top-chrome/bookmarks/bookmarks_list.js';
-import {BookmarkProductInfo} from 'chrome://read-later.top-chrome/bookmarks/commerce/shopping_list.mojom-webui.js';
-import {ShoppingListApiProxyImpl} from 'chrome://read-later.top-chrome/bookmarks/commerce/shopping_list_api_proxy.js';
-import {PluralStringProxyImpl} from 'chrome://resources/js/plural_string_proxy.js';
+import {BookmarkFolderElement, FOLDER_OPEN_CHANGED_EVENT} from 'chrome://bookmarks-side-panel.top-chrome/bookmark_folder.js';
+import {BookmarksApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_api_proxy.js';
+import {BookmarksListElement, LOCAL_STORAGE_OPEN_FOLDERS_KEY} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_list.js';
+import {ShoppingListApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/commerce/shopping_list_api_proxy.js';
+import {BookmarkProductInfo} from 'chrome://bookmarks-side-panel.top-chrome/shopping_list.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {fakeMetricsPrivate, MetricsTracker} from 'chrome://webui-test/metrics_test_support.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
-import {TestPluralStringProxy} from 'chrome://webui-test/test_plural_string_proxy.js';
 import {isVisible} from 'chrome://webui-test/test_util.js';
-
-import {fakeMetricsPrivate, MetricsTracker} from '../metrics_test_support.js';
 
 import {TestShoppingListApiProxy} from './commerce/test_shopping_list_api_proxy.js';
 import {TestBookmarksApiProxy} from './test_bookmarks_api_proxy.js';
@@ -100,8 +97,7 @@ suite('SidePanelBookmarksListTest', () => {
 
   setup(async () => {
     window.localStorage[LOCAL_STORAGE_OPEN_FOLDERS_KEY] = undefined;
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
     metrics = fakeMetricsPrivate();
 
@@ -112,9 +108,6 @@ suite('SidePanelBookmarksListTest', () => {
     shoppingListApi = new TestShoppingListApiProxy();
     shoppingListApi.setProducts(products);
     ShoppingListApiProxyImpl.setInstance(shoppingListApi);
-
-    const pluralString = new TestPluralStringProxy();
-    PluralStringProxyImpl.setInstance(pluralString);
 
     bookmarksList = document.createElement('bookmarks-list');
     document.body.appendChild(bookmarksList);

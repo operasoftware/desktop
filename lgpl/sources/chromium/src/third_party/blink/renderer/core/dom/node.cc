@@ -40,7 +40,6 @@
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_document_state.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
-#include "third_party/blink/renderer/core/document_transition/document_transition_utils.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/child_list_mutation_scope.h"
@@ -51,6 +50,7 @@
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/element_rare_data.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_vector.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/add_event_listener_options_resolved.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -125,6 +125,8 @@
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script.h"
+#include "third_party/blink/renderer/core/view_transition/view_transition_supplement.h"
+#include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
@@ -164,9 +166,11 @@ ScrollCustomizationCallbacks& GetScrollCustomizationCallbacks() {
 using ReattachHookScope = LayoutShiftTracker::ReattachHookScope;
 
 struct SameSizeAsNode : EventTarget {
-  uint32_t node_flags_;
-  Member<void*> willbe_member_[4];
+  subtle::UncompressedMember<int> first_uncompressed;
+  subtle::UncompressedMember<int> second_uncompressed;
+  Member<void*> willbe_member_[2];
   Member<NodeData> member_;
+  uint32_t node_flags_;
   // Increasing size of Member increases size of Node.
   static_assert(kBlinkMemberGCHasDebugChecks ||
                     sizeof(Member<NodeData>) <= sizeof(void*),
@@ -313,12 +317,12 @@ void Node::DumpStatistics() {
 #endif
 
 Node::Node(TreeScope* tree_scope, ConstructionType type)
-    : node_flags_(type),
-      parent_or_shadow_host_node_(nullptr),
+    : parent_or_shadow_host_node_(nullptr),
       tree_scope_(tree_scope),
       previous_(nullptr),
       next_(nullptr),
-      data_(&NodeRenderingData::SharedEmptyData()) {
+      data_(&NodeData::SharedEmptyData()),
+      node_flags_(type) {
   DCHECK(tree_scope_ || type == kCreateDocument || type == kCreateShadowRoot);
 #if DUMP_NODE_STATISTICS
   LiveNodeSet().insert(this);
@@ -335,9 +339,13 @@ Node::~Node() {
 
 NodeRareData& Node::CreateRareData() {
   if (IsElementNode()) {
-    data_ = MakeGarbageCollected<ElementRareData>(DataAsNodeRenderingData());
+    if (RuntimeEnabledFeatures::ElementSuperRareDataEnabled()) {
+      data_ = MakeGarbageCollected<ElementRareDataVector>(data_);
+    } else {
+      data_ = MakeGarbageCollected<ElementRareData>(data_);
+    }
   } else {
-    data_ = MakeGarbageCollected<NodeRareData>(DataAsNodeRenderingData());
+    data_ = MakeGarbageCollected<NodeRareData>(std::move(*data_));
   }
 
   DCHECK(data_);
@@ -366,8 +374,9 @@ NodeList* Node::childNodes() {
 
 Node* Node::PseudoAwarePreviousSibling() const {
   Element* parent = parentElement();
-  if (!parent || previousSibling())
+  if (!parent || HasPreviousSibling()) {
     return previousSibling();
+  }
   switch (GetPseudoId()) {
     case kPseudoIdAfter:
       if (Node* previous = parent->lastChild())
@@ -391,8 +400,9 @@ Node* Node::PseudoAwarePreviousSibling() const {
 
 Node* Node::PseudoAwareNextSibling() const {
   Element* parent = parentElement();
-  if (!parent || nextSibling())
+  if (!parent || HasNextSibling()) {
     return nextSibling();
+  }
   switch (GetPseudoId()) {
     case kPseudoIdMarker:
       if (Node* next = parent->GetPseudoElement(kPseudoIdBefore))
@@ -1012,46 +1022,32 @@ LayoutBox* Node::GetLayoutBox() const {
 }
 
 void Node::SetLayoutObject(LayoutObject* layout_object) {
-  NodeRenderingData* node_layout_data =
-      HasRareData() ? DataAsNodeRareData()->GetNodeRenderingData()
-                    : DataAsNodeRenderingData();
-
   DCHECK(!layout_object || layout_object->GetNode() == this);
 
-  // Already pointing to a non empty NodeRenderingData so just set the pointer
+  // Already pointing to a non empty NodeData so just set the pointer
   // to the new LayoutObject.
-  if (!node_layout_data->IsSharedEmptyData()) {
-    node_layout_data->SetLayoutObject(layout_object);
+  if (!data_->IsSharedEmptyData()) {
+    data_->SetLayoutObject(layout_object);
     return;
   }
 
   if (!layout_object)
     return;
 
-  // Swap the NodeRenderingData to point to a new NodeRenderingData instead of
+  // Swap the NodeData to point to a new NodeData instead of
   // the static SharedEmptyData instance.
-  DCHECK(!node_layout_data->GetComputedStyle());
-  node_layout_data =
-      MakeGarbageCollected<NodeRenderingData>(layout_object, nullptr);
-  if (HasRareData()) {
-    DataAsNodeRareData()->SetNodeRenderingData(node_layout_data);
-  } else {
-    data_ = node_layout_data;
-  }
+  DCHECK(!data_->GetComputedStyle());
+  data_ = MakeGarbageCollected<NodeData>(layout_object, nullptr);
 }
 
 void Node::SetComputedStyle(scoped_refptr<const ComputedStyle> computed_style) {
   // We don't set computed style for text nodes.
   DCHECK(IsElementNode());
 
-  NodeRenderingData* node_layout_data =
-      HasRareData() ? DataAsNodeRareData()->GetNodeRenderingData()
-                    : DataAsNodeRenderingData();
-
-  // Already pointing to a non empty NodeRenderingData so just set the pointer
+  // Already pointing to a non empty NodeData so just set the pointer
   // to the new LayoutObject.
-  if (!node_layout_data->IsSharedEmptyData()) {
-    node_layout_data->SetComputedStyle(computed_style);
+  if (!data_->IsSharedEmptyData()) {
+    data_->SetComputedStyle(computed_style);
     return;
   }
 
@@ -1063,16 +1059,10 @@ void Node::SetComputedStyle(scoped_refptr<const ComputedStyle> computed_style) {
   DCHECK(computed_style->IsEnsuredInDisplayNone() ||
          LayoutTreeBuilderTraversal::Parent(*this));
 
-  // Swap the NodeRenderingData to point to a new NodeRenderingData instead of
+  // Swap the NodeData to point to a new NodeData instead of
   // the static SharedEmptyData instance.
-  DCHECK(!node_layout_data->GetLayoutObject());
-  node_layout_data =
-      MakeGarbageCollected<NodeRenderingData>(nullptr, computed_style);
-  if (HasRareData()) {
-    DataAsNodeRareData()->SetNodeRenderingData(node_layout_data);
-  } else {
-    data_ = node_layout_data;
-  }
+  DCHECK(!data_->GetLayoutObject());
+  data_ = MakeGarbageCollected<NodeData>(nullptr, computed_style);
 }
 
 LayoutBoxModelObject* Node::GetLayoutBoxModelObject() const {
@@ -1357,7 +1347,7 @@ void Node::SetNeedsStyleRecalc(StyleChangeType change_type,
   if (auto* this_element = DynamicTo<Element>(this)) {
     this_element->SetAnimationStyleChange(false);
 
-    // The style walk for the pseudo tree created for a DocumentTransition is
+    // The style walk for the pseudo tree created for a ViewTransition is
     // done after resolving style for the author DOM. See
     // StyleEngine::RecalcTransitionPseudoStyle.
     // Since the dirty bits from the originating element (root element) are not
@@ -1367,10 +1357,10 @@ void Node::SetNeedsStyleRecalc(StyleChangeType change_type,
       auto update_style_change = [](PseudoElement* pseudo_element) {
         pseudo_element->SetNeedsStyleRecalc(
             kLocalStyleChange, StyleChangeReasonForTracing::Create(
-                                   style_change_reason::kDocumentTransition));
+                                   style_change_reason::kViewTransition));
       };
-      DocumentTransitionUtils::ForEachTransitionPseudo(GetDocument(),
-                                                       update_style_change);
+      ViewTransitionUtils::ForEachTransitionPseudo(GetDocument(),
+                                                   update_style_change);
     }
   }
 
@@ -1381,10 +1371,12 @@ void Node::SetNeedsStyleRecalc(StyleChangeType change_type,
 void Node::ClearNeedsStyleRecalc() {
   node_flags_ &= ~kStyleChangeMask;
   ClearFlag(kForceReattachLayoutTree);
-
-  auto* element = DynamicTo<Element>(this);
-  if (element && HasRareData())
+  if (!HasRareData()) {
+    return;
+  }
+  if (auto* element = DynamicTo<Element>(this)) {
     element->SetAnimationStyleChange(false);
+  }
 }
 
 bool Node::InActiveDocument() const {
@@ -2208,6 +2200,13 @@ uint16_t Node::compareDocumentPosition(const Node* other_node,
                                kDocumentPositionContains | connection;
 }
 
+NodeData& Node::EnsureMutableData() {
+  if (data_->IsSharedEmptyData()) {
+    data_ = MakeGarbageCollected<NodeData>(nullptr, nullptr);
+  }
+  return *data_;
+}
+
 void Node::InvalidateIfHasEffectiveAppearance() const {
   auto* layout_object = GetLayoutObject();
   if (!layout_object)
@@ -2227,12 +2226,14 @@ Node::InsertionNotificationRequest Node::InsertedInto(
          IsContainerNode());
   if (insertion_point.isConnected()) {
     SetFlag(kIsConnectedFlag);
+#if DCHECK_IS_ON()
     insertion_point.GetDocument().IncrementNodeCount();
+#endif
   }
   if (ParentOrShadowHostNode()->IsInShadowTree())
     SetFlag(kIsInShadowTreeFlag);
-  if (GetDocument().HasAXObjectCache()) {
-    GetDocument().ExistingAXObjectCache()->ChildrenChanged(&insertion_point);
+  if (auto* cache = GetDocument().ExistingAXObjectCache()) {
+    cache->ChildrenChanged(&insertion_point);
   }
   return kInsertionDone;
 }
@@ -2246,12 +2247,14 @@ void Node::RemovedFrom(ContainerNode& insertion_point) {
     ClearNeedsStyleInvalidation();
     ClearChildNeedsStyleInvalidation();
     ClearFlag(kIsConnectedFlag);
+#if DCHECK_IS_ON()
     insertion_point.GetDocument().DecrementNodeCount();
+#endif
   }
   if (IsInShadowTree() && !ContainingTreeScope().RootNode().IsShadowRoot())
     ClearFlag(kIsInShadowTreeFlag);
-  if (GetDocument().HasAXObjectCache()) {
-    GetDocument().ExistingAXObjectCache()->Remove(this);
+  if (auto* cache = GetDocument().ExistingAXObjectCache()) {
+    cache->Remove(this);
   }
 }
 
@@ -2280,64 +2283,6 @@ String Node::DebugName() const {
 
 String Node::DebugNodeName() const {
   return nodeName();
-}
-
-String Node::GetPath() const {
-  HeapVector<Member<const Node>, 16> chain;
-  {
-    const Node* node = this;
-    while (node->ParentOrShadowHostNode()) {
-      chain.push_back(node);
-      node = node->ParentOrShadowHostNode();
-    }
-  }
-
-  StringBuilder path;
-  for (unsigned index = chain.size(); index > 0; --index) {
-    const Node* node = chain[index - 1];
-    if (node->IsShadowRoot()) {
-      path.Append("/#shadow-root[0]");
-      continue;
-    }
-
-    switch (node->getNodeType()) {
-      case kElementNode: {
-        path.Append(String::Format("/%s", node->nodeName().Utf8().data()));
-
-        const Element* element = To<Element>(node);
-        const AtomicString& id_attr = element->GetIdAttribute();
-        if (node->previousSibling() || node->nextSibling()) {
-          int count = 0;
-          for (Node* previous = node->previousSibling(); previous;
-               previous = previous->previousSibling()) {
-            if (previous->nodeName() == node->nodeName())
-              ++count;
-          }
-          if (!id_attr.empty()) {
-            path.Append(String::Format("[@id=\"%s\" and position()=%d]",
-                                       id_attr.GetString().Utf8().data(),
-                                       count));
-          } else {
-            path.Append(String::Format("[%d]", count));
-          }
-        } else if (!id_attr.empty()) {
-          path.Append(String::Format("[@id=\"%s\"]",
-                                     id_attr.GetString().Utf8().data()));
-        }
-        break;
-      }
-      case kTextNode:
-        path.Append(String::Format("/text()"));
-        break;
-      case kAttributeNode:
-        path.Append(String::Format("/@%s", node->nodeName().Utf8().data()));
-        break;
-      default:
-        break;
-    }
-  }
-
-  return path.ToString();
 }
 
 static void DumpAttributeDesc(const Node& node,
@@ -2639,6 +2584,12 @@ ExecutionContext* Node::GetExecutionContext() const {
 
 void Node::WillMoveToNewDocument(Document& old_document,
                                  Document& new_document) {
+#if DCHECK_IS_ON()
+  if (RuntimeEnabledFeatures::UseSeparateTraversalForWillMoveEnabled()) {
+    DCHECK_NE(&GetDocument(), &new_document);
+  }
+#endif  // DCHECK_IS_ON()
+
   // In rare situations, this node may be the focused element of the old
   // document. In this case, we need to clear the focused element of the old
   // document, and since we are currently in an event forbidden scope, we can't
@@ -2668,6 +2619,7 @@ void Node::WillMoveToNewDocument(Document& old_document,
 
 void Node::DidMoveToNewDocument(Document& old_document) {
   TreeScopeAdopter::EnsureDidMoveToNewDocumentWasCalled(old_document);
+  DCHECK_NE(&GetDocument(), &old_document);
 
   if (const EventTargetData* event_target_data = GetEventTargetData()) {
     const EventListenerMap& listener_map =
@@ -2938,11 +2890,6 @@ void Node::NotifyMutationObserversNodeWillDetach() {
 }
 
 void Node::HandleLocalEvents(Event& event) {
-  if (UNLIKELY(IsDocumentNode() && GetDocument().TopmostPopupAutoOrHint())) {
-    // Check if this event should "light dismiss" one or more popups.
-    Element::HandlePopupLightDismiss(event);
-  }
-
   if (!HasEventTargetData())
     return;
 
@@ -3440,6 +3387,11 @@ void Node::RemovedFromFlatTree() {
     DetachLayoutTree();
   }
   GetDocument().GetStyleEngine().RemovedFromFlatTree(*this);
+
+  // Ensure removal from accessibility cache even if it doesn't have layout.
+  if (auto* cache = GetDocument().ExistingAXObjectCache()) {
+    cache->Remove(this);
+  }
 }
 
 void Node::RegisterScrollTimeline(ScrollTimeline* timeline) {
@@ -3456,6 +3408,15 @@ HTMLSlotElement* Node::ManuallyAssignedSlot() {
   if (FlatTreeNodeData* data = GetFlatTreeNodeData())
     return data->ManuallyAssignedSlot();
   return nullptr;
+}
+
+HashSet<Member<TreeScope>> Node::GetAncestorTreeScopes() const {
+  HashSet<Member<TreeScope>> ancestor_tree_scopes;
+  for (TreeScope* scope = &GetTreeScope(); scope;
+       scope = scope->ParentTreeScope()) {
+    ancestor_tree_scopes.insert(scope);
+  }
+  return ancestor_tree_scopes;
 }
 
 void Node::Trace(Visitor* visitor) const {

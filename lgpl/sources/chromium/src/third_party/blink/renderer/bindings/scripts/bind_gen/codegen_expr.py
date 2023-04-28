@@ -181,7 +181,7 @@ def expr_from_exposure(exposure,
     #         feature_selector-2nd-phase-term))
     # which can be represented in more details as:
     #   (and cross_origin_isolated_term
-    #        isolated_application_term
+    #        isolated_context_term
     #        secure_context_term
     #        uncond_exposed_term
     #        (or
@@ -193,7 +193,7 @@ def expr_from_exposure(exposure,
     #             feature_selector_term)))
     # where
     #   cross_origin_isolated_term represents [CrossOriginIsolated]
-    #   isolated_application_term represents [IsolatedApplication]
+    #   isolated_context_term represents [IsolatedContext]
     #   secure_context_term represents [SecureContext=F1]
     #   uncond_exposed_term represents [Exposed=(G1, G2)]
     #   cond_exposed_term represents [Exposed(G1 F1, G2 F2)]
@@ -226,11 +226,11 @@ def expr_from_exposure(exposure,
     else:
         cross_origin_isolated_term = _Expr(True)
 
-    # [IsolatedApplication]
-    if exposure.only_in_isolated_application_contexts:
-        isolated_application_term = _Expr("${is_isolated_application}")
+    # [IsolatedContext]
+    if exposure.only_in_isolated_contexts:
+        isolated_context_term = _Expr("${is_in_isolated_context}")
     else:
-        isolated_application_term = _Expr(True)
+        isolated_context_term = _Expr(True)
 
     # [SecureContext]
     if exposure.only_in_secure_contexts is True:
@@ -251,6 +251,7 @@ def expr_from_exposure(exposure,
         "LayoutWorklet": "IsLayoutWorkletGlobalScope",
         "PaintWorklet": "IsPaintWorkletGlobalScope",
         "ServiceWorker": "IsServiceWorkerGlobalScope",
+        "ShadowRealm": "IsShadowRealmGlobalScope",
         "SharedWorker": "IsSharedWorkerGlobalScope",
         "Window": "IsWindow",
         "Worker": "IsWorkerGlobalScope",
@@ -259,7 +260,13 @@ def expr_from_exposure(exposure,
     if global_names:
         matched_global_count = 0
         for entry in exposure.global_names_and_features:
-            if entry.global_name not in global_names:
+            if entry.global_name == "*":
+                # [Exposed(GLOBAL_NAME FEATURE_NAME)] is not supported.
+                assert entry.feature is None
+                # Constructs with the wildcard exposure ([Exposed=*]) are
+                # unconditionally exposed.
+                pass
+            elif entry.global_name not in global_names:
                 continue
             matched_global_count += 1
             if entry.feature:
@@ -270,6 +277,12 @@ def expr_from_exposure(exposure,
                 or matched_global_count > 0)
     else:
         for entry in exposure.global_names_and_features:
+            if entry.global_name == "*":
+                # [Exposed(GLOBAL_NAME FEATURE_NAME)] is not supported.
+                assert entry.feature is None
+                # Constructs with the wildcard exposure ([Exposed=*]) are
+                # unconditionally exposed.
+                continue
             try:
                 execution_context_check = GLOBAL_NAME_TO_EXECUTION_CONTEXT_TEST[
                     entry.global_name]
@@ -278,8 +291,10 @@ def expr_from_exposure(exposure,
                 # of [TargetOfExposed] exposure. If this is actually a global,
                 # add it to GLOBAL_NAME_TO_EXECUTION_CONTEXT_CHECK.
                 return _Expr(
-                    "(NOTREACHED() << \"{} exposure test is not supported at runtime\", false)"
-                    .format(entry.global_name))
+                    "(::logging::NotReachedError::NotReached"
+                    "(__FILE__, __LINE__) << "
+                    "\"{} exposure test is not supported at runtime\", false)".
+                    format(entry.global_name))
 
             pred_term = _Expr(
                 "${{execution_context}}->{}()".format(execution_context_check))
@@ -314,7 +329,7 @@ def expr_from_exposure(exposure,
     # Build an expression.
     top_level_terms = []
     top_level_terms.append(cross_origin_isolated_term)
-    top_level_terms.append(isolated_application_term)
+    top_level_terms.append(isolated_context_term)
     top_level_terms.append(secure_context_term)
     if uncond_exposed_terms:
         top_level_terms.append(expr_or(uncond_exposed_terms))

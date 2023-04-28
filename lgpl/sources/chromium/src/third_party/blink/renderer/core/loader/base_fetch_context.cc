@@ -7,6 +7,7 @@
 #include "net/http/structured_headers.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "services/network/public/cpp/request_mode.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/device_memory/approximated_device_memory.h"
 #include "third_party/blink/public/common/features.h"
@@ -20,6 +21,7 @@
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.h"
+#include "third_party/blink/renderer/core/loader/idna_util.h"
 #include "third_party/blink/renderer/core/loader/subresource_filter.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -40,11 +42,17 @@ namespace {
 // https://www.rfc-editor.org/rfc/rfc8941.html.
 const AtomicString SerializeStringHeader(std::string str) {
   std::string output;
-  if (!str.empty()) {
-    output = net::structured_headers::SerializeItem(
-                 net::structured_headers::Item(str))
-                 .value_or(std::string());
+
+  // See https://crbug.com/1416925.
+  if (str.empty() &&
+      !base::FeatureList::IsEnabled(
+          blink::features::kQuoteEmptySecChUaStringHeadersConsistently)) {
+    return AtomicString(output.c_str());
   }
+
+  output =
+      net::structured_headers::SerializeItem(net::structured_headers::Item(str))
+          .value_or(std::string());
 
   return AtomicString(output.c_str());
 }
@@ -519,7 +527,7 @@ void BaseFetchContext::PrintAccessDeniedMessage(const KURL& url) const {
               ". Domains, protocols and ports must match.\n";
   }
 
-  AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+  console_logger_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
       mojom::ConsoleMessageSource::kSecurity,
       mojom::ConsoleMessageLevel::kError, message));
 }
@@ -595,7 +603,7 @@ BaseFetchContext::CanRequestInternal(
   if (request_mode != network::mojom::RequestMode::kNavigate &&
       !resource_request.CanDisplay(url)) {
     if (reporting_disposition == ReportingDisposition::kReport) {
-      AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+      console_logger_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
           mojom::ConsoleMessageSource::kJavaScript,
           mojom::ConsoleMessageLevel::kError,
           "Not allowed to load local resource: " + url.GetString()));
@@ -606,6 +614,12 @@ BaseFetchContext::CanRequestInternal(
   }
 
   if (request_mode == network::mojom::RequestMode::kSameOrigin &&
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+     // This is a workaround for allowing loading shader mods. Probably belongs more
+     // to SecurityPolicy, but it is much harder to do such a rule that won't affect
+     // other fetches.
+     !(type == ResourceType::kGpuShader && url.ProtocolIs("chrome-extension")) &&
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
       cors::CalculateCorsFlag(url, origin.get(),
                               resource_request.IsolatedWorldOrigin().get(),
                               request_mode)) {
@@ -656,6 +670,14 @@ BaseFetchContext::CanRequestInternal(
   if (IsSVGImageChromeClient() && !url.ProtocolIsData())
     return ResourceRequestBlockedReason::kOrigin;
 
+  // data: URL is deprecated in SVGUseElement.
+  if (RuntimeEnabledFeatures::RemoveDataUrlInSvgUseEnabled() &&
+      options.initiator_info.name == fetch_initiator_type_names::kUse &&
+      url.ProtocolIsData()) {
+    PrintAccessDeniedMessage(url);
+    return ResourceRequestBlockedReason::kOrigin;
+  }
+
   // Measure the number of embedded-credential ('http://user:password@...')
   // resources embedded as subresources.
   const FetchClientSettingsObject& fetch_client_settings_object =
@@ -690,6 +712,24 @@ BaseFetchContext::CanRequestInternal(
     }
   }
 
+  // Warn if the resource URL's hostname contains IDNA deviation characters.
+  // Only warn if the resource URL's origin is different than its requestor
+  // (we don't want to warn for <img src="faß.de/image.img"> on faß.de).
+  // TODO(crbug.com/1396475): Remove once Non-Transitional mode is shipped.
+  if (!resource_request.RequestorOrigin()->IsSameOriginWith(
+          SecurityOrigin::Create(url).get()) &&
+      url.HasIDNA2008DeviationCharacter()) {
+    String message = GetConsoleWarningForIDNADeviationCharacters(url);
+    if (!message.empty()) {
+      console_logger_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+          mojom::ConsoleMessageSource::kSecurity,
+          mojom::ConsoleMessageLevel::kWarning, message));
+      UseCounter::Count(
+          GetExecutionContext(),
+          WebFeature::kIDNA2008DeviationCharacterInHostnameOfSubresource);
+    }
+  }
+
   return absl::nullopt;
 }
 
@@ -715,6 +755,7 @@ bool BaseFetchContext::ShouldSendClientHint(
 
 void BaseFetchContext::Trace(Visitor* visitor) const {
   visitor->Trace(fetcher_properties_);
+  visitor->Trace(console_logger_);
   FetchContext::Trace(visitor);
 }
 

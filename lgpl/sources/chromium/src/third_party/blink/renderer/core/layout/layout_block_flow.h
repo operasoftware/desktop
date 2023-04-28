@@ -100,7 +100,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   void Trace(Visitor*) const override;
 
   static LayoutBlockFlow* CreateAnonymous(Document*,
-                                          scoped_refptr<ComputedStyle>,
+                                          scoped_refptr<const ComputedStyle>,
                                           LegacyLayout);
 
   bool IsLayoutBlockFlow() const final {
@@ -368,6 +368,8 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
     return MultiColumnFlowThread();
   }
 
+  bool IsInitialLetterBox() const override;
+
   void AddVisualOverflowFromInlineChildren();
 
   void AddLayoutOverflowFromInlineChildren();
@@ -538,8 +540,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
     return false;
   }
   virtual void WillCollectInlines() { NOT_DESTROYED(); }
-
-  void StopDeferringShaping() const;
 
 #if DCHECK_IS_ON()
   void ShowLineTreeAndMark(const InlineBox* = nullptr,

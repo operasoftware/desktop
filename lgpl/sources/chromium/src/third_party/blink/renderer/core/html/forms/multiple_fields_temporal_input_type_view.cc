@@ -376,17 +376,22 @@ void MultipleFieldsTemporalInputTypeView::Blur() {
   ClosePopupView();
 }
 
-void MultipleFieldsTemporalInputTypeView::CustomStyleForLayoutObject(
-    ComputedStyle& style) {
-  EDisplay original_display = style.Display();
-  EDisplay new_display = original_display;
-  if (original_display == EDisplay::kInline ||
-      original_display == EDisplay::kInlineBlock)
-    new_display = EDisplay::kInlineFlex;
-  else if (original_display == EDisplay::kBlock)
-    new_display = EDisplay::kFlex;
-  style.SetDisplay(new_display);
-  style.SetDirection(ComputedTextDirection());
+void MultipleFieldsTemporalInputTypeView::AdjustStyle(
+    ComputedStyleBuilder& builder) {
+  if (!RuntimeEnabledFeatures::DateInputInlineBlockEnabled()) {
+    EDisplay original_display = builder.Display();
+    EDisplay new_display = original_display;
+    if (original_display == EDisplay::kInline ||
+        original_display == EDisplay::kInlineBlock) {
+      new_display = EDisplay::kInlineFlex;
+    } else if (original_display == EDisplay::kBlock) {
+      new_display = EDisplay::kFlex;
+    }
+    builder.SetDisplay(new_display);
+  } else {
+    builder.SetShouldIgnoreOverflowPropertyForInlineBlockBaseline();
+  }
+  builder.SetDirection(ComputedTextDirection());
 }
 
 void MultipleFieldsTemporalInputTypeView::CreateShadowSubtree() {
@@ -394,6 +399,14 @@ void MultipleFieldsTemporalInputTypeView::CreateShadowSubtree() {
 
   Document& document = GetElement().GetDocument();
   ContainerNode* container = GetElement().UserAgentShadowRoot();
+
+  if (RuntimeEnabledFeatures::DateInputInlineBlockEnabled()) {
+    auto* container_div = MakeGarbageCollected<HTMLDivElement>(document);
+    container_div->SetShadowPseudoId(
+        shadow_element_names::kPseudoInternalDatetimeContainer);
+    GetElement().UserAgentShadowRoot()->AppendChild(container_div);
+    container = container_div;
+  }
 
   container->AppendChild(
       MakeGarbageCollected<DateTimeEditElement, Document&,

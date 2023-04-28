@@ -127,6 +127,8 @@ const struct DOMExceptionEntry {
     {DOMExceptionCode::kNotAllowedError, "NotAllowedError",
      "The request is not allowed by the user agent or the platform in the "
      "current context."},
+    {DOMExceptionCode::kOptOutError, "OptOutError",
+     "The user opted out of the process."},
 
     // DOMError (obsolete, not DOMException) defined in File system (obsolete).
     // https://www.w3.org/TR/2012/WD-file-system-api-20120417/
@@ -153,7 +155,11 @@ const struct DOMExceptionEntry {
      "A parity error has been detected."},
     {DOMExceptionCode::kWebTransportError, "WebTransportError",
      "The WebTransport operation failed."},
-};
+
+    // Smart Card API
+    // https://github.com/WICG/web-smart-card/blob/main/README.md#web-idl
+    {DOMExceptionCode::kSmartCardError, "SmartCardError",
+     "A Smart Card operation failed."}};
 
 uint16_t ToLegacyErrorCode(DOMExceptionCode exception_code) {
   if (DOMExceptionCode::kLegacyErrorCodeMin <= exception_code &&

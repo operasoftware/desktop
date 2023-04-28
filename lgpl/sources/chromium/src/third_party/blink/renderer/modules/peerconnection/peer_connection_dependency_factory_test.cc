@@ -40,17 +40,17 @@ class PeerConnectionDependencyFactoryTest
   }
 
  protected:
+  base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
+      base::kFeaturePlatformAacDecoderInGpu, true};
   base::ScopedTestFeatureOverride enable_external_openh264_{
       base::kFeatureExternalOpenH264Encoder, GetParam()};
-  base::ScopedTestFeatureOverride enable_platform_sw_codec_mac_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac, GetParam()};
-  base::ScopedTestFeatureOverride enable_platform_sw_codec_win_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin, GetParam()};
   Persistent<PeerConnectionDependencyFactory> dependency_factory_;
   MockRTCPeerConnectionHandlerClient mock_client_;
 };
 
-INSTANTIATE_TEST_CASE_P(, PeerConnectionDependencyFactoryTest, testing::Bool());
+INSTANTIATE_TEST_SUITE_P(,
+                         PeerConnectionDependencyFactoryTest,
+                         testing::Bool());
 
 TEST_P(PeerConnectionDependencyFactoryTest, CreateRTCPeerConnectionHandler) {
   V8TestingScope scope;

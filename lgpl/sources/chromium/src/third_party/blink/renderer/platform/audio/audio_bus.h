@@ -34,6 +34,14 @@
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
+namespace base {
+class SequencedTaskRunner;
+}  // namespace base
+
+namespace media {
+class AudioDecoder;
+}  // namespace media
+
 namespace blink {
 
 // An AudioBus represents a collection of one or more AudioChannels.
@@ -69,6 +77,21 @@ class PLATFORM_EXPORT AudioBus : public ThreadSafeRefCounted<AudioBus> {
   static scoped_refptr<AudioBus> Create(unsigned number_of_channels,
                                         uint32_t length,
                                         bool allocate = true);
+
+  // Pass in 0.0 for sampleRate to use the file's sample-rate, otherwise a
+  // sample-rate conversion to the requested sampleRate will be made (if it
+  // doesn't already match the file's sample-rate).  The created buffer will
+  // have its sample-rate set correctly to the result.
+  // |external_decoder| is an additional decoder that is optionally tried in
+  // case the built-in decoder fails. |external_decoder| shall be accessed on
+  // |external_decoder_task_runner|.
+  static scoped_refptr<AudioBus> CreateBusFromInMemoryAudioFile(
+      const void* data,
+      size_t data_size,
+      bool mix_to_mono,
+      float sample_rate,
+      media::AudioDecoder* external_decoder,
+      base::SequencedTaskRunner* external_decoder_task_runner);
 
   AudioBus(const AudioBus&) = delete;
   AudioBus& operator=(const AudioBus&) = delete;

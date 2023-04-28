@@ -1,5 +1,6 @@
 include_rules = [
     "+base/containers/span.h",
+    "+base/containers/flat_map.h",
     "+base/files/file_path.h",
     "+base/i18n/rtl.h",
     "+base/observer_list_types.h",
@@ -43,6 +44,7 @@ include_rules = [
     "+services/network/public/mojom/referrer_policy.mojom-shared.h",
     "+services/network/public/mojom/url_loader.mojom-shared.h",
     "+services/network/public/mojom/url_loader_factory.mojom-shared.h",
+    "+services/network/public/mojom/url_response_head.mojom-shared.h",
     "+services/network/public/mojom/web_sandbox_flags.mojom-blink-forward.h",
     "+services/network/public/mojom/web_sandbox_flags.mojom-shared.h",
     "+services/service_manager/public",

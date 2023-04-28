@@ -49,6 +49,10 @@ class CORE_EXPORT PictureInPictureController
     kDisabledByPermissionsPolicy,
     kDisabledByAttribute,
     kAutoPipAndroid,
+
+    // An active document that's already a picture-in-picture document may not
+    // re-enter picture-in-picture mode.
+    kDocumentPip,
   };
 
   // Enter Picture-in-Picture for a video element and resolve promise if any.
@@ -66,15 +70,6 @@ class CORE_EXPORT PictureInPictureController
 
   // Should be called when an element has exited Picture-in-Picture.
   virtual void OnExitedPictureInPicture(ScriptPromiseResolver*) = 0;
-
-  // Add video element to the list of video elements for the associated document
-  // that are eligible to Auto Picture-in-Picture.
-  virtual void AddToAutoPictureInPictureElementsList(HTMLVideoElement*) = 0;
-
-  // Remove video element from the list of video elements for the associated
-  // document that are eligible to Auto Picture-in-Picture.
-  virtual void RemoveFromAutoPictureInPictureElementsList(
-      HTMLVideoElement*) = 0;
 
   // Notifies that one of the states used by Picture-in-Picture has changed.
   virtual void OnPictureInPictureStateChange() = 0;

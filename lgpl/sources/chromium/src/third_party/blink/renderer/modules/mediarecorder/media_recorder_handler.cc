@@ -18,6 +18,7 @@
 #include "media/base/video_codecs.h"
 #include "media/base/video_frame.h"
 #include "media/muxers/live_webm_muxer_delegate.h"
+#include "media/muxers/muxer.h"
 #include "media/muxers/webm_muxer.h"
 #include "third_party/blink/renderer/modules/mediarecorder/buildflags.h"
 #include "third_party/blink/renderer/modules/mediarecorder/media_recorder.h"
@@ -56,7 +57,8 @@ VideoTrackRecorder::CodecId CodecIdFromMediaVideoCodec(media::VideoCodec id) {
       return VideoTrackRecorder::CodecId::kVp8;
     case media::VideoCodec::kVP9:
       return VideoTrackRecorder::CodecId::kVp9;
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
     case media::VideoCodec::kH264:
       return VideoTrackRecorder::CodecId::kH264;
@@ -74,7 +76,8 @@ media::VideoCodec MediaVideoCodecFromCodecId(VideoTrackRecorder::CodecId id) {
       return media::VideoCodec::kVP8;
     case VideoTrackRecorder::CodecId::kVp9:
       return media::VideoCodec::kVP9;
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
     case VideoTrackRecorder::CodecId::kH264:
       return media::VideoCodec::kH264;
@@ -113,7 +116,8 @@ VideoTrackRecorder::CodecProfile VideoStringToCodecProfile(
     codec_id = VideoTrackRecorder::CodecId::kVp8;
   if (codecs_str.Find("vp9") != kNotFound)
     codec_id = VideoTrackRecorder::CodecId::kVp9;
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
   if (codecs_str.Find("h264") != kNotFound)
     codec_id = VideoTrackRecorder::CodecId::kH264;
@@ -148,15 +152,6 @@ AudioTrackRecorder::CodecId AudioStringToCodecId(const String& codecs) {
 
 }  // anonymous namespace
 
-MediaRecorderHandler::MediaRecorderHandler(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : video_codec_profile_(VideoTrackRecorder::CodecId::kLast),
-      audio_codec_id_(AudioTrackRecorder::CodecId::kLast),
-      recorder_(nullptr),
-      task_runner_(std::move(task_runner)) {}
-
-MediaRecorderHandler::~MediaRecorderHandler() = default;
-
 bool MediaRecorderHandler::CanSupportMimeType(const String& type,
                                               const String& web_codecs) {
   DCHECK(IsMainThread());
@@ -177,7 +172,8 @@ bool MediaRecorderHandler::CanSupportMimeType(const String& type,
   static const char* const kVideoCodecs[] = {
     "vp8",
     "vp9",
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
     "h264",
     "avc1",
@@ -264,7 +260,7 @@ bool MediaRecorderHandler::Start(int timeslice) {
   DCHECK(!recording_);
   DCHECK(media_stream_);
   DCHECK(timeslice_.is_zero());
-  DCHECK(!webm_muxer_);
+  DCHECK(!muxer_);
 
   invalidated_ = false;
 
@@ -291,14 +287,13 @@ bool MediaRecorderHandler::Start(int timeslice) {
     return false;
   }
 
-  webm_muxer_ = std::make_unique<media::WebmMuxer>(
+  muxer_ = std::make_unique<media::WebmMuxer>(
       CodecIdToMediaAudioCodec(audio_codec_id_), use_video_tracks,
       use_audio_tracks,
       std::make_unique<media::LiveWebmMuxerDelegate>(WTF::BindRepeating(
           &MediaRecorderHandler::WriteData, WrapWeakPersistent(this))));
-  if (timeslice > 0) {
-    webm_muxer_->SetMaximumDurationToForceDataOutput(timeslice_);
-  }
+  if (timeslice > 0)
+    muxer_->SetMaximumDurationToForceDataOutput(timeslice_);
   if (use_video_tracks) {
     // TODO(mcasas): The muxer API supports only one video track. Extend it to
     // several video tracks, see http://crbug.com/528523.
@@ -326,15 +321,18 @@ bool MediaRecorderHandler::Start(int timeslice) {
       video_recorders_.emplace_back(
           std::make_unique<VideoTrackRecorderPassthrough>(
               video_tracks_[0], std::move(on_passthrough_video_cb),
-              std::move(on_track_source_changed_cb), task_runner_));
+              std::move(on_track_source_changed_cb)));
     } else {
       const VideoTrackRecorder::OnEncodedVideoCB on_encoded_video_cb =
           media::BindToCurrentLoop(WTF::BindRepeating(
               &MediaRecorderHandler::OnEncodedVideo, WrapWeakPersistent(this)));
+      auto on_video_error_cb = media::BindToCurrentLoop(
+          WTF::BindOnce(&MediaRecorderHandler::OnVideoEncodingError,
+                        WrapWeakPersistent(this)));
       video_recorders_.emplace_back(std::make_unique<VideoTrackRecorderImpl>(
           video_codec_profile_, video_tracks_[0],
           std::move(on_encoded_video_cb), std::move(on_track_source_changed_cb),
-          video_bits_per_second_, task_runner_));
+          std::move(on_video_error_cb), video_bits_per_second_));
     }
   }
 
@@ -368,13 +366,17 @@ void MediaRecorderHandler::Stop() {
   DCHECK(IsMainThread());
   // Don't check |recording_| since we can go directly from pause() to stop().
 
+  // TODO(crbug.com/719023): The video recorder needs to be flushed to retrieve
+  // the last N frames with some codecs.
+
+  // Ensure any stored data inside the muxer is flushed out before invalidation.
+  muxer_ = nullptr;
   invalidated_ = true;
 
   recording_ = false;
   timeslice_ = base::Milliseconds(0);
   video_recorders_.clear();
   audio_recorders_.clear();
-  webm_muxer_.reset();
 }
 
 void MediaRecorderHandler::Pause() {
@@ -385,8 +387,8 @@ void MediaRecorderHandler::Pause() {
     video_recorder->Pause();
   for (const auto& audio_recorder : audio_recorders_)
     audio_recorder->Pause();
-  if (webm_muxer_)
-    webm_muxer_->Pause();
+  if (muxer_)
+    muxer_->Pause();
 }
 
 void MediaRecorderHandler::Resume() {
@@ -397,8 +399,8 @@ void MediaRecorderHandler::Resume() {
     video_recorder->Resume();
   for (const auto& audio_recorder : audio_recorders_)
     audio_recorder->Resume();
-  if (webm_muxer_)
-    webm_muxer_->Resume();
+  if (muxer_)
+    muxer_->Resume();
 }
 
 void MediaRecorderHandler::EncodingInfo(
@@ -473,7 +475,8 @@ String MediaRecorderHandler::ActualMimeType() {
       case VideoTrackRecorder::CodecId::kVp9:
         mime_type.Append("video/webm;codecs=");
         break;
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
       case VideoTrackRecorder::CodecId::kH264:
         mime_type.Append("video/x-matroska;codecs=");
@@ -492,7 +495,8 @@ String MediaRecorderHandler::ActualMimeType() {
       case VideoTrackRecorder::CodecId::kVp9:
         mime_type.Append("vp9");
         break;
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
       case VideoTrackRecorder::CodecId::kH264:
         mime_type.Append("avc1");
@@ -534,7 +538,7 @@ String MediaRecorderHandler::ActualMimeType() {
 }
 
 void MediaRecorderHandler::OnEncodedVideo(
-    const media::WebmMuxer::VideoParameters& params,
+    const media::Muxer::VideoParameters& params,
     std::string encoded_data,
     std::string encoded_alpha,
     base::TimeTicks timestamp,
@@ -552,7 +556,7 @@ void MediaRecorderHandler::OnEncodedVideo(
 }
 
 void MediaRecorderHandler::OnPassthroughVideo(
-    const media::WebmMuxer::VideoParameters& params,
+    const media::Muxer::VideoParameters& params,
     std::string encoded_data,
     std::string encoded_alpha,
     base::TimeTicks timestamp,
@@ -566,7 +570,7 @@ void MediaRecorderHandler::OnPassthroughVideo(
 }
 
 void MediaRecorderHandler::HandleEncodedVideo(
-    const media::WebmMuxer::VideoParameters& params,
+    const media::Muxer::VideoParameters& params,
     std::string encoded_data,
     std::string encoded_alpha,
     base::TimeTicks timestamp,
@@ -588,11 +592,11 @@ void MediaRecorderHandler::HandleEncodedVideo(
     return;
   }
 
-  if (!webm_muxer_)
+  if (!muxer_)
     return;
-  if (!webm_muxer_->OnEncodedVideo(params, std::move(encoded_data),
-                                   std::move(encoded_alpha), timestamp,
-                                   is_key_frame)) {
+  if (!muxer_->OnEncodedVideo(params, std::move(encoded_data),
+                              std::move(encoded_alpha), timestamp,
+                              is_key_frame)) {
     DLOG(ERROR) << "Error muxing video data";
     recorder_->OnError("Error muxing video data");
   }
@@ -610,10 +614,9 @@ void MediaRecorderHandler::OnEncodedAudio(const media::AudioParameters& params,
     recorder_->OnError("Amount of tracks in MediaStream has changed.");
     return;
   }
-  if (!webm_muxer_)
+  if (!muxer_)
     return;
-  if (!webm_muxer_->OnEncodedAudio(params, std::move(encoded_data),
-                                   timestamp)) {
+  if (!muxer_->OnEncodedAudio(params, std::move(encoded_data), timestamp)) {
     DLOG(ERROR) << "Error muxing audio data";
     recorder_->OnError("Error muxing audio data");
   }
@@ -621,7 +624,7 @@ void MediaRecorderHandler::OnEncodedAudio(const media::AudioParameters& params,
 
 void MediaRecorderHandler::WriteData(base::StringPiece data) {
   DCHECK(IsMainThread());
-
+  DVLOG(3) << __func__ << " " << data.length() << "B";
   if (invalidated_)
     return;
 
@@ -687,8 +690,8 @@ void MediaRecorderHandler::UpdateTrackLiveAndEnabled(
   const bool track_live_and_enabled =
       track.GetReadyState() == MediaStreamSource::kReadyStateLive &&
       track.Enabled();
-  if (webm_muxer_)
-    webm_muxer_->SetLiveAndEnabled(track_live_and_enabled, is_video);
+  if (muxer_)
+    muxer_->SetLiveAndEnabled(track_live_and_enabled, is_video);
 }
 
 void MediaRecorderHandler::OnSourceReadyStateChanged() {
@@ -739,6 +742,12 @@ void MediaRecorderHandler::Trace(Visitor* visitor) const {
   visitor->Trace(video_tracks_);
   visitor->Trace(audio_tracks_);
   visitor->Trace(recorder_);
+}
+
+void MediaRecorderHandler::OnVideoEncodingError() {
+  if (recorder_) {
+    recorder_->OnError("Video encoding failed.");
+  }
 }
 
 }  // namespace blink

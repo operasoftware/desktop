@@ -74,7 +74,7 @@ FilterOperation::OperationType FilterOperationResolver::FilterOperationForType(
     case CSSValueID::kDropShadow:
       return FilterOperation::OperationType::kDropShadow;
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
-    case CSSValueID::kShader:
+    case CSSValueID::kOperaShader:
       return FilterOperation::OperationType::kGpuShader;
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
     default:
@@ -158,8 +158,9 @@ double FilterOperationResolver::ResolveNumericArgumentForFunction(
       if (filter.length() == 1) {
         const CSSPrimitiveValue& value = To<CSSPrimitiveValue>(filter.Item(0));
         amount = value.GetDoubleValue();
-        if (value.IsPercentage())
+        if (value.IsPercentage()) {
           amount /= 100;
+        }
       }
       return amount;
     }
@@ -247,14 +248,14 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
             conversion_data, &state, filter_value->Item(0));
         // TODO(fs): Resolve 'currentcolor' when constructing the filter chain.
         if (shadow.GetColor().IsCurrentColor()) {
-          shadow.OverrideColor(state.Style()->GetCurrentColor());
+          shadow.OverrideColor(state.StyleBuilder().GetCurrentColor());
         }
         operations.Operations().push_back(
             MakeGarbageCollected<DropShadowFilterOperation>(shadow));
         break;
       }
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
-      case CSSValueID::kShader: {
+      case CSSValueID::kOperaShader: {
         // For now we support only single shader value
         if (filter_value->length() == 1) {
           const auto* shader_value =
@@ -269,7 +270,7 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
           operations.Operations().push_back(
               MakeGarbageCollected<GpuShaderFilterOperation>(
                   shader_value->RelativeUrl(), shader_value->AbsoluteUrl(),
-                  shader_value->GetReferrer(), resource,
+                  shader_value->GetReferrer(), resource, shader_value->Args(),
                   shader_value->AnimationFrame()));
         }
         break;
@@ -298,16 +299,18 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
   float zoom = 1.0f;
   CSSToLengthConversionData::FontSizes font_sizes(
       kOffScreenCanvasEmFontSize, kOffScreenCanvasRemFontSize, &font, zoom);
+  CSSToLengthConversionData::LineHeightSize line_height_size;
   CSSToLengthConversionData::ViewportSize viewport_size(0, 0);
   CSSToLengthConversionData::ContainerSizes container_sizes;
+  CSSToLengthConversionData::Flags ignored_flags = 0;
   CSSToLengthConversionData conversion_data(
-      nullptr /* element_style */, nullptr /* parent_style */,
-      WritingMode::kHorizontalTb, font_sizes, viewport_size, container_sizes,
-      1 /* zoom */);
+      WritingMode::kHorizontalTb, font_sizes, line_height_size, viewport_size,
+      container_sizes, 1 /* zoom */, ignored_flags);
 
   for (auto& curr_value : To<CSSValueList>(in_value)) {
-    if (curr_value->IsURIValue())
+    if (curr_value->IsURIValue()) {
       continue;
+    }
 
     const auto* filter_value = To<CSSFunctionValue>(curr_value.Get());
     FilterOperation::OperationType operation_type =

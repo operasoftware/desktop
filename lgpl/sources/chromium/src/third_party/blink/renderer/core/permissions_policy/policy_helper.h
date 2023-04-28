@@ -61,10 +61,7 @@ class PolicyParserMessageBuffer {
 
 using FeatureNameMap = HashMap<String, mojom::blink::PermissionsPolicyFeature>;
 
-using DocumentPolicyFeatureSet = HashSet<
-    mojom::blink::DocumentPolicyFeature,
-    DefaultHash<mojom::blink::DocumentPolicyFeature>::Hash,
-    WTF::EnumOrGenericHashTraits<true, mojom::blink::DocumentPolicyFeature>>;
+using DocumentPolicyFeatureSet = HashSet<mojom::blink::DocumentPolicyFeature>;
 
 class FeatureContext;
 

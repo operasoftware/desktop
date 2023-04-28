@@ -30,6 +30,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -78,7 +79,8 @@ struct MediaRecorderTestParams {
 static const MediaRecorderTestParams kMediaRecorderTestParams[] = {
     {true, false, true, "video/webm", "vp8", true},
     {true, false, true, "video/webm", "vp9", true},
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
     {true, false, false, "video/x-matroska", "avc1", false},
     {true, false, true, "video/x-matroska", "avc1", false},
@@ -91,9 +93,11 @@ static const MediaRecorderTestParams kMediaRecorderTestParams[] = {
 
 MediaStream* CreateMediaStream(V8TestingScope& scope) {
   auto* source = MakeGarbageCollected<MediaStreamSource>(
-      "sourceId", MediaStreamSource::kTypeAudio, "sourceName", false);
-  auto* component =
-      MakeGarbageCollected<MediaStreamComponentImpl>("audioTrack", source);
+      "sourceId", MediaStreamSource::kTypeAudio, "sourceName", false,
+      /*platform_source=*/nullptr);
+  auto* component = MakeGarbageCollected<MediaStreamComponentImpl>(
+      "audioTrack", source,
+      std::make_unique<MediaStreamAudioTrack>(/*is_local_track=*/true));
 
   auto* track = MakeGarbageCollected<MediaStreamTrackImpl>(
       scope.GetExecutionContext(), component);
@@ -109,14 +113,14 @@ MediaStream* CreateMediaStream(V8TestingScope& scope) {
 
 class MockMediaRecorder : public MediaRecorder {
  public:
-  MockMediaRecorder(V8TestingScope& scope)
+  explicit MockMediaRecorder(V8TestingScope& scope)
       : MediaRecorder(scope.GetExecutionContext(),
                       CreateMediaStream(scope),
                       MediaRecorderOptions::Create(),
                       scope.GetExceptionState()) {}
   ~MockMediaRecorder() override = default;
 
-  MOCK_METHOD4(WriteData, void(const char*, size_t, bool, double));
+  MOCK_METHOD4(WriteData, void(const void*, size_t, bool, double));
   MOCK_METHOD1(OnError, void(const String& message));
 };
 
@@ -125,8 +129,7 @@ class MediaRecorderHandlerFixture : public ScopedMockOverlayScrollbars {
   MediaRecorderHandlerFixture(bool has_video, bool has_audio)
       : has_video_(has_video),
         has_audio_(has_audio),
-        media_recorder_handler_(MakeGarbageCollected<MediaRecorderHandler>(
-            scheduler::GetSingleThreadTaskRunnerForTesting())),
+        media_recorder_handler_(MakeGarbageCollected<MediaRecorderHandler>()),
         audio_source_(kTestAudioChannels,
                       440 /* freq */,
                       kTestAudioSampleRate) {
@@ -134,10 +137,6 @@ class MediaRecorderHandlerFixture : public ScopedMockOverlayScrollbars {
 
     registry_.Init();
   }
-
-  MediaRecorderHandlerFixture(const MediaRecorderHandlerFixture&) = delete;
-  MediaRecorderHandlerFixture& operator=(const MediaRecorderHandlerFixture&) =
-      delete;
 
   ~MediaRecorderHandlerFixture() {
     registry_.reset();
@@ -157,13 +156,21 @@ class MediaRecorderHandlerFixture : public ScopedMockOverlayScrollbars {
                                                     base::TimeTicks::Now());
   }
 
-  void OnEncodedVideoForTesting(const media::WebmMuxer::VideoParameters& params,
+  void OnEncodedVideoForTesting(const media::Muxer::VideoParameters& params,
                                 std::string encoded_data,
                                 std::string encoded_alpha,
                                 base::TimeTicks timestamp,
                                 bool is_key_frame) {
-    media_recorder_handler_->OnEncodedVideo(params, encoded_data, encoded_alpha,
-                                            timestamp, is_key_frame);
+    media_recorder_handler_->OnEncodedVideo(params, std::move(encoded_data),
+                                            std::move(encoded_alpha), timestamp,
+                                            is_key_frame);
+  }
+
+  void OnEncodedAudioForTesting(const media::AudioParameters& params,
+                                std::string encoded_data,
+                                base::TimeTicks timestamp) {
+    media_recorder_handler_->OnEncodedAudio(params, std::move(encoded_data),
+                                            timestamp);
   }
 
   void OnAudioBusForTesting(const media::AudioBus& audio_bus) {
@@ -187,32 +194,25 @@ class MediaRecorderHandlerFixture : public ScopedMockOverlayScrollbars {
   }
 
   void ForceOneErrorInWebmMuxer() {
-    media_recorder_handler_->webm_muxer_->ForceOneLibWebmErrorForTesting();
+    static_cast<media::WebmMuxer*>(media_recorder_handler_->muxer_.get())
+        ->ForceOneLibWebmErrorForTesting();
   }
 
   std::unique_ptr<media::AudioBus> NextAudioBus() {
     std::unique_ptr<media::AudioBus> bus(media::AudioBus::Create(
         kTestAudioChannels,
         kTestAudioSampleRate * kTestAudioBufferDurationMs / 1000));
-    audio_source_.OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), 0,
+    audio_source_.OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), {},
                              bus.get());
     return bus;
   }
 
   ScopedTestingPlatformSupport<IOTaskRunnerTestingPlatformSupport> platform_;
-
   MockMediaStreamRegistry registry_;
-
   bool has_video_;
-
   bool has_audio_;
-
-  // The Class under test. Needs to be scoped_ptr to force its destruction.
   Persistent<MediaRecorderHandler> media_recorder_handler_;
-
-  // For generating test AudioBuses
   media::SineWaveAudioSource audio_source_;
-
   MockMediaStreamVideoSource* video_source_ = nullptr;
 };
 
@@ -223,8 +223,15 @@ class MediaRecorderHandlerTest : public TestWithParam<MediaRecorderTestParams>,
       : MediaRecorderHandlerFixture(GetParam().has_video,
                                     GetParam().has_audio) {}
 
-  MediaRecorderHandlerTest(const MediaRecorderHandlerTest&) = delete;
-  MediaRecorderHandlerTest& operator=(const MediaRecorderHandlerTest&) = delete;
+  bool IsCodecSupported() {
+#if !BUILDFLAG(RTC_USE_H264)
+    // Test requires OpenH264 encoder. It can't use the VEA encoder.
+    if (std::string(GetParam().codecs) == "avc1") {
+      return false;
+    }
+#endif
+    return true;
+  }
 
  private:
   // Can't run the external OpenH264 encoder in the unit test.
@@ -234,15 +241,8 @@ class MediaRecorderHandlerTest : public TestWithParam<MediaRecorderTestParams>,
   base::ScopedTestFeatureOverride disable_external_openh264_{
       base::kFeatureExternalOpenH264Encoder, /*enabled=*/false};
 
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_mac_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac,
-      GetParam().enable_platform_sw_encoder};
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_win_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin,
-      GetParam().enable_platform_sw_encoder};
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_web_codecs_win_{
-      base::kFeaturePlatformSWH264EncoderWebCodecsWin,
-      GetParam().enable_platform_sw_encoder};
+  base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
+      base::kFeaturePlatformAacDecoderInGpu, true};
 };
 
 // Checks that canSupportMimeType() works as expected, by sending supported
@@ -268,7 +268,8 @@ TEST_P(MediaRecorderHandlerTest, CanSupportMimeType) {
   EXPECT_TRUE(media_recorder_handler_->CanSupportMimeType(
       mime_type_video, example_good_codecs_3));
   const String example_good_codecs_4("H264");
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
   EXPECT_TRUE(media_recorder_handler_->CanSupportMimeType(
       mime_type_video, example_good_codecs_4));
@@ -351,8 +352,9 @@ TEST_P(MediaRecorderHandlerTest, InitializeStartStop) {
 // contained encoded data in writeData().
 TEST_P(MediaRecorderHandlerTest, EncodeVideoFrames) {
   // Video-only test.
-  if (GetParam().has_audio)
+  if (GetParam().has_audio || !IsCodecSupported()) {
     return;
+  }
 
   AddTracks();
 
@@ -429,10 +431,6 @@ TEST_P(MediaRecorderHandlerTest, EncodeVideoFrames) {
   media_recorder_handler_->Stop();
 }
 
-INSTANTIATE_TEST_SUITE_P(All,
-                         MediaRecorderHandlerTest,
-                         ValuesIn(kMediaRecorderTestParams));
-
 // Sends 2 frames and expect them as WebM (or MKV) contained encoded audio data
 // in writeData().
 TEST_P(MediaRecorderHandlerTest, OpusEncodeAudioFrames) {
@@ -500,8 +498,9 @@ TEST_P(MediaRecorderHandlerTest, OpusEncodeAudioFrames) {
 // Starts up recording and forces a WebmMuxer's libwebm error.
 TEST_P(MediaRecorderHandlerTest, WebmMuxerErrorWhileEncoding) {
   // Video-only test: Audio would be very similar.
-  if (GetParam().has_audio)
+  if (GetParam().has_audio || !IsCodecSupported()) {
     return;
+  }
 
   AddTracks();
 
@@ -599,8 +598,8 @@ TEST_P(MediaRecorderHandlerTest, PauseRecorderForVideo) {
   media_recorder_handler_->Pause();
 
   EXPECT_CALL(*recorder, WriteData).Times(AtLeast(1));
-  media::WebmMuxer::VideoParameters params(
-      gfx::Size(), 1, media::VideoCodec::kVP9, gfx::ColorSpace());
+  media::Muxer::VideoParameters params(gfx::Size(), 1, media::VideoCodec::kVP9,
+                                       gfx::ColorSpace());
   OnEncodedVideoForTesting(params, "vp9 frame", "", base::TimeTicks::Now(),
                            true);
 
@@ -633,8 +632,8 @@ TEST_P(MediaRecorderHandlerTest, StartStopStartRecorderForVideo) {
   EXPECT_TRUE(media_recorder_handler_->Start(0));
 
   EXPECT_CALL(*recorder, WriteData).Times(AtLeast(1));
-  media::WebmMuxer::VideoParameters params(
-      gfx::Size(), 1, media::VideoCodec::kVP9, gfx::ColorSpace());
+  media::Muxer::VideoParameters params(gfx::Size(), 1, media::VideoCodec::kVP9,
+                                       gfx::ColorSpace());
   OnEncodedVideoForTesting(params, "vp9 frame", "", base::TimeTicks::Now(),
                            true);
 
@@ -644,7 +643,95 @@ TEST_P(MediaRecorderHandlerTest, StartStopStartRecorderForVideo) {
   media_recorder_handler_ = nullptr;
 }
 
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+INSTANTIATE_TEST_SUITE_P(All,
+                         MediaRecorderHandlerTest,
+                         ValuesIn(kMediaRecorderTestParams));
+
+class MediaRecorderHandlerAudioVideoTest : public testing::Test,
+                                           public MediaRecorderHandlerFixture {
+ public:
+  MediaRecorderHandlerAudioVideoTest()
+      : MediaRecorderHandlerFixture(/*has_video=*/true,
+                                    /*has_audio=*/true) {}
+
+  void FeedVideo() {
+    media::Muxer::VideoParameters video_params(
+        gfx::Size(), 1, media::VideoCodec::kVP9, gfx::ColorSpace());
+    OnEncodedVideoForTesting(video_params, "video", "alpha", timestamp_, true);
+    timestamp_ += base::Milliseconds(10);
+  }
+
+  void FeedAudio() {
+    media::AudioParameters audio_params(
+        media::AudioParameters::AUDIO_PCM_LINEAR,
+        media::ChannelLayoutConfig::Stereo(), kTestAudioSampleRate,
+        kTestAudioSampleRate * kTestAudioBufferDurationMs / 1000);
+    OnEncodedAudioForTesting(audio_params, "audio", timestamp_);
+    timestamp_ += base::Milliseconds(10);
+  }
+
+  base::TimeTicks timestamp_ = base::TimeTicks::Now();
+};
+
+TEST_F(MediaRecorderHandlerAudioVideoTest, EmitsCachedAudioDataOnStop) {
+  AddTracks();
+  V8TestingScope scope;
+  auto* recorder = MakeGarbageCollected<MockMediaRecorder>(scope);
+  media_recorder_handler_->Initialize(
+      recorder, registry_.test_stream(), "video/webm", "vp9,opus", 0, 0,
+      AudioTrackRecorder::BitrateMode::kVariable);
+  media_recorder_handler_->Start(std::numeric_limits<int>::max());
+
+  // Feed some encoded data into the recorder. Expect that data cached by the
+  // muxer is emitted on the call to Stop.
+  FeedVideo();
+  FeedAudio();
+  EXPECT_CALL(*recorder, WriteData).Times(AtLeast(1));
+  media_recorder_handler_->Stop();
+  media_recorder_handler_ = nullptr;
+}
+
+TEST_F(MediaRecorderHandlerAudioVideoTest, EmitsCachedVideoDataOnStop) {
+  AddTracks();
+  V8TestingScope scope;
+  auto* recorder = MakeGarbageCollected<MockMediaRecorder>(scope);
+  media_recorder_handler_->Initialize(
+      recorder, registry_.test_stream(), "video/webm", "vp9,opus", 0, 0,
+      AudioTrackRecorder::BitrateMode::kVariable);
+  media_recorder_handler_->Start(std::numeric_limits<int>::max());
+
+  // Feed some encoded data into the recorder. Expect that data cached by the
+  // muxer is emitted on the call to Stop.
+  FeedAudio();
+  FeedVideo();
+  EXPECT_CALL(*recorder, WriteData).Times(AtLeast(1));
+  media_recorder_handler_->Stop();
+  media_recorder_handler_ = nullptr;
+}
+
+TEST_F(MediaRecorderHandlerAudioVideoTest,
+       EmitsCachedAudioDataAfterVideoTrackEnded) {
+  AddTracks();
+  V8TestingScope scope;
+  auto* recorder = MakeGarbageCollected<MockMediaRecorder>(scope);
+  media_recorder_handler_->Initialize(
+      recorder, registry_.test_stream(), "video/webm", "vp9,opus", 0, 0,
+      AudioTrackRecorder::BitrateMode::kVariable);
+  media_recorder_handler_->Start(std::numeric_limits<int>::max());
+
+  // Feed some encoded data into the recorder. Expect that data cached by the
+  // muxer is emitted on the call to Stop.
+  FeedVideo();
+  registry_.test_stream()->VideoComponents()[0]->GetPlatformTrack()->Stop();
+  FeedAudio();
+  FeedAudio();
+  EXPECT_CALL(*recorder, WriteData).Times(AtLeast(1));
+  media_recorder_handler_->Stop();
+  media_recorder_handler_ = nullptr;
+}
+
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
 struct H264ProfileTestParams {
@@ -688,16 +775,6 @@ class MediaRecorderHandlerH264ProfileTest
   // external encoder into the test.
   base::ScopedTestFeatureOverride disable_external_openh264_{
       base::kFeatureExternalOpenH264Encoder, /*enabled=*/false};
-
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_mac_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac,
-      GetParam().enable_platform_sw_encoder};
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_win_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin,
-      GetParam().enable_platform_sw_encoder};
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_web_codecs_win_{
-      base::kFeaturePlatformSWH264EncoderWebCodecsWin,
-      GetParam().enable_platform_sw_encoder};
 };
 
 TEST_P(MediaRecorderHandlerH264ProfileTest, ActualMimeType) {
@@ -736,7 +813,8 @@ static const MediaRecorderPassthroughTestParams
     kMediaRecorderPassthroughTestParams[] = {
         {true, "video/webm;codecs=vp8", media::VideoCodec::kVP8},
         {true, "video/webm;codecs=vp9", media::VideoCodec::kVP9},
-#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
     defined(USE_SYSTEM_PROPRIETARY_CODECS)
         {false, "video/x-matroska;codecs=avc1", media::VideoCodec::kH264},
         {true, "video/x-matroska;codecs=avc1", media::VideoCodec::kH264},
@@ -751,8 +829,7 @@ class MediaRecorderHandlerPassthroughTest
     registry_.Init();
     video_source_ = registry_.AddVideoTrack(TestVideoTrackId());
     ON_CALL(*video_source_, SupportsEncodedOutput).WillByDefault(Return(true));
-    media_recorder_handler_ = MakeGarbageCollected<MediaRecorderHandler>(
-        scheduler::GetSingleThreadTaskRunnerForTesting());
+    media_recorder_handler_ = MakeGarbageCollected<MediaRecorderHandler>();
     EXPECT_FALSE(media_recorder_handler_->recording_);
   }
 
@@ -785,16 +862,6 @@ TEST_P(MediaRecorderHandlerPassthroughTest, PassesThrough) {
   // external encoder into the test.
   base::ScopedTestFeatureOverride disable_external_openh264{
       base::kFeatureExternalOpenH264Encoder, /*enabled=*/false};
-
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_mac{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac,
-      GetParam().enable_platform_sw_encoder};
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_win{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin,
-      GetParam().enable_platform_sw_encoder};
-  base::ScopedTestFeatureOverride enable_platform_sw_encoder_web_codecs_win{
-      base::kFeaturePlatformSWH264EncoderWebCodecsWin,
-      GetParam().enable_platform_sw_encoder};
 
   // Setup the mock video source to allow for passthrough recording.
   EXPECT_CALL(*video_source_, OnEncodedSinkEnabled);

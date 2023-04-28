@@ -17,14 +17,13 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scroll_paint_property_node.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace blink {
 
 using CompositorStickyConstraint = cc::StickyPositionConstraint;
-class AffineTransform;
 
 // A transform (e.g., created by css "transform" or "perspective", or for
 // internal positioning such as paint offset or scrolling) along with a
@@ -47,6 +46,13 @@ class PLATFORM_EXPORT TransformPaintPropertyNodeOrAlias
   bool Changed(PaintPropertyChangeType change,
                const TransformPaintPropertyNodeOrAlias& relative_to_node) const;
 
+  void AddChanged(PaintPropertyChangeType changed) {
+    DCHECK_NE(PaintPropertyChangeType::kUnchanged, changed);
+    GeometryMapperTransformCache::ClearCache();
+    GeometryMapperClipCache::ClearCache();
+    PaintPropertyNode::AddChanged(changed);
+  }
+
  protected:
   using PaintPropertyNode::PaintPropertyNode;
 };
@@ -57,12 +63,6 @@ class TransformPaintPropertyNodeAlias
   static scoped_refptr<TransformPaintPropertyNodeAlias> Create(
       const TransformPaintPropertyNodeOrAlias& parent) {
     return base::AdoptRef(new TransformPaintPropertyNodeAlias(parent));
-  }
-
-  PaintPropertyChangeType SetParent(
-      const TransformPaintPropertyNodeOrAlias& parent) {
-    DCHECK(IsParentAlias());
-    return PaintPropertyNode::SetParent(parent);
   }
 
  private:
@@ -85,74 +85,9 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     kVisible,
   };
 
-  // Stores a transform and origin with an optimization for the identity and
-  // 2d translation cases that avoids allocating a full matrix and origin.
-  class PLATFORM_EXPORT TransformAndOrigin {
-    DISALLOW_NEW();
-
-   public:
-    TransformAndOrigin() = default;
-    explicit TransformAndOrigin(const AffineTransform&);
-    // These constructors are not explicit so that we can use gfx::Vector2dF or
-    // TransformationMatrix directly in the initialization list of State.
-    // NOLINTNEXTLINE(google-explicit-constructor)
-    TransformAndOrigin(const gfx::Vector2dF& translation_2d)
-        : translation_2d_(translation_2d) {}
-    // This should be used for arbitrary matrix only. If the caller knows that
-    // the transform is identity or a 2d translation, the translation_2d version
-    // should be used instead.
-    // NOLINTNEXTLINE(google-explicit-constructor)
-    TransformAndOrigin(const TransformationMatrix& matrix,
-                       const gfx::Point3F& origin = gfx::Point3F()) {
-      matrix_and_origin_ = std::make_unique<MatrixAndOrigin>(matrix, origin);
-    }
-
-    bool IsIdentityOr2DTranslation() const { return !matrix_and_origin_; }
-    bool IsIdentity() const {
-      return !matrix_and_origin_ && translation_2d_.IsZero();
-    }
-    const gfx::Vector2dF& Translation2D() const {
-      DCHECK(IsIdentityOr2DTranslation());
-      return translation_2d_;
-    }
-
-    const TransformationMatrix& Matrix() const {
-      DCHECK(matrix_and_origin_);
-      return matrix_and_origin_->matrix;
-    }
-    TransformationMatrix SlowMatrix() const;
-
-    gfx::Point3F Origin() const {
-      return matrix_and_origin_ ? matrix_and_origin_->origin : gfx::Point3F();
-    }
-    bool TransformEquals(const TransformAndOrigin& other) const {
-      return translation_2d_ == other.translation_2d_ &&
-             ((!matrix_and_origin_ && !other.matrix_and_origin_) ||
-              (matrix_and_origin_ && other.matrix_and_origin_ &&
-               matrix_and_origin_->matrix == other.matrix_and_origin_->matrix));
-    }
-
-    bool ChangePreserves2dAxisAlignment(const TransformAndOrigin& other) const {
-      if (IsIdentityOr2DTranslation() && other.IsIdentityOr2DTranslation())
-        return true;
-      if (IsIdentityOr2DTranslation())
-        return other.Matrix().Preserves2dAxisAlignment();
-      if (other.IsIdentityOr2DTranslation())
-        return Matrix().Preserves2dAxisAlignment();
-      // TODO(crbug.com/960481): Consider more rare corner cases.
-      return (Matrix().Inverse() * other.Matrix()).Preserves2dAxisAlignment();
-    }
-
-   private:
-    struct MatrixAndOrigin {
-      MatrixAndOrigin(const TransformationMatrix& m, const gfx::Point3F& o)
-          : matrix(m), origin(o) {}
-      TransformationMatrix matrix;
-      gfx::Point3F origin;
-      USING_FAST_MALLOC(MatrixAndOrigin);
-    };
-    gfx::Vector2dF translation_2d_;
-    std::unique_ptr<MatrixAndOrigin> matrix_and_origin_;
+  struct PLATFORM_EXPORT TransformAndOrigin {
+    gfx::Transform matrix;
+    gfx::Point3F origin;
   };
 
   struct AnimationState {
@@ -161,39 +96,9 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     STACK_ALLOCATED();
   };
 
-  // For the purpose of computing the translation offset caused by CSS
-  // `anchor-scroll`, this structure stores the range of the scroll containers
-  // (both ends inclusive) whose scroll offsets are accumulated.
-  struct AnchorScrollContainersData {
-    USING_FAST_MALLOC(AnchorScrollContainersData);
-
-   public:
-    scoped_refptr<const TransformPaintPropertyNode> inner_most_scroll_container;
-    scoped_refptr<const TransformPaintPropertyNode> outer_most_scroll_container;
-    gfx::Vector2d accumulated_scroll_origin;
-
-    AnchorScrollContainersData(scoped_refptr<const TransformPaintPropertyNode>
-                                   inner_most_scroll_container,
-                               scoped_refptr<const TransformPaintPropertyNode>
-                                   outer_most_scroll_container,
-                               gfx::Vector2d accumulated_scroll_origin)
-        : inner_most_scroll_container(std::move(inner_most_scroll_container)),
-          outer_most_scroll_container(std::move(outer_most_scroll_container)),
-          accumulated_scroll_origin(accumulated_scroll_origin) {}
-
-    bool operator==(const AnchorScrollContainersData& other) const {
-      return inner_most_scroll_container == other.inner_most_scroll_container &&
-             outer_most_scroll_container == other.outer_most_scroll_container &&
-             accumulated_scroll_origin == other.accumulated_scroll_origin;
-    }
-  };
-
   // To make it less verbose and more readable to construct and update a node,
   // a struct with default values is used to represent the state.
   struct PLATFORM_EXPORT State {
-    DISALLOW_NEW();
-
-   public:
     TransformAndOrigin transform_and_origin;
     scoped_refptr<const ScrollPaintPropertyNode> scroll;
     scoped_refptr<const TransformPaintPropertyNode>
@@ -218,7 +123,8 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     CompositingReasons direct_compositing_reasons = CompositingReason::kNone;
     CompositorElementId compositor_element_id;
     std::unique_ptr<CompositorStickyConstraint> sticky_constraint;
-    std::unique_ptr<AnchorScrollContainersData> anchor_scroll_containers_data;
+    std::unique_ptr<cc::AnchorScrollContainersData>
+        anchor_scroll_containers_data;
     // If a visible frame is rooted at this node, this represents the element
     // ID of the containing document.
     CompositorElementId visible_frame_element_id;
@@ -267,33 +173,30 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     return std::max(parent_changed, state_changed);
   }
 
-  bool IsIdentityOr2DTranslation() const {
-    return state_.transform_and_origin.IsIdentityOr2DTranslation();
+  bool IsIdentityOr2dTranslation() const {
+    return state_.transform_and_origin.matrix.IsIdentityOr2dTranslation();
   }
-  bool IsIdentity() const { return state_.transform_and_origin.IsIdentity(); }
-  // Only available when IsIdentityOr2DTranslation() is true.
-  const gfx::Vector2dF& Translation2D() const {
-    return state_.transform_and_origin.Translation2D();
+  bool IsIdentity() const {
+    return state_.transform_and_origin.matrix.IsIdentity();
   }
-  // Only available when IsIdentityOr2DTranslation() is false.
-  const TransformationMatrix& Matrix() const {
-    return state_.transform_and_origin.Matrix();
+  // Only available when IsIdentityOr2dTranslation() is true.
+  gfx::Vector2dF Get2dTranslation() const {
+    DCHECK(IsIdentityOr2dTranslation());
+    return state_.transform_and_origin.matrix.To2dTranslation();
+  }
+  const gfx::Transform& Matrix() const {
+    return state_.transform_and_origin.matrix;
   }
 
-  TransformationMatrix MatrixWithOriginApplied() const {
-    TransformationMatrix result = Matrix();
-    result.ApplyTransformOrigin(Origin());
+  gfx::Transform MatrixWithOriginApplied() const {
+    gfx::Transform result = Matrix();
+    result.ApplyTransformOrigin(Origin().x(), Origin().y(), Origin().z());
     return result;
   }
 
-  // The slow version always return meaningful TransformationMatrix regardless
-  // of IsIdentityOr2DTranslation(). Should be used only in contexts that are
-  // not performance sensitive.
-  TransformationMatrix SlowMatrix() const {
-    return state_.transform_and_origin.SlowMatrix();
+  const gfx::Point3F& Origin() const {
+    return state_.transform_and_origin.origin;
   }
-
-  gfx::Point3F Origin() const { return state_.transform_and_origin.Origin(); }
 
   PaintPropertyChangeType DirectlyUpdateTransformAndOrigin(
       TransformAndOrigin&& transform_and_origin,
@@ -326,7 +229,7 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     return state_.sticky_constraint.get();
   }
 
-  const AnchorScrollContainersData* GetAnchorScrollContainersData() const {
+  const cc::AnchorScrollContainersData* GetAnchorScrollContainersData() const {
     return state_.anchor_scroll_containers_data.get();
   }
 
@@ -490,25 +393,11 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     if (state_.scroll) {
       // If there is an associated scroll node, this can only be a 2d
       // translation for scroll offset.
-      DCHECK(IsIdentityOr2DTranslation());
+      DCHECK(IsIdentityOr2dTranslation());
       // The scroll compositor element id should be stored on the scroll node.
       DCHECK(!state_.compositor_element_id);
     }
-    DCHECK(!HasActiveTransformAnimation() || !IsIdentityOr2DTranslation());
 #endif
-  }
-
-  void AddChanged(PaintPropertyChangeType changed) {
-    // TODO(crbug.com/814815): This is a workaround of the bug. When the bug is
-    // fixed, change the following condition to
-    //   DCHECK(!transform_cache_ || !transform_cache_->IsValid());
-    DCHECK_NE(PaintPropertyChangeType::kUnchanged, changed);
-    if (transform_cache_ && transform_cache_->IsValid()) {
-      DLOG(WARNING) << "Transform tree changed without invalidating the cache.";
-      GeometryMapperTransformCache::ClearCache();
-      GeometryMapperClipCache::ClearCache();
-    }
-    TransformPaintPropertyNodeOrAlias::AddChanged(changed);
   }
 
   // For access to GetTransformCache() and SetCachedTransform.
@@ -516,6 +405,7 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
   friend class GeometryMapperTest;
   friend class GeometryMapperTransformCache;
   friend class GeometryMapperTransformCacheTest;
+  friend class PaintPropertyTreeBuilderTest;
 
   const GeometryMapperTransformCache& GetTransformCache() const {
     if (!transform_cache_)

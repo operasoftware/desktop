@@ -13,7 +13,6 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/trace_event.h"
@@ -68,7 +67,7 @@ bool JingleSocketOptionToP2PSocketOption(rtc::Socket::Option option,
   return true;
 }
 
-const size_t kMaximumInFlightBytes = 64 * 1024;  // 64 KB
+const size_t kDefaultMaximumInFlightBytes = 64 * 1024;  // 64 KB
 
 // IpcPacketSocket implements rtc::AsyncPacketSocket interface
 // using P2PSocketClient that works over IPC-channel. It must be used
@@ -126,7 +125,7 @@ class IpcPacketSocket : public rtc::AsyncPacketSocket,
       const network::P2PSendPacketMetrics& send_metrics) override;
   void OnError() override;
   void OnDataReceived(const net::IPEndPoint& address,
-                      const Vector<int8_t>& data,
+                      base::span<const uint8_t> data,
                       const base::TimeTicks& timestamp) override;
 
  private:
@@ -180,6 +179,9 @@ class IpcPacketSocket : public rtc::AsyncPacketSocket,
   // quickly restricts the client to a sustainable steady-state rate.
   size_t send_bytes_available_;
 
+  // The current limit for maximum bytes in flight.
+  size_t max_in_flight_bytes_;
+
   // Used to detect when browser doesn't send SendComplete message for some
   // packets. In normal case, the first packet should be the one that we're
   // going to receive the next completion signal.
@@ -197,10 +199,6 @@ class IpcPacketSocket : public rtc::AsyncPacketSocket,
   // send_bytes_available_.
   size_t max_discard_bytes_sequence_;
   size_t current_discard_bytes_sequence_;
-
-  // Track the total number of packets and the number of packets discarded.
-  int packets_discarded_;
-  int total_packets_;
 };
 
 // Simple wrapper around P2PAsyncAddressResolver. The main purpose of this
@@ -227,8 +225,8 @@ class AsyncAddressResolverImpl : public rtc::AsyncResolverInterface {
 
   THREAD_CHECKER(thread_checker_);
 
-  rtc::SocketAddress addr_;                // Address to resolve.
-  std::vector<rtc::IPAddress> addresses_;  // Resolved addresses.
+  rtc::SocketAddress addr_;           // Address to resolve.
+  Vector<rtc::IPAddress> addresses_;  // Resolved addresses.
 
   base::WeakPtrFactory<AsyncAddressResolverImpl> weak_factory_{this};
 };
@@ -236,14 +234,13 @@ class AsyncAddressResolverImpl : public rtc::AsyncResolverInterface {
 IpcPacketSocket::IpcPacketSocket()
     : type_(network::P2P_SOCKET_UDP),
       state_(kIsUninitialized),
-      send_bytes_available_(kMaximumInFlightBytes),
+      send_bytes_available_(kDefaultMaximumInFlightBytes),
+      max_in_flight_bytes_(kDefaultMaximumInFlightBytes),
       writable_signal_expected_(false),
       error_(0),
       max_discard_bytes_sequence_(0),
-      current_discard_bytes_sequence_(0),
-      packets_discarded_(0),
-      total_packets_(0) {
-  static_assert(kMaximumInFlightBytes > 0, "would send at zero rate");
+      current_discard_bytes_sequence_(0) {
+  static_assert(kDefaultMaximumInFlightBytes > 0, "would send at zero rate");
   std::fill_n(options_, static_cast<int>(network::P2P_SOCKET_OPT_MAX),
               kDefaultNonSetOptionValue);
 }
@@ -251,11 +248,6 @@ IpcPacketSocket::IpcPacketSocket()
 IpcPacketSocket::~IpcPacketSocket() {
   if (state_ == kIsOpening || state_ == kIsOpen || state_ == kIsError) {
     Close();
-  }
-
-  if (total_packets_ > 0) {
-    UMA_HISTOGRAM_PERCENTAGE("WebRTC.ApplicationPercentPacketsDiscarded",
-                             (packets_discarded_ * 100) / total_packets_);
   }
 }
 
@@ -268,7 +260,6 @@ void IpcPacketSocket::TraceSendThrottlingState() const {
 
 void IpcPacketSocket::IncrementDiscardCounters(size_t bytes_discarded) {
   current_discard_bytes_sequence_ += bytes_discarded;
-  packets_discarded_++;
 
   if (current_discard_bytes_sequence_ > max_discard_bytes_sequence_) {
     max_discard_bytes_sequence_ = current_discard_bytes_sequence_;
@@ -384,8 +375,6 @@ int IpcPacketSocket::SendTo(const void* data,
     return 0;
   }
 
-  total_packets_++;
-
   if (data_size > send_bytes_available_) {
     TRACE_EVENT_INSTANT1("p2p", "MaxPendingBytesWouldBlock",
                          TRACE_EVENT_SCOPE_THREAD, "id",
@@ -420,12 +409,13 @@ int IpcPacketSocket::SendTo(const void* data,
     }
   }
 
+  DCHECK_GE(send_bytes_available_, data_size);
   send_bytes_available_ -= data_size;
 
-  Vector<int8_t> data_vector;
-  data_vector.Append(reinterpret_cast<const int8_t*>(data),
-                     base::checked_cast<wtf_size_t>(data_size));
-  uint64_t packet_id = client_->Send(address_chrome, data_vector, options);
+  uint64_t packet_id = client_->Send(
+      address_chrome,
+      base::make_span(reinterpret_cast<const uint8_t*>(data), data_size),
+      options);
 
   // Ensure packet_id is not 0. It can't be the case according to
   // P2PSocketClientImpl::Send().
@@ -509,6 +499,24 @@ int IpcPacketSocket::DoSetOption(network::P2PSocketOption option, int value) {
   DCHECK_EQ(state_, kIsOpen);
 
   client_->SetOption(option, value);
+  if (option == network::P2PSocketOption::P2P_SOCKET_OPT_SNDBUF && value > 0) {
+    LOG(INFO) << "Setting new p2p socket buffer limit to " << value;
+
+    // Allow socket option to increase in-flight limit above default, but not
+    // reduce it.
+    size_t new_limit =
+        std::max(static_cast<size_t>(value), kDefaultMaximumInFlightBytes);
+    size_t in_flight_bytes = max_in_flight_bytes_ - send_bytes_available_;
+    if (in_flight_bytes > new_limit) {
+      // New limit is lower than the current number of in flight bytes - just
+      // set availability to 0 but allow the current excess to still be sent.
+      send_bytes_available_ = 0;
+    } else {
+      send_bytes_available_ = new_limit - in_flight_bytes;
+    }
+    max_in_flight_bytes_ = new_limit;
+  }
+
   return 0;
 }
 
@@ -578,9 +586,8 @@ void IpcPacketSocket::OnSendComplete(
   CHECK(send_metrics.packet_id == 0 ||
         record.packet_id == send_metrics.packet_id);
 
-  send_bytes_available_ += record.packet_size;
-
-  DCHECK_LE(send_bytes_available_, kMaximumInFlightBytes);
+  send_bytes_available_ = std::min(send_bytes_available_ + record.packet_size,
+                                   max_in_flight_bytes_);
 
   in_flight_packet_records_.pop_front();
   TraceSendThrottlingState();
@@ -609,7 +616,7 @@ void IpcPacketSocket::OnError() {
 }
 
 void IpcPacketSocket::OnDataReceived(const net::IPEndPoint& address,
-                                     const Vector<int8_t>& data,
+                                     base::span<const uint8_t> data,
                                      const base::TimeTicks& timestamp) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
@@ -628,8 +635,9 @@ void IpcPacketSocket::OnDataReceived(const net::IPEndPoint& address,
     }
   }
 
-  SignalReadPacket(this, reinterpret_cast<const char*>(&data[0]), data.size(),
-                   address_lj, timestamp.since_origin().InMicroseconds());
+  SignalReadPacket(this, reinterpret_cast<const char*>(data.data()),
+                   data.size(), address_lj,
+                   timestamp.since_origin().InMicroseconds());
 }
 
 AsyncAddressResolverImpl::AsyncAddressResolverImpl(
@@ -668,13 +676,10 @@ bool AsyncAddressResolverImpl::GetResolvedAddress(
     rtc::SocketAddress* addr) const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (addresses_.empty())
-    return false;
-
-  for (size_t i = 0; i < addresses_.size(); ++i) {
-    if (family == addresses_[i].family()) {
+  for (auto& address : addresses_) {
+    if (family == address.family()) {
       *addr = addr_;
-      addr->SetResolvedIP(addresses_[i]);
+      addr->SetResolvedIP(address);
       return true;
     }
   }

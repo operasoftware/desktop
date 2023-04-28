@@ -28,7 +28,7 @@ runTests([
       }
       // Opera creates additional frames for shared start page and address bar
       // (BABE) so frame ids are different than in clean Chromium.      
-      chrome.test.assertEq(mparchEnabled ? 8 : 7, details.frameId);
+      chrome.test.assertEq(8, details.frameId);
       chrome.test.assertEq(6, details.parentFrameId);
       chrome.test.assertEq('sub_frame', details.type);
       chrome.test.assertEq('fenced_frame', details.frameType);

@@ -73,6 +73,7 @@
 #define SYNCOBJ_TIMELINE_TESTS_STR "SYNCOBJ TIMELINE Tests"
 #define SECURITY_TESTS_STR "Security Tests"
 #define HOTUNPLUG_TESTS_STR "Hotunplug Tests"
+#define CP_DMA_TESTS_STR "CP DMA Tests"
 
 /**
  *  Open handles for amdgpu devices
@@ -163,6 +164,12 @@ static CU_SuiteInfo suites[] = {
 		.pCleanupFunc = suite_hotunplug_tests_clean,
 		.pTests = hotunplug_tests,
 	},
+	{
+		.pName = CP_DMA_TESTS_STR,
+		.pInitFunc = suite_cp_dma_tests_init,
+		.pCleanupFunc = suite_cp_dma_tests_clean,
+		.pTests = cp_dma_tests,
+	},
 
 	CU_SUITE_INFO_NULL,
 };
@@ -231,6 +238,10 @@ static Suites_Active_Status suites_active_stat[] = {
 		{
 			.pName = HOTUNPLUG_TESTS_STR,
 			.pActive = suite_hotunplug_tests_enable,
+		},
+		{
+			.pName = CP_DMA_TESTS_STR,
+			.pActive = suite_cp_dma_tests_enable,
 		},
 };
 
@@ -310,6 +321,10 @@ static int amdgpu_open_devices(int open_render_node)
 	int drm_count;
 	int fd;
 	drmVersionPtr version;
+
+	for (i = 0; i < MAX_CARDS_SUPPORTED; i++) {
+		drm_amdgpu[i] = -1;
+	}
 
 	drm_count = drmGetDevices2(0, devices, MAX_CARDS_SUPPORTED);
 
@@ -533,6 +548,14 @@ static void amdgpu_disable_suites()
 		if (amdgpu_set_test_active(DEADLOCK_TESTS_STR,
 				"gfx ring slow bad draw test (set amdgpu.lockup_timeout=50)", CU_FALSE))
 			fprintf(stderr, "test deactivation failed - %s\n", CU_get_error_msg());
+
+	if (amdgpu_set_test_active(DEADLOCK_TESTS_STR,
+			"sdma ring corrupted header test (set amdgpu.lockup_timeout=50)", CU_FALSE))
+		fprintf(stderr, "test deactivation failed - %s\n", CU_get_error_msg());
+
+	if (amdgpu_set_test_active(DEADLOCK_TESTS_STR,
+			"sdma ring slow linear copy test (set amdgpu.lockup_timeout=50)", CU_FALSE))
+		fprintf(stderr, "test deactivation failed - %s\n", CU_get_error_msg());
 
 	if (amdgpu_set_test_active(BASIC_TESTS_STR, "bo eviction Test", CU_FALSE))
 		fprintf(stderr, "test deactivation failed - %s\n", CU_get_error_msg());

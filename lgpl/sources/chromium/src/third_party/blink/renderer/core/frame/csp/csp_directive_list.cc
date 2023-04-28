@@ -102,6 +102,7 @@ CSPDirectiveName EffectiveDirectiveForInlineCheck(
     // "navigation":
     // 1. Return script-src-elem. [spec text]
     case ContentSecurityPolicy::InlineType::kScript:
+    case ContentSecurityPolicy::InlineType::kScriptSpeculationRules:
     case ContentSecurityPolicy::InlineType::kNavigation:
       return CSPDirectiveName::ScriptSrcElem;
 
@@ -271,8 +272,7 @@ bool CheckWasmEval(const network::mojom::blink::ContentSecurityPolicy& csp,
       OperativeDirective(csp, CSPDirectiveName::ScriptSrc).source_list;
   return !directive || directive->allow_eval ||
          (SupportsWasmEval(csp, policy) && directive->allow_wasm_eval) ||
-         (RuntimeEnabledFeatures::WebAssemblyCSPEnabled() &&
-          directive->allow_wasm_unsafe_eval);
+         directive->allow_wasm_unsafe_eval;
 }
 
 bool CheckHash(const network::mojom::blink::CSPSourceList* directive,
@@ -295,6 +295,7 @@ bool CheckUnsafeHashesAllowed(
       return CheckUnsafeHashesAllowed(directive);
 
     case ContentSecurityPolicy::InlineType::kScript:
+    case ContentSecurityPolicy::InlineType::kScriptSpeculationRules:
     case ContentSecurityPolicy::InlineType::kStyle:
       return true;
   }
@@ -430,8 +431,10 @@ bool CheckInlineAndReportViolation(
     const String& hash_value,
     CSPDirectiveName effective_type) {
   if (!directive.source_list ||
-      CSPSourceListAllowAllInline(directive.type, *directive.source_list))
+      CSPSourceListAllowAllInline(directive.type, inline_type,
+                                  *directive.source_list)) {
     return true;
+  }
 
   bool is_script = ContentSecurityPolicy::IsScriptInlineType(inline_type);
 
@@ -504,11 +507,10 @@ bool CheckSourceAndReportViolation(
     }
   }
 
-  // We should never have a violation against `child-src` or `default-src`
+  // We should never have a violation against `child-src`
   // directly; the effective directive should always be one of the explicit
-  // fetch directives.
+  // fetch directives, or default-src in the case of resource hints.
   DCHECK_NE(CSPDirectiveName::ChildSrc, effective_type);
-  DCHECK_NE(CSPDirectiveName::DefaultSrc, effective_type);
 
   String prefix = "Refused to ";
   switch (effective_type) {
@@ -517,6 +519,11 @@ bool CheckSourceAndReportViolation(
       break;
     case CSPDirectiveName::ConnectSrc:
       prefix = prefix + "connect to '";
+      break;
+    case CSPDirectiveName::DefaultSrc:
+      // This would occur if we try to fetch content without an explicit
+      // destination - i.e. resource hints (prefetch, preconnect).
+      prefix = prefix + "fetch content from '";
       break;
     case CSPDirectiveName::FontSrc:
       prefix = prefix + "load the font '";
@@ -536,9 +543,6 @@ bool CheckSourceAndReportViolation(
     case CSPDirectiveName::ObjectSrc:
       prefix = prefix + "load plugin data from '";
       break;
-    case CSPDirectiveName::PrefetchSrc:
-      prefix = prefix + "prefetch content from '";
-      break;
     case CSPDirectiveName::ScriptSrc:
     case CSPDirectiveName::ScriptSrcAttr:
     case CSPDirectiveName::ScriptSrcElem:
@@ -554,7 +558,6 @@ bool CheckSourceAndReportViolation(
       break;
     case CSPDirectiveName::BlockAllMixedContent:
     case CSPDirectiveName::ChildSrc:
-    case CSPDirectiveName::DefaultSrc:
     case CSPDirectiveName::FencedFrameSrc:
     case CSPDirectiveName::FrameAncestors:
     case CSPDirectiveName::FrameSrc:
@@ -657,7 +660,9 @@ bool CSPDirectiveListAllowInline(
 
   auto* html_script_element = DynamicTo<HTMLScriptElement>(element);
   if (html_script_element &&
-      inline_type == ContentSecurityPolicy::InlineType::kScript &&
+      (inline_type == ContentSecurityPolicy::InlineType::kScript ||
+       inline_type ==
+           ContentSecurityPolicy::InlineType::kScriptSpeculationRules) &&
       !html_script_element->Loader()->IsParserInserted() &&
       CSPDirectiveListAllowDynamic(csp, type)) {
     return true;
@@ -671,6 +676,7 @@ bool CSPDirectiveListAllowInline(
         break;
 
       case ContentSecurityPolicy::InlineType::kScript:
+      case ContentSecurityPolicy::InlineType::kScriptSpeculationRules:
       case ContentSecurityPolicy::InlineType::kStyleAttribute:
       case ContentSecurityPolicy::InlineType::kStyle:
         hash_value = GetSha256String(content);
@@ -681,6 +687,10 @@ bool CSPDirectiveListAllowInline(
     switch (inline_type) {
       case ContentSecurityPolicy::InlineType::kNavigation:
         message = "run the JavaScript URL";
+        break;
+
+      case ContentSecurityPolicy::InlineType::kScriptSpeculationRules:
+        message = "apply inline speculation rules";
         break;
 
       case ContentSecurityPolicy::InlineType::kScriptAttribute:
@@ -707,7 +717,8 @@ bool CSPDirectiveListAllowInline(
   }
 
   return !directive.source_list ||
-         CSPSourceListAllowAllInline(directive.type, *directive.source_list);
+         CSPSourceListAllowAllInline(directive.type, inline_type,
+                                     *directive.source_list);
 }
 
 bool CSPDirectiveListShouldCheckEval(
@@ -817,14 +828,19 @@ bool CSPDirectiveListAllowFromSource(
     ParserDisposition parser_disposition) {
   DCHECK(type == CSPDirectiveName::BaseURI ||
          type == CSPDirectiveName::ConnectSrc ||
+         type == CSPDirectiveName::DefaultSrc ||
          type == CSPDirectiveName::FontSrc ||
          type == CSPDirectiveName::FormAction ||
+         // FrameSrc and ChildSrc enabled here only for the resource hint check
+         type == CSPDirectiveName::ChildSrc ||
+         type == CSPDirectiveName::FrameSrc ||
          type == CSPDirectiveName::ImgSrc ||
          type == CSPDirectiveName::ManifestSrc ||
          type == CSPDirectiveName::MediaSrc ||
          type == CSPDirectiveName::ObjectSrc ||
-         type == CSPDirectiveName::PrefetchSrc ||
+         type == CSPDirectiveName::ScriptSrc ||
          type == CSPDirectiveName::ScriptSrcElem ||
+         type == CSPDirectiveName::StyleSrc ||
          type == CSPDirectiveName::StyleSrcElem ||
          type == CSPDirectiveName::WorkerSrc);
 
@@ -956,8 +972,11 @@ bool CSPDirectiveListIsScriptRestrictionReasonable(
   // If no `script-src` enforcement occurs, or it allows any and all inline
   // script, the restriction is not reasonable.
   if (!script_src.source_list ||
-      CSPSourceListAllowAllInline(script_src.type, *script_src.source_list))
+      CSPSourceListAllowAllInline(script_src.type,
+                                  ContentSecurityPolicy::InlineType::kScript,
+                                  *script_src.source_list)) {
     return false;
+  }
 
   if (CSPSourceListIsNone(*script_src.source_list))
     return true;

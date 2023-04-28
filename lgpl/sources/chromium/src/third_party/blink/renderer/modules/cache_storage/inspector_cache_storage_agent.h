@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
 #include "third_party/blink/renderer/core/inspector/protocol/cache_storage.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/wtf/gc_plugin.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -32,7 +33,8 @@ class MODULES_EXPORT InspectorCacheStorageAgent final
   ~InspectorCacheStorageAgent() override;
   void Trace(Visitor*) const override;
 
-  void requestCacheNames(const String& security_origin,
+  void requestCacheNames(protocol::Maybe<String> maybe_security_origin,
+                         protocol::Maybe<String> maybe_storage_key,
                          std::unique_ptr<RequestCacheNamesCallback>) override;
   void requestEntries(const String& cache_id,
                       protocol::Maybe<int> skip_count,
@@ -54,6 +56,7 @@ class MODULES_EXPORT InspectorCacheStorageAgent final
  private:
   Member<InspectedFrames> frames_;
 
+  GC_PLUGIN_IGNORE("https://crbug.com/1381979")
   CachesMap caches_;
 };
 

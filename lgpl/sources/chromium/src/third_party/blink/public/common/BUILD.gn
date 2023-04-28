@@ -5,6 +5,8 @@
 import("//build/buildflag_header.gni")
 import("//build/config/compiler/compiler.gni")
 import("//build/config/features.gni")
+import("//build/config/opera_desktop.gni")
+import("//build/config/rust.gni")
 import("//testing/test.gni")
 import("//third_party/blink/public/public_features.gni")
 import("//third_party/blink/renderer/build/scripts/scripts.gni")
@@ -64,6 +66,30 @@ blink_python_runner("make_generated_permissions_policy_helper") {
   ]
 }
 
+blink_python_runner("make_runtime_feature_state_contexts_headers") {
+  script = "../../renderer/build/scripts/make_runtime_feature_state_contexts_headers.py"
+
+  inputs = scripts_for_json5_files + [
+             "../../renderer/platform/runtime_enabled_features.json5",
+             "../../renderer/build/scripts/templates/runtime_feature_state_context.h.tmpl",
+             "../../renderer/build/scripts/templates/runtime_feature_state_read_context.h.tmpl",
+           ]
+
+  outputs = [
+    "$root_gen_dir/third_party/blink/public/common/runtime_feature_state/runtime_feature_state_context.h",
+    "$root_gen_dir/third_party/blink/public/common/runtime_feature_state/runtime_feature_state_read_context.h",
+  ]
+
+  args = [
+    rebase_path("../../renderer/platform/runtime_enabled_features.json5",
+                root_build_dir),
+    "--output_dir",
+    rebase_path(
+        "$root_gen_dir/third_party/blink/public/common/runtime_feature_state/",
+        root_build_dir),
+  ]
+}
+
 # Public common API headers, mojom and libraries that can be linked and
 # referenced both by browser-side and renderer-side components.
 component("common") {
@@ -86,7 +112,7 @@ buildflag_header("buildflags") {
   header = "buildflags.h"
   flags = [
     "RTC_USE_H264=$rtc_use_h264",
-    "ENABLE_JXL_DECODER=$enable_jxl_decoder",
+    "BUILD_RUST_CRASH=$build_rust_crash",
     "OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER=$opera_feature_blink_gpu_shader_css_filter",
   ]
 }
@@ -114,11 +140,14 @@ source_set("headers") {
     "//third_party/blink/*",
   ]
 
+  if (opera_desktop) {
+    visibility += [ "//opera/desktop/chrome_imports/chrome/*" ]
+  }
+
   sources = [
     "action_after_pagehide.h",
     "associated_interfaces/associated_interface_provider.h",
     "associated_interfaces/associated_interface_registry.h",
-    "attribution_reporting/constants.h",
     "blob/blob_utils.h",
     "bluetooth/web_bluetooth_device_id.h",
     "bluetooth/web_bluetooth_device_id_mojom_traits.h",
@@ -141,6 +170,8 @@ source_set("headers") {
     "dom_storage/session_storage_namespace_id.h",
     "features.h",
     "fenced_frame/fenced_frame_utils.h",
+    "fenced_frame/redacted_fenced_frame_config.h",
+    "fenced_frame/redacted_fenced_frame_config_mojom_traits.h",
     "fetch/fetch_api_request_headers_map.h",
     "fetch/fetch_api_request_headers_mojom_traits.h",
     "forcedark/forcedark_switches.h",
@@ -148,14 +179,17 @@ source_set("headers") {
     "frame/fenced_frame_sandbox_flags.h",
     "frame/frame_ad_evidence.h",
     "frame/frame_owner_element_type.h",
+    "frame/frame_owner_element_type_mojom_traits.h",
     "frame/frame_policy.h",
     "frame/frame_visual_properties.h",
     "frame/from_ad_state.h",
     "frame/fullscreen_request_token.h",
+    "frame/history_user_activation_state.h",
     "frame/payment_request_token.h",
     "frame/transient_allow_fullscreen.h",
     "frame/user_activation_state.h",
     "frame/user_activation_update_source.h",
+    "frame/view_transition_state.h",
     "history/session_history_constants.h",
     "indexeddb/indexed_db_default_mojom_traits.h",
     "indexeddb/indexeddb_key.h",
@@ -184,6 +218,8 @@ source_set("headers") {
     "interest_group/auction_config_mojom_traits.h",
     "interest_group/interest_group.h",
     "interest_group/interest_group_mojom_traits.h",
+    "interest_group/interest_group_utils.h",
+    "interest_group/seller_capabilities.h",
     "link_to_text/link_to_text_mojom_traits.h",
     "loader/http_body_element_type.h",
     "loader/inter_process_time_ticks_converter.h",
@@ -226,8 +262,6 @@ source_set("headers") {
     "metrics/form_element_pii_type.h",
     "metrics/post_message_counter.h",
     "mime_util/mime_util.h",
-    "mobile_metrics/mobile_friendliness.h",
-    "native_io/native_io_utils.h",
     "navigation/impression.h",
     "navigation/navigation_params.h",
     "navigation/navigation_params_mojom_traits.h",
@@ -298,11 +332,13 @@ source_set("headers") {
 
   sources += get_target_outputs(":make_generated_origin_trial_feature")
   sources += get_target_outputs(":make_generated_permissions_policy_helper")
+  sources += get_target_outputs(":make_runtime_feature_state_contexts_headers")
 
   public_deps = [
     ":buildflags",
     ":make_generated_origin_trial_feature",
     ":make_generated_permissions_policy_helper",
+    ":make_runtime_feature_state_contexts_headers",
     "//base",
     "//mojo/public/cpp/bindings",
     "//services/metrics/public/cpp:metrics_cpp",
@@ -312,7 +348,6 @@ source_set("headers") {
     "//third_party/blink/public:runtime_features_for_public",
     "//third_party/blink/public/common/privacy_budget",
     "//third_party/blink/public/common/tokens:tokens_headers",
-    "//third_party/blink/public/mojom:mobile_metrics_shared_cpp_sources",
     "//third_party/blink/public/mojom:mojom_modules_headers",
     "//third_party/blink/public/mojom:mojom_platform_shared",
     "//third_party/blink/public/mojom:web_bluetooth_mojo_bindings_headers",
@@ -336,8 +371,8 @@ source_set("headers") {
     "//ui/base:base",
   ]
 
-  # iOS doesn't use and must not depend on //media
-  if (!is_ios) {
+  # Chromium without blink doesn't use and must not depend on //media
+  if (use_blink) {
     deps += [
       "//media",
       "//media/capture:capture_base",
@@ -357,10 +392,6 @@ source_set("headers") {
 
   if (is_mac) {
     sources += [ "sandbox_support/sandbox_support_mac.h" ]
-  }
-
-  if (is_win) {
-    sources += [ "dwrite_rasterizer_support/dwrite_rasterizer_support.h" ]
   }
 }
 

@@ -8,7 +8,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/ranges/algorithm.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
 #include "cc/animation/animation_host.h"
@@ -37,6 +37,7 @@
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/platform/graphics/raster_dark_mode_filter_impl.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/scheduler/public/agent_group_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/compositor_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/page_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
@@ -78,9 +79,6 @@ const gpu::SchedulingPriority kGpuStreamPriorityDefault =
 const uint32_t kGpuStreamIdDefault = 0;
 
 static const int kInvalidNextPreviousFlagsValue = -1;
-
-static const char kOOPIF[] = "OOPIF";
-static const char kRenderer[] = "Renderer";
 
 void OnDidPresentForceDrawFrame(
     mojom::blink::Widget::ForceRedrawCallback callback,
@@ -136,7 +134,7 @@ CreateSyntheticBeginFrameSource() {
   base::SingleThreadTaskRunner* compositor_impl_side_task_runner =
       Platform::Current()->CompositorThreadTaskRunner()
           ? Platform::Current()->CompositorThreadTaskRunner().get()
-          : base::ThreadTaskRunnerHandle::Get().get();
+          : base::SingleThreadTaskRunner::GetCurrentDefault().get();
   return std::make_unique<viz::BackToBackBeginFrameSource>(
       std::make_unique<viz::DelayBasedTimeSource>(
           compositor_impl_side_task_runner));
@@ -294,7 +292,7 @@ void WidgetBase::Shutdown() {
     // compositor thread.
 
     scoped_refptr<base::SingleThreadTaskRunner> cleanup_runner =
-        base::ThreadTaskRunnerHandle::Get();
+        base::SingleThreadTaskRunner::GetCurrentDefault();
     cleanup_runner->PostNonNestableTask(
         FROM_HERE, base::BindOnce(
                        [](std::unique_ptr<LayerTreeView> view,
@@ -478,7 +476,7 @@ void WidgetBase::WasShown(bool was_evicted,
   SetHidden(false);
 
   if (record_tab_switch_time_request) {
-    LayerTreeHost()->RequestPresentationTimeForNextFrame(
+    LayerTreeHost()->RequestSuccessfulPresentationTimeForNextFrame(
         tab_switch_time_recorder_.TabWasShown(
             false /* has_saved_frames */,
             record_tab_switch_time_request->event_start_time,
@@ -490,7 +488,7 @@ void WidgetBase::WasShown(bool was_evicted,
   client_->WasShown(was_evicted);
 }
 
-void WidgetBase::RequestPresentationTimeForNextFrame(
+void WidgetBase::RequestSuccessfulPresentationTimeForNextFrame(
     mojom::blink::RecordContentToVisibleTimeRequestPtr visible_time_request) {
   DCHECK(visible_time_request);
   if (is_hidden_)
@@ -498,7 +496,7 @@ void WidgetBase::RequestPresentationTimeForNextFrame(
 
   // Tab was shown while widget was already painting, eg. due to being
   // captured.
-  LayerTreeHost()->RequestPresentationTimeForNextFrame(
+  LayerTreeHost()->RequestSuccessfulPresentationTimeForNextFrame(
       tab_switch_time_recorder_.TabWasShown(
           false /* has_saved_frames */, visible_time_request->event_start_time,
           visible_time_request->destination_is_loaded,
@@ -506,7 +504,7 @@ void WidgetBase::RequestPresentationTimeForNextFrame(
           visible_time_request->show_reason_bfcache_restore));
 }
 
-void WidgetBase::CancelPresentationTimeRequest() {
+void WidgetBase::CancelSuccessfulPresentationTimeRequest() {
   if (is_hidden_)
     return;
 
@@ -528,9 +526,9 @@ void WidgetBase::OnDeferMainFrameUpdatesChanged(bool defer) {
   // LayerTreeHost::CreateThreaded() will defer main frame updates immediately
   // until it gets a LocalSurfaceId. That's before the
   // |widget_input_handler_manager_| is created, so it can be null here.
-  // TODO(schenney): To avoid ping-ponging between defer main frame states
-  // during initialization, and requiring null checks here, we should probably
-  // pass the LocalSurfaceId to the compositor while it is
+  // TODO(rendering-core): To avoid ping-ponging between defer main frame
+  // states during initialization, and requiring null checks here, we should
+  // probably pass the LocalSurfaceId to the compositor while it is
   // initialized so that it doesn't have to immediately switch into deferred
   // mode without being requested to.
   if (!widget_input_handler_manager_)
@@ -552,6 +550,10 @@ void WidgetBase::OnDeferCommitsChanged(
 
 void WidgetBase::OnPauseRenderingChanged(bool paused) {
   widget_input_handler_manager_->OnPauseRenderingChanged(paused);
+}
+
+void WidgetBase::OnCommitRequested() {
+  client_->OnCommitRequested();
 }
 
 void WidgetBase::DidBeginMainFrame() {
@@ -579,13 +581,6 @@ void WidgetBase::RequestNewLayerTreeFrameSink(
   if (url.IsEmpty())
     url = KURL("chrome://gpu/WidgetBase::RequestNewLayerTreeFrameSink");
 
-  // TODO(danakj): This may not be accurate, depending on the intent. A child
-  // local root could be in the same process as the view, so if the client is
-  // meant to designate the process type, it seems kRenderer would be the
-  // correct choice. If client is meant to designate the widget type, then
-  // kOOPIF would denote that it is not for the main frame. However, kRenderer
-  // would also be used for other widgets such as popups.
-  const char* client_name = is_embedded_ ? kOOPIF : kRenderer;
   const bool for_web_tests = WebTestMode();
   // Misconfigured bots (eg. crbug.com/780757) could run web tests on a
   // machine where gpu compositing doesn't work. Don't crash in that case.
@@ -631,8 +626,6 @@ void WidgetBase::RequestNewLayerTreeFrameSink(
   // potentially increases it for input on the other hand.)
   if (LayerTreeHost()->GetSettings().disable_frame_rate_limit)
     params->synthetic_begin_frame_source = CreateSyntheticBeginFrameSource();
-
-  params->client_name = client_name;
 
   mojo::PendingReceiver<viz::mojom::blink::CompositorFrameSink>
       compositor_frame_sink_receiver = CrossVariantMojoReceiver<
@@ -924,7 +917,7 @@ void WidgetBase::AddPresentationCallback(
   layer_tree_view_->AddPresentationCallback(frame_token, std::move(callback));
 }
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
 void WidgetBase::AddCoreAnimationErrorCodeCallback(
     uint32_t frame_token,
     base::OnceCallback<void(gfx::CALayerResult)> callback) {
@@ -1406,13 +1399,17 @@ void WidgetBase::QueueSyntheticEvent(
     std::unique_ptr<WebCoalescedInputEvent> event) {
   client_->WillQueueSyntheticEvent(*event);
 
+  // Popups, which don't have a threaded input handler, are allowed to queue up
+  // main thread gesture scroll events.
+  bool uses_input_handler = client_->FrameWidget();
+
   // TODO(acomminos): If/when we add support for gesture event attribution on
   //                  the impl thread, have the caller provide attribution.
   WebInputEventAttribution attribution;
   widget_input_handler_manager_->input_event_queue()->HandleEvent(
       std::move(event), MainThreadEventQueue::DispatchType::kNonBlocking,
       mojom::blink::InputEventResultState::kNotConsumed, attribution, nullptr,
-      HandledEventCallback());
+      HandledEventCallback(), !uses_input_handler);
 }
 
 bool WidgetBase::IsForProvisionalFrame() {

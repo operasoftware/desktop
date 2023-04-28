@@ -53,10 +53,10 @@
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "ui/gfx/delegated_ink_metadata.h"
+#include "ui/gfx/geometry/transform.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
 // To avoid conflicts with the CreateWindow macro from the Windows SDK...
@@ -117,7 +117,6 @@ struct WebWindowFeatures;
 namespace mojom {
 namespace blink {
 class TextAutosizerPageInfo;
-class WindowFeatures;
 }
 }  // namespace mojom
 
@@ -245,7 +244,6 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void Show(LocalFrame& frame,
                     LocalFrame& opener_frame,
                     NavigationPolicy navigation_policy,
-                    const mojom::blink::WindowFeatures& window_features,
                     bool consumed_user_gesture) = 0;
 
   // All the parameters should be in viewport space. That is, if an event
@@ -491,7 +489,12 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void HandleKeyboardEventOnTextField(HTMLInputElement&,
                                               KeyboardEvent&) {}
   virtual void TextFieldDataListChanged(HTMLInputElement&) {}
+
+  // Called when the selected option of a <select> control is changed as a
+  // result of user activation - see
+  // https://html.spec.whatwg.org/multipage/interaction.html#tracking-user-activation
   virtual void DidChangeSelectionInSelectControl(HTMLFormControlElement&) {}
+
   virtual void SelectFieldOptionsChanged(HTMLFormControlElement&) {}
   virtual void AjaxSucceeded(LocalFrame*) {}
   // Called when |element| is in autofilled state and the value has been changed
@@ -502,8 +505,8 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   // Input method editor related functions.
   virtual void ShowVirtualKeyboardOnElementFocus(LocalFrame&) {}
 
-  virtual TransformationMatrix GetDeviceEmulationTransform() const {
-    return TransformationMatrix();
+  virtual gfx::Transform GetDeviceEmulationTransform() const {
+    return gfx::Transform();
   }
 
   virtual void OnMouseDown(Node&) {}
@@ -567,6 +570,8 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void FormElementReset(HTMLFormElement& element) {}
 
   virtual void PasswordFieldReset(HTMLInputElement& element) {}
+
+  virtual float ZoomFactorForViewportLayout() { return 1; }
 
  protected:
   ChromeClient() = default;

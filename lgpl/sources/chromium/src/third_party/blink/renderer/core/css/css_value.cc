@@ -26,11 +26,13 @@
 
 #include "third_party/blink/renderer/core/css/css_value.h"
 
+#include "third_party/blink/renderer/core/css/css_alternate_value.h"
 #include "third_party/blink/renderer/core/css/css_axis_value.h"
 #include "third_party/blink/renderer/core/css/css_basic_shape_values.h"
 #include "third_party/blink/renderer/core/css/css_border_image_slice_value.h"
 #include "third_party/blink/renderer/core/css/css_bracketed_value_list.h"
 #include "third_party/blink/renderer/core/css/css_color.h"
+#include "third_party/blink/renderer/core/css/css_color_mix_value.h"
 #include "third_party/blink/renderer/core/css/css_content_distribution_value.h"
 #include "third_party/blink/renderer/core/css/css_counter_value.h"
 #include "third_party/blink/renderer/core/css/css_crossfade_value.h"
@@ -81,6 +83,7 @@
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/css_value_pair.h"
 #include "third_party/blink/renderer/core/css/css_variable_reference_value.h"
+#include "third_party/blink/renderer/core/css/css_view_value.h"
 #include "third_party/blink/renderer/platform/geometry/length.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 
@@ -91,7 +94,7 @@
 namespace blink {
 
 struct SameSizeAsCSSValue final : public GarbageCollected<SameSizeAsCSSValue> {
-  char bitfields[sizeof(uint16_t) + sizeof(uint8_t)];
+  char bitfields[sizeof(uint32_t)];
 };
 ASSERT_SIZE(CSSValue, SameSizeAsCSSValue);
 
@@ -120,25 +123,30 @@ CSSValue* CSSValue::Create(const Length& value, float zoom) {
 }
 
 bool CSSValue::HasFailedOrCanceledSubresources() const {
-  if (IsValueList())
+  if (IsValueList()) {
     return To<CSSValueList>(this)->HasFailedOrCanceledSubresources();
-  if (GetClassType() == kFontFaceSrcClass)
+  }
+  if (GetClassType() == kFontFaceSrcClass) {
     return To<CSSFontFaceSrcValue>(this)->HasFailedOrCanceledSubresources();
-  if (GetClassType() == kImageClass)
+  }
+  if (GetClassType() == kImageClass) {
     return To<CSSImageValue>(this)->HasFailedOrCanceledSubresources();
+  }
   if (GetClassType() == kCrossfadeClass) {
     return To<cssvalue::CSSCrossfadeValue>(this)
         ->HasFailedOrCanceledSubresources();
   }
-  if (GetClassType() == kImageSetClass)
+  if (GetClassType() == kImageSetClass) {
     return To<CSSImageSetValue>(this)->HasFailedOrCanceledSubresources();
+  }
 
   return false;
 }
 
 bool CSSValue::MayContainUrl() const {
-  if (IsValueList())
+  if (IsValueList()) {
     return To<CSSValueList>(*this).MayContainUrl();
+  }
   return IsImageValue() || IsURIValue();
 }
 
@@ -191,6 +199,8 @@ bool CSSValue::operator==(const CSSValue& other) const {
                                                                     other);
       case kColorClass:
         return CompareCSSValues<cssvalue::CSSColor>(*this, other);
+      case kColorMixClass:
+        return CompareCSSValues<cssvalue::CSSColorMixValue>(*this, other);
       case kCounterClass:
         return CompareCSSValues<cssvalue::CSSCounterValue>(*this, other);
       case kCursorImageClass:
@@ -205,6 +215,8 @@ bool CSSValue::operator==(const CSSValue& other) const {
         return CompareCSSValues<cssvalue::CSSFontStyleRangeValue>(*this, other);
       case kFontVariationClass:
         return CompareCSSValues<cssvalue::CSSFontVariationValue>(*this, other);
+      case kAlternateClass:
+        return CompareCSSValues<cssvalue::CSSAlternateValue>(*this, other);
       case kFunctionClass:
         return CompareCSSValues<CSSFunctionValue>(*this, other);
       case kLayoutFunctionClass:
@@ -269,6 +281,9 @@ bool CSSValue::operator==(const CSSValue& other) const {
         return CompareCSSValues<CSSShadowValue>(*this, other);
       case kStringClass:
         return CompareCSSValues<CSSStringValue>(*this, other);
+      case kLinearTimingFunctionClass:
+        return CompareCSSValues<cssvalue::CSSLinearTimingFunctionValue>(*this,
+                                                                        other);
       case kCubicBezierTimingFunctionClass:
         return CompareCSSValues<cssvalue::CSSCubicBezierTimingFunctionValue>(
             *this, other);
@@ -306,6 +321,8 @@ bool CSSValue::operator==(const CSSValue& other) const {
         return CompareCSSValues<CSSLightDarkValuePair>(*this, other);
       case kScrollClass:
         return CompareCSSValues<cssvalue::CSSScrollValue>(*this, other);
+      case kViewClass:
+        return CompareCSSValues<cssvalue::CSSViewValue>(*this, other);
       case kRatioClass:
         return CompareCSSValues<cssvalue::CSSRatioValue>(*this, other);
     }
@@ -335,6 +352,8 @@ String CSSValue::CssText() const {
       return To<cssvalue::CSSBorderImageSliceValue>(this)->CustomCSSText();
     case kColorClass:
       return To<cssvalue::CSSColor>(this)->CustomCSSText();
+    case kColorMixClass:
+      return To<cssvalue::CSSColorMixValue>(this)->CustomCSSText();
     case kCounterClass:
       return To<cssvalue::CSSCounterValue>(this)->CustomCSSText();
     case kCursorImageClass:
@@ -349,6 +368,8 @@ String CSSValue::CssText() const {
       return To<cssvalue::CSSFontStyleRangeValue>(this)->CustomCSSText();
     case kFontVariationClass:
       return To<cssvalue::CSSFontVariationValue>(this)->CustomCSSText();
+    case kAlternateClass:
+      return To<cssvalue::CSSAlternateValue>(this)->CustomCSSText();
     case kFunctionClass:
       return To<CSSFunctionValue>(this)->CustomCSSText();
     case kLayoutFunctionClass:
@@ -411,6 +432,8 @@ String CSSValue::CssText() const {
       return To<CSSShadowValue>(this)->CustomCSSText();
     case kStringClass:
       return To<CSSStringValue>(this)->CustomCSSText();
+    case kLinearTimingFunctionClass:
+      return To<cssvalue::CSSLinearTimingFunctionValue>(this)->CustomCSSText();
     case kCubicBezierTimingFunctionClass:
       return To<cssvalue::CSSCubicBezierTimingFunctionValue>(this)
           ->CustomCSSText();
@@ -444,11 +467,31 @@ String CSSValue::CssText() const {
       return To<CSSLightDarkValuePair>(this)->CustomCSSText();
     case kScrollClass:
       return To<cssvalue::CSSScrollValue>(this)->CustomCSSText();
+    case kViewClass:
+      return To<cssvalue::CSSViewValue>(this)->CustomCSSText();
     case kRatioClass:
       return To<cssvalue::CSSRatioValue>(this)->CustomCSSText();
   }
   NOTREACHED();
   return String();
+}
+
+const CSSValue& CSSValue::PopulateWithTreeScope(
+    const TreeScope* tree_scope) const {
+  switch (GetClassType()) {
+    case kCounterClass:
+      return To<cssvalue::CSSCounterValue>(this)->PopulateWithTreeScope(
+          tree_scope);
+    case kCustomIdentClass:
+      return To<CSSCustomIdentValue>(this)->PopulateWithTreeScope(tree_scope);
+    case kMathFunctionClass:
+      return To<CSSMathFunctionValue>(this)->PopulateWithTreeScope(tree_scope);
+    case kValueListClass:
+      return To<CSSValueList>(this)->PopulateWithTreeScope(tree_scope);
+    default:
+      NOTREACHED();
+      return *this;
+  }
 }
 
 void CSSValue::Trace(Visitor* visitor) const {
@@ -482,6 +525,9 @@ void CSSValue::Trace(Visitor* visitor) const {
     case kColorClass:
       To<cssvalue::CSSColor>(this)->TraceAfterDispatch(visitor);
       return;
+    case kColorMixClass:
+      To<cssvalue::CSSColorMixValue>(this)->TraceAfterDispatch(visitor);
+      return;
     case kCounterClass:
       To<cssvalue::CSSCounterValue>(this)->TraceAfterDispatch(visitor);
       return;
@@ -502,6 +548,9 @@ void CSSValue::Trace(Visitor* visitor) const {
       return;
     case kFontVariationClass:
       To<cssvalue::CSSFontVariationValue>(this)->TraceAfterDispatch(visitor);
+      return;
+    case kAlternateClass:
+      To<cssvalue::CSSAlternateValue>(this)->TraceAfterDispatch(visitor);
       return;
     case kFunctionClass:
       To<CSSFunctionValue>(this)->TraceAfterDispatch(visitor);
@@ -597,6 +646,10 @@ void CSSValue::Trace(Visitor* visitor) const {
     case kStringClass:
       To<CSSStringValue>(this)->TraceAfterDispatch(visitor);
       return;
+    case kLinearTimingFunctionClass:
+      To<cssvalue::CSSLinearTimingFunctionValue>(this)->TraceAfterDispatch(
+          visitor);
+      return;
     case kCubicBezierTimingFunctionClass:
       To<cssvalue::CSSCubicBezierTimingFunctionValue>(this)->TraceAfterDispatch(
           visitor);
@@ -649,6 +702,9 @@ void CSSValue::Trace(Visitor* visitor) const {
       return;
     case kScrollClass:
       To<cssvalue::CSSScrollValue>(this)->TraceAfterDispatch(visitor);
+      return;
+    case kViewClass:
+      To<cssvalue::CSSViewValue>(this)->TraceAfterDispatch(visitor);
       return;
     case kRatioClass:
       To<cssvalue::CSSRatioValue>(this)->TraceAfterDispatch(visitor);

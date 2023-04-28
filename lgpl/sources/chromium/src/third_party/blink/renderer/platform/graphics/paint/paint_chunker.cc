@@ -140,12 +140,10 @@ bool PaintChunker::IncrementDisplayItemIndex(const DisplayItemClient& client,
     chunk.rect_known_to_be_opaque = gfx::MaximumCoveredRect(
         chunk.rect_known_to_be_opaque, drawing->RectKnownToBeOpaque());
     if (chunk.text_known_to_be_on_opaque_background) {
-      if (const auto* paint_record = drawing->GetPaintRecord().get()) {
-        if (paint_record->has_draw_text_ops()) {
-          chunk.has_text = true;
-          chunk.text_known_to_be_on_opaque_background =
-              chunk.rect_known_to_be_opaque.Contains(item.VisualRect());
-        }
+      if (drawing->GetPaintRecord().has_draw_text_ops()) {
+        chunk.has_text = true;
+        chunk.text_known_to_be_on_opaque_background =
+            chunk.rect_known_to_be_opaque.Contains(item.VisualRect());
       }
     } else {
       // text_known_to_be_on_opaque_background should be initially true before
@@ -277,7 +275,8 @@ void PaintChunker::CreateScrollHitTestChunk(
   auto& hit_test_data = chunk.EnsureHitTestData();
   hit_test_data.scroll_translation = scroll_translation;
   hit_test_data.scroll_hit_test_rect = rect;
-  if (id.type == DisplayItem::Type::kScrollbarHitTest) {
+  if (id.type == DisplayItem::Type::kScrollbarHitTest ||
+      id.type == DisplayItem::Type::kResizerScrollHitTest) {
     hit_test_data.touch_action_rects.push_back(
         TouchActionRect{rect, TouchAction::kNone});
   }

@@ -29,7 +29,7 @@
 #endif
 
 namespace cc {
-class DocumentTransitionRequest;
+class ViewTransitionRequest;
 }
 
 namespace blink {
@@ -50,7 +50,7 @@ enum class PaintArtifactCompositorUpdateReason {
   kLocalFrameViewUpdateLayerDebugInfo = 4,
   kLocalFrameViewBenchmarking = 5,
   kDisplayLockContextNeedsPaintArtifactCompositorUpdate = 6,
-  kDocumentTransitionNotifyChanges = 7,
+  kViewTransitionNotifyChanges = 7,
   kFrameCaretSetVisible = 8,
   kFrameCaretPaint = 9,
   kInspectorOverlayAgentDisableFrameOverlay = 10,
@@ -122,7 +122,7 @@ class SynthesizedClip : private cc::ContentLayerClient {
 
  private:
   scoped_refptr<cc::PictureLayer> layer_;
-  GeometryMapper::Translation2DOrMatrix translation_2d_or_matrix_;
+  gfx::Transform projection_;
   bool rrect_is_local_ = false;
   SkRRect rrect_;
   absl::optional<Path> path_;
@@ -147,7 +147,6 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
 
   struct ViewportProperties {
     const TransformPaintPropertyNode* overscroll_elasticity_transform = nullptr;
-    const EffectPaintPropertyNode* overscroll_elasticity_effect = nullptr;
     const TransformPaintPropertyNode* page_scale = nullptr;
     const TransformPaintPropertyNode* inner_scroll_translation = nullptr;
     const ClipPaintPropertyNode* outer_clip = nullptr;
@@ -165,7 +164,7 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
       scoped_refptr<const PaintArtifact> artifact,
       const ViewportProperties& viewport_properties,
       const Vector<const TransformPaintPropertyNode*>& scroll_translation_nodes,
-      Vector<std::unique_ptr<cc::DocumentTransitionRequest>> requests);
+      Vector<std::unique_ptr<cc::ViewTransitionRequest>> requests);
 
   // Fast-path update where the painting of existing composited layers changed,
   // but property trees and compositing decisions remain the same. See:
@@ -238,8 +237,8 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
     previous_update_for_testing_ = PreviousUpdateType::kNone;
   }
 
-  void SetNeedsFullUpdateAfterPaintIfNeeded(const PaintChunkSubset& previous,
-                                            const PaintChunkSubset& repainted);
+  void SetNeedsFullUpdateAfterPaintIfNeeded(const PaintArtifact& previous,
+                                            const PaintArtifact& repainted);
 
   // Returns true if a property tree node associated with |element_id| exists
   // on any of the PropertyTrees constructed by |Update|.
@@ -260,7 +259,7 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   // cc layer. This is the entry point of the layerization algorithm.
   void CollectPendingLayers(scoped_refptr<const PaintArtifact>);
 
-  // This is the internal recursion of collectPendingLayers. This function
+  // This is the internal recursion of CollectPendingLayers. This function
   // loops over the list of paint chunks, scoped by an isolated group
   // (i.e. effect node). Inside of the loop, chunks are tested for overlap
   // and merge compatibility. Subgroups are handled by recursion, and will
@@ -281,9 +280,9 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   // time a paint property tree node is encountered that has direct compositing
   // reasons. This case will always start a new layer and can skip merge tests.
   // New values are added when transform nodes are first encountered.
-  void LayerizeGroup(const PaintChunkSubset&,
+  void LayerizeGroup(scoped_refptr<const PaintArtifact>,
                      const EffectPaintPropertyNode&,
-                     PaintChunkIterator& chunk_cursor,
+                     Vector<PaintChunk>::const_iterator& chunk_cursor,
                      HashSet<const TransformPaintPropertyNode*>&
                          directly_composited_transforms,
                      bool force_draws_content);

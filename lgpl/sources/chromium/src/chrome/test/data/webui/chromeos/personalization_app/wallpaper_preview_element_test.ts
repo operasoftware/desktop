@@ -39,7 +39,7 @@ suite('WallpaperPreviewTest', function() {
       async () => {
         personalizationStore.data.wallpaper.loading = {
           ...personalizationStore.data.wallpaper.loading,
-          selected: 1,
+          selected: true,
           setImage: 0,
         };
         wallpaperPreviewElement = initElement(WallpaperPreview);
@@ -55,7 +55,7 @@ suite('WallpaperPreviewTest', function() {
         // Loading placeholder should be hidden.
         personalizationStore.data.wallpaper.loading = {
           ...personalizationStore.data.wallpaper.loading,
-          selected: 0,
+          selected: false,
           setImage: 0,
         };
         personalizationStore.data.wallpaper.currentSelected =
@@ -69,7 +69,7 @@ suite('WallpaperPreviewTest', function() {
         // come back.
         personalizationStore.data.wallpaper.loading = {
           ...personalizationStore.data.wallpaper.loading,
-          selected: 0,
+          selected: false,
           setImage: 1,
         };
         personalizationStore.notifyObservers();
@@ -86,7 +86,11 @@ suite('WallpaperPreviewTest', function() {
     await waitAfterNextRender(wallpaperPreviewElement);
 
     const img = wallpaperPreviewElement.shadowRoot!.querySelector('img');
-    assertEquals(wallpaperProvider.currentWallpaper.url.url, img!.src);
+    assertEquals(
+        `chrome://personalization/wallpaper.jpg?key=${
+            wallpaperProvider.currentWallpaper.key}`,
+        img!.src,
+        'current wallpaper key is appended to url as query parameter');
   });
 
   test('shows placeholders when image fails to load', async () => {

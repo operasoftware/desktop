@@ -6,8 +6,6 @@
  * @fileoverview Tests for the passkeys subpage.
  */
 
-import {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
-import {CrLazyRenderElement} from 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.js';
 import {Passkey, PasskeysBrowserProxy, PasskeysBrowserProxyImpl, SettingsPasskeysDeleteConfirmationDialogElement, SettingsPasskeysSubpageElement} from 'chrome://settings/lazy_load.js';
 import {assertDeepEquals, assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
@@ -109,8 +107,7 @@ suite('PasskeysSubpage', function() {
   setup(async function() {
     browserProxy = new TestPasskeysBrowserProxy();
     PasskeysBrowserProxyImpl.setInstance(browserProxy);
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     page = document.createElement('settings-passkeys-subpage');
   });
 
@@ -229,9 +226,7 @@ suite('PasskeysSubpage', function() {
     await flushTasks();
     assertEquals(browserProxy.getCallCount('enumerate'), 1);
 
-    const lazyDialog =
-        page.shadowRoot!.querySelector<CrLazyRenderElement<CrDialogElement>>(
-            '#deleteErrorDialog');
+    const lazyDialog = page.$.deleteErrorDialog;
     assertTrue(lazyDialog !== null, 'Dialog not found');
     assertTrue(
         lazyDialog.getIfExists() === null, 'Dialog should not be showing');

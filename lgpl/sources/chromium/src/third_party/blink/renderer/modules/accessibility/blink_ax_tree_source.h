@@ -43,8 +43,10 @@ class MODULES_EXPORT BlinkAXTreeSource
   AXObject* GetRoot() const override;
   AXObject* GetFromId(int32_t id) const override;
   int32_t GetId(AXObject* node) const override;
-  void GetChildren(AXObject* node,
-                   std::vector<AXObject*>* out_children) const override;
+  void CacheChildrenIfNeeded(AXObject*) override {}
+  size_t GetChildCount(AXObject* node) const override;
+  AXObject* ChildAt(AXObject* node, size_t) const override;
+  void ClearChildCache(AXObject*) override {}
   AXObject* GetParent(AXObject* node) const override;
   void SerializeNode(AXObject* node, ui::AXNodeData* out_data) const override;
   bool IsIgnored(AXObject* node) const override;
@@ -52,7 +54,6 @@ class MODULES_EXPORT BlinkAXTreeSource
   bool IsEqual(AXObject* node1, AXObject* node2) const override;
   AXObject* GetNull() const override;
   std::string GetDebugString(AXObject* node) const override;
-  void SerializerClearedNode(int32_t node_id) override;
 
   // Set the id of the node to fetch image data for. Normally the content
   // of images is not part of the accessibility tree, but one node at a

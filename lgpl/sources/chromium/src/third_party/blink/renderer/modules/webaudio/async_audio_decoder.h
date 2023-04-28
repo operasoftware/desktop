@@ -28,10 +28,17 @@
 
 #include "third_party/blink/renderer/bindings/modules/v8/v8_decode_error_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_decode_success_callback.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_handle.h"
 
 namespace base {
+class SequencedTaskRunner;
 class SingleThreadTaskRunner;
 }
+
+namespace media {
+class AudioDecoder;
+class MediaLog;
+}  // namespace media
 
 namespace blink {
 
@@ -73,13 +80,26 @@ class AsyncAudioDecoder {
 
  private:
   AudioBuffer* CreateAudioBufferFromAudioBus(AudioBus*);
+  static void CreateAudioDecoder(
+      DOMArrayBuffer* audio_data,
+      float sample_rate,
+      CrossThreadHandle<V8DecodeSuccessCallback> success_callback,
+      CrossThreadHandle<V8DecodeErrorCallback> error_callback,
+      CrossThreadHandle<ScriptPromiseResolver> resolver,
+      BaseAudioContext* context,
+      scoped_refptr<base::SequencedTaskRunner> decoder_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      const ExceptionContext& exception_context);
   static void DecodeOnBackgroundThread(
       DOMArrayBuffer* audio_data,
       float sample_rate,
-      V8DecodeSuccessCallback*,
-      V8DecodeErrorCallback*,
-      ScriptPromiseResolver*,
+      CrossThreadHandle<V8DecodeSuccessCallback>,
+      CrossThreadHandle<V8DecodeErrorCallback>,
+      CrossThreadHandle<ScriptPromiseResolver>,
       BaseAudioContext*,
+      std::unique_ptr<media::MediaLog> media_log,
+      std::unique_ptr<media::AudioDecoder>,
+      scoped_refptr<base::SequencedTaskRunner>,
       scoped_refptr<base::SingleThreadTaskRunner>,
       const ExceptionContext&);
   static void NotifyComplete(DOMArrayBuffer* audio_data,

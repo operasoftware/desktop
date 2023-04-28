@@ -38,10 +38,10 @@ ScrollbarDisplayItem::ScrollbarDisplayItem(
   DCHECK(!scroll_translation || scroll_translation->ScrollNode());
 }
 
-sk_sp<const PaintRecord> ScrollbarDisplayItem::Paint() const {
+PaintRecord ScrollbarDisplayItem::Paint() const {
   DCHECK(!IsTombstone());
   auto* scrollbar = data_->scrollbar_.get();
-  if (data_->record_) {
+  if (!data_->record_.empty()) {
     DCHECK(!scrollbar->NeedsRepaintPart(
         cc::ScrollbarPart::TRACK_BUTTONS_TICKMARKS));
     DCHECK(!scrollbar->NeedsRepaintPart(cc::ScrollbarPart::THUMB));
@@ -50,7 +50,7 @@ sk_sp<const PaintRecord> ScrollbarDisplayItem::Paint() const {
 
   PaintRecorder recorder;
   const gfx::Rect& rect = VisualRect();
-  recorder.beginRecording(gfx::RectToSkRect(rect));
+  recorder.beginRecording();
   auto* canvas = recorder.getRecordingCanvas();
   scrollbar->PaintPart(canvas, cc::ScrollbarPart::TRACK_BUTTONS_TICKMARKS,
                        rect);
@@ -67,7 +67,7 @@ scoped_refptr<cc::ScrollbarLayerBase> ScrollbarDisplayItem::CreateOrReuseLayer(
   DCHECK(!IsTombstone());
   // This function is called when the scrollbar is composited. We don't need
   // record_ which is for non-composited scrollbars.
-  data_->record_ = nullptr;
+  data_->record_ = PaintRecord();
 
   auto* scrollbar = data_->scrollbar_.get();
   auto layer = cc::ScrollbarLayerBase::CreateOrReuse(scrollbar, existing_layer);

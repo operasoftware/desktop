@@ -10,17 +10,16 @@ import {CustomizeDialogPage, NewTabPageProxy} from 'chrome://new-tab-page/new_ta
 import {PageCallbackRouter, PageHandlerRemote} from 'chrome://new-tab-page/new_tab_page.mojom-webui.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
-import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
+import {TestMock} from 'chrome://webui-test/test_mock.js';
 
 import {createBackgroundImage, createTheme, installMock} from './test_support.js';
 
 suite('NewTabPageCustomizeDialogTest', () => {
   let customizeDialog: CustomizeDialogElement;
-  let handler: TestBrowserProxy;
+  let handler: TestMock<PageHandlerRemote>;
 
   setup(() => {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
     handler = installMock(
         PageHandlerRemote,
@@ -35,6 +34,9 @@ suite('NewTabPageCustomizeDialogTest', () => {
     }));
     handler.setResultFor('getBackgroundImages', Promise.resolve({
       images: [],
+    }));
+    handler.setResultFor('getModulesIdNames', Promise.resolve({
+      data: [],
     }));
 
     customizeDialog = document.createElement('ntp-customize-dialog');
@@ -128,7 +130,8 @@ suite('NewTabPageCustomizeDialogTest', () => {
   suite('backgrounds', () => {
     setup(() => {
       const theme = createTheme();
-      theme.dailyRefreshCollectionId = 'landscape';
+      theme.dailyRefreshEnabled = true;
+      theme.backgroundImageCollectionId = 'landscape';
       theme.backgroundImage =
           createBackgroundImage('https://example.com/image.png');
       customizeDialog.theme = theme;

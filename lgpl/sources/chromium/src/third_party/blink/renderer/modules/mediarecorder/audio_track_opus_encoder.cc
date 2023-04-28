@@ -77,13 +77,13 @@ AudioTrackOpusEncoder::AudioTrackOpusEncoder(
       opus_encoder_(nullptr) {}
 
 AudioTrackOpusEncoder::~AudioTrackOpusEncoder() {
-  // We don't DCHECK that we're on the encoder thread here, as it should have
-  // already been deleted at this point.
   DestroyExistingOpusEncoder();
 }
 
-double AudioTrackOpusEncoder::ProvideInput(media::AudioBus* audio_bus,
-                                           uint32_t frames_delayed) {
+double AudioTrackOpusEncoder::ProvideInput(
+    media::AudioBus* audio_bus,
+    uint32_t frames_delayed,
+    const media::AudioGlitchInfo& glitch_info) {
   fifo_->Consume(audio_bus, 0, audio_bus->frames());
   return 1.0;
 }
@@ -91,7 +91,6 @@ double AudioTrackOpusEncoder::ProvideInput(media::AudioBus* audio_bus,
 void AudioTrackOpusEncoder::OnSetFormat(
     const media::AudioParameters& input_params) {
   DVLOG(1) << __func__;
-  DCHECK_CALLED_ON_VALID_THREAD(encoder_thread_checker_);
   if (input_params_.Equals(input_params))
     return;
 
@@ -164,7 +163,6 @@ void AudioTrackOpusEncoder::EncodeAudio(
     std::unique_ptr<media::AudioBus> input_bus,
     base::TimeTicks capture_time) {
   DVLOG(3) << __func__ << ", #frames " << input_bus->frames();
-  DCHECK_CALLED_ON_VALID_THREAD(encoder_thread_checker_);
   DCHECK_EQ(input_bus->channels(), input_params_.channels());
   DCHECK(!capture_time.is_null());
   DCHECK(converter_);

@@ -4,9 +4,9 @@
 
 import {CrPolicyIndicatorType} from '//resources/ash/common/cr_policy_indicator_behavior.js';
 import {AboutPageBrowserProxyImpl, BrowserChannel, DeviceNameBrowserProxyImpl, DeviceNameState, LifetimeBrowserProxyImpl, Router, routes, SetDeviceNameResult, UpdateStatus} from 'chrome://os-settings/chromeos/os_settings.js';
-import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {webUIListenerCallback} from 'chrome://resources/ash/common/cr.m.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util.js';
+import {getDeepActiveElement} from 'chrome://resources/ash/common/util.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
@@ -75,7 +75,7 @@ suite('AboutPageTest', function() {
     return Promise.all([
       aboutBrowserProxy.whenCalled('getChannelInfo'),
       aboutBrowserProxy.whenCalled('refreshUpdateStatus'),
-      aboutBrowserProxy.whenCalled('refreshTPMFirmwareUpdateStatus'),
+      aboutBrowserProxy.whenCalled('refreshTpmFirmwareUpdateStatus'),
       aboutBrowserProxy.whenCalled('checkInternetConnection'),
     ]);
   }
@@ -222,8 +222,9 @@ suite('AboutPageTest', function() {
 
     assertEquals(
         page.i18nAdvanced(
-            'aboutRollbackInProgress',
-            {substitutions: [page.deviceManager_, progress + '%']}),
+                'aboutRollbackInProgress',
+                {substitutions: [page.deviceManager_, progress + '%']})
+            .toString(),
         statusMessageEl.innerHTML);
 
     fireStatusChanged(
@@ -231,7 +232,8 @@ suite('AboutPageTest', function() {
 
     assertEquals(
         page.i18nAdvanced(
-            'aboutRollbackSuccess', {substitutions: [page.deviceManager_]}),
+                'aboutRollbackSuccess', {substitutions: [page.deviceManager_]})
+            .toString(),
         statusMessageEl.innerHTML);
   });
 
@@ -473,7 +475,7 @@ suite('AboutPageTest', function() {
   test('TPMFirmwareUpdate', async () => {
     assertTrue(page.$.aboutTPMFirmwareUpdate.hidden);
     aboutBrowserProxy.setTPMFirmwareUpdateStatus({updateAvailable: true});
-    aboutBrowserProxy.refreshTPMFirmwareUpdateStatus();
+    aboutBrowserProxy.refreshTpmFirmwareUpdateStatus();
     assertFalse(page.$.aboutTPMFirmwareUpdate.hidden);
     page.$.aboutTPMFirmwareUpdate.click();
     await flushTasks();
@@ -551,7 +553,6 @@ suite('AboutPageTest', function() {
       aboutPageEndOfLifeMessage: 'message',
     });
     await initNewPage();
-    page.scroller = page.offsetParent;
     assertTrue(!!page.$['detailed-build-info-trigger']);
     page.$['detailed-build-info-trigger'].click();
     const buildInfoPage =
@@ -579,7 +580,6 @@ suite('AboutPageTest', function() {
       aboutPageEndOfLifeMessage: '',
     });
     await initNewPage();
-    page.scroller = page.offsetParent;
     assertTrue(!!page.$['detailed-build-info-trigger']);
     page.$['detailed-build-info-trigger'].click();
     const buildInfoPage =
@@ -593,14 +593,12 @@ suite('AboutPageTest', function() {
       aboutPageEndOfLifeMessage: 'message',
     });
     await initNewPage();
-    page.scroller = page.offsetParent;
     assertTrue(!!page.$['detailed-build-info-trigger']);
     page.$['detailed-build-info-trigger'].click();
     checkEndOfLifeSection();
   });
 
   function getBuildInfoPage() {
-    page.scroller = page.offsetParent;
     assertTrue(!!page.$['detailed-build-info-trigger']);
     page.$['detailed-build-info-trigger'].click();
     const buildInfoPage =
@@ -763,8 +761,6 @@ suite('AboutPageTest', function() {
   });
 
   test('FirmwareUpdatesBadge No Updates', async function() {
-    loadTimeData.overrideValues({isFirmwareUpdaterAppEnabled: true});
-
     aboutBrowserProxy.setFirmwareUpdatesCount(0);
     await initNewPage();
     flush();
@@ -778,8 +774,6 @@ suite('AboutPageTest', function() {
   });
 
   test('FirmwareUpdatesBadge N Updates', async function() {
-    loadTimeData.overrideValues({isFirmwareUpdaterAppEnabled: true});
-
     for (let i = 1; i < 10; i++) {
       aboutBrowserProxy.setFirmwareUpdatesCount(i);
       await initNewPage();
@@ -797,8 +791,6 @@ suite('AboutPageTest', function() {
   });
 
   test('FirmwareUpdatesBadge 10 Updates', async function() {
-    loadTimeData.overrideValues({isFirmwareUpdaterAppEnabled: true});
-
     aboutBrowserProxy.setFirmwareUpdatesCount(10);
     await initNewPage();
     flush();
@@ -816,7 +808,6 @@ suite('AboutPageTest', function() {
   test('LaunchFirmwareUpdates', async function() {
     loadTimeData.overrideValues({
       isDeepLinkingEnabled: true,
-      isFirmwareUpdaterAppEnabled: true,
     });
 
     await initNewPage();
@@ -830,7 +821,6 @@ suite('AboutPageTest', function() {
   test('Deep link to firmware updates', async () => {
     loadTimeData.overrideValues({
       isDeepLinkingEnabled: true,
-      isFirmwareUpdaterAppEnabled: true,
     });
 
     await initNewPage();
@@ -1384,7 +1374,7 @@ suite('ChannelSwitcherDialogTest', function() {
   let browserProxy = null;
   let currentChannel;
 
-  setup(function() {
+  setup(async function() {
     currentChannel = BrowserChannel.BETA;
     browserProxy = new TestAboutPageBrowserProxyChromeOS();
     browserProxy.setChannels(currentChannel, currentChannel);
@@ -1395,7 +1385,7 @@ suite('ChannelSwitcherDialogTest', function() {
 
     radioButtons = dialog.shadowRoot.querySelectorAll('cr-radio-button');
     assertEquals(3, radioButtons.length);
-    return browserProxy.whenCalled('getChannelInfo');
+    await browserProxy.whenCalled('getChannelInfo');
   });
 
   teardown(function() {
@@ -1535,10 +1525,10 @@ suite('AboutPageTest_OfficialBuild', function() {
     Router.getInstance().resetRouteForTesting();
   });
 
-  test('ReportAnIssue', function() {
+  test('ReportAnIssue', async function() {
     assertTrue(!!page.$.reportIssue);
     page.$.reportIssue.click();
-    return browserProxy.whenCalled('openFeedbackDialog');
+    await browserProxy.whenCalled('openFeedbackDialog');
   });
 
   test('Deep link to report an issue', async () => {

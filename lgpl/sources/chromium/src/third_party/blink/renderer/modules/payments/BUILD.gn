@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("payments") {
@@ -57,8 +56,6 @@ blink_modules_sources("payments") {
     "update_payment_details_function.cc",
     "update_payment_details_function.h",
   ]
-
-  jumbo_excluded_sources = [ "payment_instruments.cc" ]
 
   deps = [
     "//components/payments/mojom:mojom_blink",

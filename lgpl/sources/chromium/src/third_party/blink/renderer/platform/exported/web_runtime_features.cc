@@ -73,13 +73,4 @@ void WebRuntimeFeatures::EnableFluentScrollbars(bool enable) {
   ScrollbarThemeSettings::SetFluentScrollbarsEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableRestoreContenteditablesState(bool enable) {
-  RuntimeEnabledFeatures::SetRestoreContenteditablesStateEnabled(enable);
-}
-
-bool WebRuntimeFeatures::IsRestoreContenteditablesStateEnabled() {
-  return RuntimeEnabledFeatures::RestoreContenteditablesStateEnabled();
-}
-
-
 }  // namespace blink

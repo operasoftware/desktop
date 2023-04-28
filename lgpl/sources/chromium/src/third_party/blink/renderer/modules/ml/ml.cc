@@ -20,8 +20,8 @@ using ml::model_loader::mojom::blink::MLService;
 }  // namespace
 
 ML::ML(ExecutionContext* execution_context)
-    : execution_context_(execution_context),
-      remote_service_(execution_context_.Get()) {}
+    : ExecutionContextClient(execution_context),
+      remote_service_(execution_context) {}
 
 void ML::CreateModelLoader(ScriptState* script_state,
                            ExceptionState& exception_state,
@@ -36,9 +36,8 @@ void ML::CreateModelLoader(ScriptState* script_state,
 }
 
 void ML::Trace(Visitor* visitor) const {
-  visitor->Trace(execution_context_);
   visitor->Trace(remote_service_);
-
+  ExecutionContextClient::Trace(visitor);
   ScriptWrappable::Trace(visitor);
 }
 
@@ -67,6 +66,22 @@ ScriptPromise ML::createContext(ScriptState* script_state,
   return promise;
 }
 
+MLContext* ML::createContextSync(ScriptState* script_state,
+                                 MLContextOptions* options,
+                                 ExceptionState& exception_state) {
+  if (!script_state->ContextIsValid()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      "Invalid script state");
+    return nullptr;
+  }
+
+  // TODO(crbug/1405354): Query browser about whether the given context is
+  // supported.
+  return MakeGarbageCollected<MLContext>(
+      options->devicePreference(), options->powerPreference(),
+      options->modelFormat(), options->numThreads(), this);
+}
+
 bool ML::BootstrapMojoConnectionIfNeeded(ScriptState* script_state,
                                          ExceptionState& exception_state) {
   // We need to do the following check because the execution context of this
@@ -81,9 +96,9 @@ bool ML::BootstrapMojoConnectionIfNeeded(ScriptState* script_state,
   // context associated with this navigator, especially with
   // cross-browsing-context calls.
   if (!remote_service_.is_bound()) {
-    execution_context_->GetBrowserInterfaceBroker().GetInterface(
+    GetExecutionContext()->GetBrowserInterfaceBroker().GetInterface(
         remote_service_.BindNewPipeAndPassReceiver(
-            execution_context_->GetTaskRunner(TaskType::kInternalDefault)));
+            GetExecutionContext()->GetTaskRunner(TaskType::kInternalDefault)));
   }
   return true;
 }

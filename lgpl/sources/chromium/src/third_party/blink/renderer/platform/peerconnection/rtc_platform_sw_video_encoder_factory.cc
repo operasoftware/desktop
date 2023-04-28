@@ -6,8 +6,6 @@
 
 #include <utility>
 
-#include "base/features/feature_utils.h"
-#include "base/features/submodule_features.h"
 #include "media/base/video_encoder.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_platform_sw_video_supported_formats.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder_adapter.h"
@@ -34,15 +32,9 @@ RTCPlatformSWVideoEncoderFactory::CreateVideoEncoder(
   std::unique_ptr<media::VideoEncoder> encoder;
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 #if BUILDFLAG(IS_MAC)
-  if (base::IsFeatureEnabled(
-          base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac)) {
-    encoder = std::make_unique<media::VTVideoEncoder>();
-  }
+  encoder = std::make_unique<media::VTVideoEncoder>();
 #elif BUILDFLAG(IS_WIN)
-  if (base::IsFeatureEnabled(
-          base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin)) {
-    encoder = std::make_unique<media::WMFVideoEncoder>();
-  }
+  encoder = std::make_unique<media::WMFVideoEncoder>(nullptr);
 #endif
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
   if (!encoder)

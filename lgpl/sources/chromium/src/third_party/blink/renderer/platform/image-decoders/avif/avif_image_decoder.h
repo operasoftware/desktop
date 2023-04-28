@@ -7,7 +7,9 @@
 
 #include <memory>
 
+#include "third_party/blink/renderer/platform/allow_discouraged_type.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/libavif/src/include/avif/avif.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "ui/gfx/color_space.h"
@@ -30,6 +32,7 @@ class PLATFORM_EXPORT AVIFImageDecoder final : public ImageDecoder {
 
   // ImageDecoder:
   String FilenameExtension() const override { return "avif"; }
+  const AtomicString& MimeType() const override;
   bool ImageIsHighBitDepth() override;
   void OnSetData(SegmentReader* data) override;
   cc::YUVSubsampling GetYUVSubsampling() const override;
@@ -37,6 +40,7 @@ class PLATFORM_EXPORT AVIFImageDecoder final : public ImageDecoder {
   wtf_size_t DecodedYUVWidthBytes(cc::YUVIndex) const override;
   SkYUVColorSpace GetYUVColorSpace() const override;
   uint8_t GetYUVBitDepth() const override;
+  absl::optional<gfx::HDRMetadata> GetHDRMetadata() const override;
   void DecodeToYUV() override;
   int RepetitionCount() const override;
   bool FrameIsReceivedAtIndex(wtf_size_t) const override;
@@ -54,7 +58,7 @@ class PLATFORM_EXPORT AVIFImageDecoder final : public ImageDecoder {
  private:
   struct AvifIOData {
     blink::SegmentReader* reader = nullptr;
-    std::vector<uint8_t> buffer;
+    std::vector<uint8_t> buffer ALLOW_DISCOURAGED_TYPE("Required by libavif");
     bool all_data_received = false;
   };
 
@@ -104,6 +108,7 @@ class PLATFORM_EXPORT AVIFImageDecoder final : public ImageDecoder {
   bool decode_to_half_float_ = false;
   uint8_t chroma_shift_x_ = 0;
   uint8_t chroma_shift_y_ = 0;
+  absl::optional<gfx::HDRMetadata> hdr_metadata_;
   bool progressive_ = false;
   // Number of displayed rows for a non-progressive still image.
   int incrementally_displayed_height_ = 0;
@@ -121,7 +126,7 @@ class PLATFORM_EXPORT AVIFImageDecoder final : public ImageDecoder {
   const AnimationOption animation_option_;
 
   // Used temporarily during incremental decoding.
-  std::vector<uint32_t> previous_last_decoded_row_;
+  Vector<uint32_t> previous_last_decoded_row_;
 };
 
 }  // namespace blink

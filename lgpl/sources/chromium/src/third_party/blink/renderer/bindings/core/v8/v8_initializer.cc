@@ -33,6 +33,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/system/sys_info.h"
+#include "build/build_config.h"
 #include "components/crash/core/common/crash_key.h"
 #include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -46,6 +47,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/shadow_realm_context.h"
 #include "third_party/blink/renderer/bindings/core/v8/use_counter_callback.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_context_snapshot.h"
@@ -95,6 +97,7 @@
 #include "third_party/blink/renderer/platform/wtf/sanitizers.h"
 #include "third_party/blink/renderer/platform/wtf/stack_util.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "tools/v8_context_snapshot/buildflags.h"
 #include "v8/include/v8-profiler.h"
 #include "v8/include/v8.h"
 
@@ -522,15 +525,6 @@ bool SharedArrayBufferConstructorEnabledCallback(
   return execution_context->SharedArrayBufferTransferAllowed();
 }
 
-bool WasmExceptionsEnabledCallback(v8::Local<v8::Context> context) {
-  ExecutionContext* execution_context = ToExecutionContext(context);
-  if (!execution_context)
-    return false;
-
-  return RuntimeEnabledFeatures::WebAssemblyExceptionsEnabled(
-      execution_context);
-}
-
 v8::Local<v8::Value> NewRangeException(v8::Isolate* isolate,
                                        const char* message) {
   return v8::Exception::RangeError(
@@ -585,6 +579,14 @@ bool WasmInstanceOverride(const v8::FunctionCallbackInfo<v8::Value>& args) {
     return true;
   }
   return false;
+}
+
+bool WasmGCEnabledCallback(v8::Local<v8::Context> context) {
+  ExecutionContext* execution_context = ToExecutionContext(context);
+  if (!execution_context) {
+    return false;
+  }
+  return RuntimeEnabledFeatures::WebAssemblyGCEnabled(execution_context);
 }
 
 v8::MaybeLocal<v8::Promise> HostImportModuleDynamically(
@@ -693,9 +695,9 @@ void InitializeV8Common(v8::Isolate* isolate) {
   isolate->SetUseCounterCallback(&UseCounterCallback);
   isolate->SetWasmModuleCallback(WasmModuleOverride);
   isolate->SetWasmInstanceCallback(WasmInstanceOverride);
+  isolate->SetWasmGCEnabledCallback(WasmGCEnabledCallback);
   isolate->SetSharedArrayBufferConstructorEnabledCallback(
       SharedArrayBufferConstructorEnabledCallback);
-  isolate->SetWasmExceptionsEnabledCallback(WasmExceptionsEnabledCallback);
   isolate->SetHostImportModuleDynamicallyCallback(HostImportModuleDynamically);
   isolate->SetHostInitializeImportMetaObjectCallback(
       HostGetImportMetaProperties);
@@ -811,14 +813,14 @@ class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
 };
 
 V8PerIsolateData::V8ContextSnapshotMode GetV8ContextSnapshotMode() {
-#if defined(USE_V8_CONTEXT_SNAPSHOT)
+#if BUILDFLAG(USE_V8_CONTEXT_SNAPSHOT)
   if (Platform::Current()->IsTakingV8ContextSnapshot())
     return V8PerIsolateData::V8ContextSnapshotMode::kTakeSnapshot;
   if (gin::GetLoadedSnapshotFileType() ==
       gin::V8SnapshotFileType::kWithAdditionalContext) {
     return V8PerIsolateData::V8ContextSnapshotMode::kUseSnapshot;
   }
-#endif  // USE_V8_CONTEXT_SNAPSHOT
+#endif  // BUILDFLAG(USE_V8_CONTEXT_SNAPSHOT)
   return V8PerIsolateData::V8ContextSnapshotMode::kDontUseSnapshot;
 }
 
@@ -884,12 +886,23 @@ void V8Initializer::InitializeMainThread(
   // is enabled. For that reason, the partition can only be initialized after V8
   // has been initialized.
   WTF::Partitions::InitializeArrayBufferPartition();
+
+  isolate->SetHostCreateShadowRealmContextCallback(
+      OnCreateShadowRealmV8Context);
 }
 
 // Stack size for workers is limited to 500KB because default stack size for
 // secondary threads is 512KB on Mac OS X. See GetDefaultThreadStackSize() in
 // base/threading/platform_thread_mac.mm for details.
+// For 32bit Windows, the stack region always starts with an odd number of
+// reserved pages, followed by two guard pages, followed by the committed
+// memory for the stack, and the worker stack size need to be reduced
+// (crbug.com/1412239).
+#if defined(ARCH_CPU_32_BITS) && BUILDFLAG(IS_WIN)
+static const int kWorkerMaxStackSize = 492 * 1024;
+#else
 static const int kWorkerMaxStackSize = 500 * 1024;
+#endif
 
 void V8Initializer::InitializeWorker(v8::Isolate* isolate) {
   InitializeV8Common(isolate);
@@ -907,6 +920,8 @@ void V8Initializer::InitializeWorker(v8::Isolate* isolate) {
   isolate->SetAllowWasmCodeGenerationCallback(
       WasmCodeGenerationCheckCallbackInMainThread);
   isolate->SetWasmAsyncResolvePromiseCallback(WasmAsyncResolvePromiseCallback);
+  isolate->SetHostCreateShadowRealmContextCallback(
+      OnCreateShadowRealmV8Context);
 }
 
 }  // namespace blink

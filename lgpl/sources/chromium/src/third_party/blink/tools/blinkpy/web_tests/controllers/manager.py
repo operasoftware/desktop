@@ -44,10 +44,8 @@ import random
 import signal
 import sys
 import time
-import traceback
 
 from blinkpy.common import exit_codes
-from blinkpy.common import path_finder
 from blinkpy.common.net.file_uploader import FileUploader
 from blinkpy.common.path_finder import PathFinder
 from blinkpy.tool import grammar
@@ -727,15 +725,17 @@ class Manager(object):
 
     def _copy_results_html_file(self, destination_dir, filename):
         """Copies a file from the template directory to the results directory."""
+        files_to_copy = [filename, filename + ".version"]
         template_dir = self._path_finder.path_from_blink_tools(
             'blinkpy', 'web_tests')
-        source_path = self._filesystem.join(template_dir, filename)
-        destination_path = self._filesystem.join(destination_dir, filename)
-        # Note that the results.html template file won't exist when
-        # we're using a MockFileSystem during unit tests, so make sure
-        # it exists before we try to copy it.
-        if self._filesystem.exists(source_path):
-            self._filesystem.copyfile(source_path, destination_path)
+        for filename in files_to_copy:
+            source_path = self._filesystem.join(template_dir, filename)
+            destination_path = self._filesystem.join(destination_dir, filename)
+            # Note that the results.html template file won't exist when
+            # we're using a MockFileSystem during unit tests, so make sure
+            # it exists before we try to copy it.
+            if self._filesystem.exists(source_path):
+                self._filesystem.copyfile(source_path, destination_path)
 
     def _stats_trie(self, initial_results):
         def _worker_number(worker_name):

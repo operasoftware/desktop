@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/paint/highlight_painting_utils.h"
 
 #include "components/shared_highlighting/core/common/fragment_directives_constants.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/style_request.h"
@@ -284,8 +285,8 @@ Color HighlightPaintingUtils::ResolveColor(
   }
   if (pseudo_style) {
     bool is_current_color;
-    Color result =
-        pseudo_style->VisitedDependentColor(property, &is_current_color);
+    Color result = pseudo_style->VisitedDependentColor(To<Longhand>(property),
+                                                       &is_current_color);
     if (!is_current_color)
       return result;
   }
@@ -360,28 +361,22 @@ HighlightPaintingUtils::SelectionTextDecoration(
     const ComputedStyle& style,
     const ComputedStyle& pseudo_style,
     absl::optional<Color> previous_layer_color) {
-  const Vector<AppliedTextDecoration>& style_decorations =
-      style.AppliedTextDecorations();
-  const Vector<AppliedTextDecoration>& pseudo_style_decorations =
-      pseudo_style.AppliedTextDecorations();
-
-  if (style_decorations.empty())
+  absl::optional<AppliedTextDecoration> decoration =
+      style.LastAppliedTextDecoration();
+  if (!decoration) {
     return absl::nullopt;
-
-  absl::optional<AppliedTextDecoration> highlight_text_decoration =
-      style_decorations.back();
-
-  if (pseudo_style_decorations.size() &&
-      style_decorations.back().Lines() ==
-          pseudo_style_decorations.back().Lines()) {
-    highlight_text_decoration = pseudo_style_decorations.back();
   }
 
-  highlight_text_decoration.value().SetColor(
+  absl::optional<AppliedTextDecoration> pseudo_decoration =
+      pseudo_style.LastAppliedTextDecoration();
+  if (pseudo_decoration && decoration->Lines() == pseudo_decoration->Lines()) {
+    decoration = pseudo_decoration;
+  }
+
+  decoration->SetColor(
       ResolveColor(document, style, &pseudo_style, kPseudoIdSelection,
                    GetCSSPropertyTextDecorationColor(), previous_layer_color));
-
-  return highlight_text_decoration;
+  return decoration;
 }
 
 TextPaintStyle HighlightPaintingUtils::HighlightPaintingStyle(

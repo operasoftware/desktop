@@ -7,8 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/features/feature_utils.h"
-#include "base/features/submodule_features.h"
 #include "base/logging.h"
 #include "base/task/sequenced_task_runner.h"
 #include "build/build_config.h"
@@ -33,8 +31,8 @@ namespace {
 // The sole purpose is destroying the wrapped RTCVideoDecoderAdapter adapter on
 // the correct sequence. Without ScopedVideoDecoder, ~RCTVideoDecoderAdapter
 // tries to destroy media::VideoDecoder and WeakPtrs on a sequence other than
-// where these were created (the media thread). This is really lame, but I'm
-// not going to fight this.
+// where these were created. This is really lame, but I'm not going to fight
+// this.
 class ScopedVideoDecoder : public webrtc::VideoDecoder {
  public:
   ScopedVideoDecoder(scoped_refptr<base::SequencedTaskRunner> task_runner,
@@ -84,25 +82,19 @@ RTCPlatformSWVideoDecoderFactory::CreateVideoDecoder(
   std::unique_ptr<media::VideoDecoder> platform_decoder;
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 #if BUILDFLAG(IS_MAC)
-  if (base::IsFeatureEnabled(
-          base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac)) {
-    platform_decoder =
-        std::make_unique<media::VTVideoDecoder>(media_task_runner_);
-  }
+  platform_decoder =
+      std::make_unique<media::VTVideoDecoder>(media_task_runner_);
 #elif BUILDFLAG(IS_WIN)
-  if (base::IsFeatureEnabled(
-          base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin)) {
-    platform_decoder =
-        std::make_unique<media::WMFVideoDecoder>(media_task_runner_);
-  }
+  platform_decoder =
+      std::make_unique<media::WMFVideoDecoder>(media_task_runner_);
 #endif
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
   if (platform_decoder) {
     if (auto adapter = RTCVideoDecoderAdapter::Create(
             std::move(platform_decoder), media_task_runner_, format)) {
-      return std::make_unique<ScopedVideoDecoder>(media_task_runner_,
-                                                  std::move(adapter));
+      return std::make_unique<ScopedVideoDecoder>(
+          base::SequencedTaskRunner::GetCurrentDefault(), std::move(adapter));
     }
   }
 

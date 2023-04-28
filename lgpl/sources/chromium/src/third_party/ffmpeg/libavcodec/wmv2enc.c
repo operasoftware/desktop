@@ -26,8 +26,11 @@
 #include "msmpeg4.h"
 #include "msmpeg4enc.h"
 #include "msmpeg4data.h"
+#include "msmpeg4_vc1_data.h"
 #include "wmv2.h"
 #include "wmv2enc.h"
+
+#define WMV2_EXTRADATA_SIZE 4
 
 typedef struct WMV2EncContext {
     MSMPEG4EncContext msmpeg4;
@@ -49,7 +52,7 @@ static int encode_ext_header(WMV2EncContext *w)
     PutBitContext pb;
     int code;
 
-    init_put_bits(&pb, s->avctx->extradata, s->avctx->extradata_size);
+    init_put_bits(&pb, s->avctx->extradata, WMV2_EXTRADATA_SIZE);
 
     put_bits(&pb, 5, s->avctx->time_base.den / s->avctx->time_base.num); // yes 29.97 -> 29
     put_bits(&pb, 11, FFMIN(s->bit_rate / 1024, 2047));
@@ -80,7 +83,7 @@ static av_cold int wmv2_encode_init(AVCodecContext *avctx)
 
     ff_wmv2_common_init(s);
 
-    avctx->extradata_size = 4;
+    avctx->extradata_size = WMV2_EXTRADATA_SIZE;
     avctx->extradata      = av_mallocz(avctx->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
     if (!avctx->extradata)
         return AVERROR(ENOMEM);
@@ -90,7 +93,7 @@ static av_cold int wmv2_encode_init(AVCodecContext *avctx)
     return 0;
 }
 
-int ff_wmv2_encode_picture_header(MpegEncContext *s, int picture_number)
+int ff_wmv2_encode_picture_header(MpegEncContext *s)
 {
     WMV2EncContext *const w = (WMV2EncContext *) s;
 
@@ -239,6 +242,7 @@ const FFCodec ff_wmv2_encoder = {
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_WMV2,
     .p.priv_class   = &ff_mpv_enc_class,
+    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(WMV2EncContext),
     .init           = wmv2_encode_init,
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),

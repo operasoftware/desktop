@@ -98,8 +98,6 @@ LayoutObject* InputTypeView::CreateLayoutObject(const ComputedStyle& style,
   return LayoutObject::CreateObject(&GetElement(), style, legacy);
 }
 
-void InputTypeView::CustomStyleForLayoutObject(ComputedStyle&) {}
-
 ControlPart InputTypeView::AutoAppearance() const {
   return kNoControlPart;
 }

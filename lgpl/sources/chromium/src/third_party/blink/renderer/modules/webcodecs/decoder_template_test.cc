@@ -4,6 +4,8 @@
 
 #include "base/features/scoped_test_feature_override.h"
 #include "base/features/submodule_features.h"
+#include "base/test/task_environment.h"
+#include "base/threading/thread_restrictions.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
@@ -36,6 +38,10 @@ class DecoderTemplateTest : public testing::Test {
                                    v8::Local<v8::Function> error_callback);
 
   T* CreateDecoder(ScriptState*, const typename T::InitType*, ExceptionState&);
+
+ private:
+  base::ScopedTestFeatureOverride gpu_audio_decoder_enabled{
+      base::kFeaturePlatformAacDecoderInGpu, true};
 };
 
 template <>
@@ -110,13 +116,6 @@ TYPED_TEST(DecoderTemplateTest, BasicConstruction) {
 }
 
 TYPED_TEST(DecoderTemplateTest, ResetDuringFlush) {
-  // Always disabled, because this is a decoder test that happens to share a
-  // code path with encoder initialization.
-  base::ScopedTestFeatureOverride disable_platform_sw_encoder_web_codecs{
-      base::kFeaturePlatformSWH264EncoderWebCodecsWin, false};
-  base::ScopedTestFeatureOverride disable_platform_sw_encoder_web_rtc{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin, false};
-
   V8TestingScope v8_scope;
 
   // Create a decoder.

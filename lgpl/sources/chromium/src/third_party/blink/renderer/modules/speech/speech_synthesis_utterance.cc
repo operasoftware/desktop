@@ -76,6 +76,27 @@ void SpeechSynthesisUtterance::setVoice(SpeechSynthesisVoice* voice) {
   mojom_utterance_->voice = voice_ ? voice_->name() : String();
 }
 
+float SpeechSynthesisUtterance::volume() const {
+  return mojom_utterance_->volume ==
+                 mojom::blink::kSpeechSynthesisDoublePrefNotSet
+             ? mojom::blink::kSpeechSynthesisDefaultVolume
+             : mojom_utterance_->volume;
+}
+
+float SpeechSynthesisUtterance::rate() const {
+  return mojom_utterance_->rate ==
+                 mojom::blink::kSpeechSynthesisDoublePrefNotSet
+             ? mojom::blink::kSpeechSynthesisDefaultRate
+             : mojom_utterance_->rate;
+}
+
+float SpeechSynthesisUtterance::pitch() const {
+  return mojom_utterance_->pitch ==
+                 mojom::blink::kSpeechSynthesisDoublePrefNotSet
+             ? mojom::blink::kSpeechSynthesisDefaultPitch
+             : mojom_utterance_->pitch;
+}
+
 void SpeechSynthesisUtterance::Trace(Visitor* visitor) const {
   visitor->Trace(receiver_);
   visitor->Trace(synthesis_);
@@ -89,10 +110,11 @@ void SpeechSynthesisUtterance::OnStartedSpeaking() {
   synthesis_->DidStartSpeaking(this);
 }
 
-void SpeechSynthesisUtterance::OnFinishedSpeaking() {
+void SpeechSynthesisUtterance::OnFinishedSpeaking(
+    mojom::blink::SpeechSynthesisErrorCode error_code) {
   DCHECK(synthesis_);
   finished_ = true;
-  synthesis_->DidFinishSpeaking(this);
+  synthesis_->DidFinishSpeaking(this, error_code);
 }
 
 void SpeechSynthesisUtterance::OnPausedSpeaking() {
@@ -154,7 +176,7 @@ void SpeechSynthesisUtterance::Start(SpeechSynthesis* synthesis) {
 void SpeechSynthesisUtterance::OnDisconnected() {
   // If the remote end disconnects, just simulate that we finished normally.
   if (!finished_)
-    OnFinishedSpeaking();
+    OnFinishedSpeaking(mojom::blink::SpeechSynthesisErrorCode::kNoError);
 }
 
 }  // namespace blink

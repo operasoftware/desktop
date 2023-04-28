@@ -26,7 +26,6 @@
 #include "third_party/blink/renderer/core/css/resolver/style_builder.h"
 #include "third_party/blink/renderer/core/css/resolver/style_cascade.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
-#include "third_party/blink/renderer/core/css/scoped_css_value.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 
@@ -259,7 +258,8 @@ InterpolationValue CSSInterpolationType::MaybeConvertCustomPropertyDeclaration(
   // CSSCustomPropertyDeclaration. Expand those keywords into real CSSValues
   // if present.
   bool is_inherited = Registration().Inherits();
-  const StyleInitialData* initial_data = state.StyleRef().InitialData().get();
+  const StyleInitialData* initial_data =
+      state.StyleBuilder().InitialData().get();
   DCHECK(initial_data);
   const CSSValue* initial_value = initial_data->GetVariableValue(name);
 
@@ -296,7 +296,7 @@ InterpolationValue CSSInterpolationType::MaybeConvertCustomPropertyDeclaration(
 InterpolationValue CSSInterpolationType::MaybeConvertUnderlyingValue(
     const InterpolationEnvironment& environment) const {
   const ComputedStyle& style =
-      To<CSSInterpolationEnvironment>(environment).Style();
+      To<CSSInterpolationEnvironment>(environment).BaseStyle();
   if (!GetProperty().IsCSSCustomProperty()) {
     return MaybeConvertStandardPropertyUnderlyingValue(style);
   }
@@ -353,7 +353,7 @@ void CSSInterpolationType::ApplyCustomPropertyValue(
   const CSSValue* value = MakeGarbageCollected<CSSCustomPropertyDeclaration>(
       std::move(variable_data), /* parser_context */ nullptr);
   StyleBuilder::ApplyProperty(GetProperty().GetCSSPropertyName(), state,
-                              ScopedCSSValue(*value, nullptr));
+                              *value);
 }
 
 }  // namespace blink

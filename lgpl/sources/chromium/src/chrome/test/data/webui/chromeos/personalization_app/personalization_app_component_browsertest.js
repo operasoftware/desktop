@@ -21,7 +21,11 @@ var PersonalizationAppComponentBrowserTest = class extends PolymerTest {
   }
 
   get featureList() {
-    return {enabled: ['ash::features::kWallpaperGooglePhotosIntegration']};
+    return {
+      enabled: [
+        'ash::features::kPersonalizationJelly',
+      ]
+    };
   }
 
   get testGenPreamble() {
@@ -39,10 +43,12 @@ var PersonalizationAppComponentBrowserTest = class extends PolymerTest {
 };
 
 [['AmbientObserverTest', 'ambient_observer_test.js'],
- ['AmbientPreviewTest', 'ambient_preview_element_test.js'],
+ ['AmbientPreviewLargeTest', 'ambient_preview_large_element_test.js'],
+ ['AmbientPreviewSmallTest', 'ambient_preview_small_element_test.js'],
  ['AmbientSubpageTest', 'ambient_subpage_element_test.js'],
  ['AvatarCameraTest', 'avatar_list_element_test.js'],
  ['AvatarListTest', 'avatar_list_element_test.js'],
+ ['DynamicColorTest', 'dynamic_color_element_test.js'],
  ['GooglePhotosAlbumsTest', 'google_photos_albums_element_test.js'],
  ['GooglePhotosCollectionTest', 'google_photos_collection_element_test.js'],
  [
@@ -69,6 +75,10 @@ var PersonalizationAppComponentBrowserTest = class extends PolymerTest {
  ['WallpaperObserverTest', 'wallpaper_observer_test.js'],
  ['WallpaperPreviewTest', 'wallpaper_preview_element_test.js'],
  ['WallpaperSelectedTest', 'wallpaper_selected_element_test.js'],
+ [
+   'GooglePhotosSharedAlbumDialogTest',
+   'google_photos_shared_album_dialog_element_test.js'
+ ],
 ].forEach(test => registerTest(...test));
 
 function registerTest(testName, module, caseName) {

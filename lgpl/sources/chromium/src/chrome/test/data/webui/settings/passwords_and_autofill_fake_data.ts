@@ -6,6 +6,7 @@
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {AutofillManagerProxy, PasswordEditDialogElement, PasswordListItemElement, PasswordMoveMultiplePasswordsToAccountDialogElement, PasswordsExportDialogElement, PasswordsImportDialogElement, PasswordsSectionElement, PaymentsManagerProxy, PersonalDataChangedListener} from 'chrome://settings/lazy_load.js';
 import {assertEquals} from 'chrome://webui-test/chai_assert.js';
+import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
 import {TestPasswordManagerProxy} from './test_password_manager_proxy.js';
 
@@ -62,7 +63,6 @@ export function createPasswordEntry(params?: PasswordEntryParams):
     isAndroidCredential: params.isAndroidCredential || false,
     note: note,
     password: '',
-    hasStartableScript: false,
   };
 }
 
@@ -170,6 +170,25 @@ export function createCreditCardEntry():
 }
 
 /**
+ * Creates a new valid IBAN entry for testing.
+ * If `value` is not empty, set guid when creating the IBAN entry, otherwise,
+ * leave it undefined, as it is an empty IBAN.
+ */
+export function createIbanEntry(
+    value?: string, nickname?: string): chrome.autofillPrivate.IbanEntry {
+  return {
+    guid: value ? makeGuid() : undefined,
+    value: (value || value === '') ? value : 'CR99 0000 0000 0000 8888 88',
+    nickname: (nickname || nickname === '') ? nickname : 'My doctor\'s IBAN',
+    metadata: {
+      isLocal: true,
+      summaryLabel: ibanPatternMaker(value || 'CR99 0000 0000 0000 8888 88'),
+      summarySublabel: nickname || 'My doctor\'s IBAN',
+    },
+  };
+}
+
+/**
  * Creates a new insecure credential.
  */
 export function makeInsecureCredential(
@@ -189,7 +208,6 @@ export function makeInsecureCredential(
     id: id || 0,
     storedIn: chrome.passwordsPrivate.PasswordStoreSet.DEVICE,
     changePasswordUrl: `http://${url}/`,
-    hasStartableScript: false,
     urls: {
       signonRealm: `http://${url}/`,
       shown: url,
@@ -220,7 +238,7 @@ export function makePasswordCheckStatus(
 /**
  * Creates a new random GUID for testing.
  */
-function makeGuid(): string {
+export function makeGuid(): string {
   return patternMaker('xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', 16);
 }
 
@@ -233,6 +251,31 @@ function patternMaker(pattern: string, base: number): string {
   return pattern.replace(/x/g, function() {
     return Math.floor(Math.random() * base).toString(base);
   });
+}
+
+/**
+ * Converts value (E.g., CH12 1234 1234 1234 1234) of IBAN to a partially masked
+ * text formatted by the following rules:
+ * 1. Reveal the first and the last four characters.
+ * 2. Mask the remaining digits.
+ * 3. The identifier string will be arranged in groups of four with a space
+ *    between each group.
+ * Examples: BE71 0961 2345 6769 will be shown as: BE71 **** **** 6769.
+ */
+function ibanPatternMaker(ibanValue: string): string {
+  let output = '';
+  const strippedValue = ibanValue.replace(/\s/g, '');
+  for (let i = 0; i < strippedValue.length; ++i) {
+    if (i % 4 === 0 && i > 0) {
+      output += ' ';
+    }
+    if (i < 4 || i >= strippedValue.length - 4) {
+      output += strippedValue.charAt(i);
+    } else {
+      output += `*`;
+    }
+  }
+  return output;
 }
 
 /**
@@ -380,22 +423,32 @@ export class AutofillManagerExpectations {
 /**
  * Test implementation
  */
-export class TestAutofillManager implements AutofillManagerProxy {
-  private actual_: AutofillManagerExpectations;
-
+export class TestAutofillManager extends TestBrowserProxy implements
+    AutofillManagerProxy {
   data: {
     addresses: chrome.autofillPrivate.AddressEntry[],
+    accountInfo: chrome.autofillPrivate.AccountInfo,
   };
 
   lastCallback:
       {setPersonalDataManagerListener: PersonalDataChangedListener|null};
 
   constructor() {
-    this.actual_ = new AutofillManagerExpectations();
+    super([
+      'getAccountInfo',
+      'getAddressList',
+      'removeAddress',
+      'removePersonalDataManagerListener',
+      'setPersonalDataManagerListener',
+    ]);
 
     // Set these to have non-empty data.
     this.data = {
       addresses: [],
+      accountInfo: {
+        email: 'stub-user@example.com',
+        isSyncEnabledForAutofillProfiles: true,
+      },
     };
 
     // Holds the last callbacks so they can be called when needed.
@@ -405,34 +458,41 @@ export class TestAutofillManager implements AutofillManagerProxy {
   }
 
   setPersonalDataManagerListener(listener: PersonalDataChangedListener) {
-    this.actual_.listeningAddresses++;
+    this.methodCalled('setPersonalDataManagerListener');
     this.lastCallback.setPersonalDataManagerListener = listener;
   }
 
   removePersonalDataManagerListener(_listener: PersonalDataChangedListener) {
-    this.actual_.listeningAddresses--;
+    this.methodCalled('removePersonalDataManagerListener');
   }
 
-  getAddressList(
-      callback: (entries: chrome.autofillPrivate.AddressEntry[]) => void) {
-    this.actual_.requestedAddresses++;
-    callback(this.data.addresses);
+  getAccountInfo() {
+    this.methodCalled('getAccountInfo');
+    return Promise.resolve(this.data.accountInfo);
+  }
+
+  getAddressList() {
+    this.methodCalled('getAddressList');
+    return Promise.resolve(this.data.addresses);
   }
 
   saveAddress(_address: chrome.autofillPrivate.AddressEntry) {}
 
   removeAddress(_guid: string) {
-    this.actual_.removeAddress++;
+    this.methodCalled('removeAddress');
   }
 
   /**
    * Verifies expectations.
    */
   assertExpectations(expected: AutofillManagerExpectations) {
-    const actual = this.actual_;
-    assertEquals(expected.requestedAddresses, actual.requestedAddresses);
-    assertEquals(expected.listeningAddresses, actual.listeningAddresses);
-    assertEquals(expected.removeAddress, actual.removeAddress);
+    assertEquals(
+        expected.requestedAddresses, this.getCallCount('getAddressList'));
+    assertEquals(
+        expected.listeningAddresses,
+        this.getCallCount('setPersonalDataManagerListener') -
+            this.getCallCount('removePersonalDataManagerListener'));
+    assertEquals(expected.removeAddress, this.getCallCount('removeAddress'));
   }
 }
 
@@ -444,17 +504,20 @@ export class PaymentsManagerExpectations {
   removedCreditCards: number = 0;
   clearedCachedCreditCards: number = 0;
   addedVirtualCards: number = 0;
+  requestedIbans: number = 0;
+  removedIbans: number = 0;
 }
 
 /**
  * Test implementation
  */
-export class TestPaymentsManager implements PaymentsManagerProxy {
-  private actual_: PaymentsManagerExpectations;
+export class TestPaymentsManager extends TestBrowserProxy implements
+    PaymentsManagerProxy {
   private isUserVerifyingPlatformAuthenticatorAvailable_: boolean|null = null;
 
   data: {
     creditCards: chrome.autofillPrivate.CreditCardEntry[],
+    ibans: chrome.autofillPrivate.IbanEntry[],
     upiIds: string[],
   };
 
@@ -462,11 +525,22 @@ export class TestPaymentsManager implements PaymentsManagerProxy {
       {setPersonalDataManagerListener: PersonalDataChangedListener|null};
 
   constructor() {
-    this.actual_ = new PaymentsManagerExpectations();
+    super([
+      'setPersonalDataManagerListener',
+      'removePersonalDataManagerListener',
+      'getCreditCardList',
+      'getIbanList',
+      'getUpiIdList',
+      'clearCachedCreditCard',
+      'removeCreditCard',
+      'removeIban',
+      'addVirtualCard',
+    ]);
 
     // Set these to have non-empty data.
     this.data = {
       creditCards: [],
+      ibans: [],
       upiIds: [],
     };
 
@@ -477,27 +551,26 @@ export class TestPaymentsManager implements PaymentsManagerProxy {
   }
 
   setPersonalDataManagerListener(listener: PersonalDataChangedListener) {
-    this.actual_.listeningCreditCards++;
+    this.methodCalled('setPersonalDataManagerListener');
     this.lastCallback.setPersonalDataManagerListener = listener;
   }
 
   removePersonalDataManagerListener(_listener: PersonalDataChangedListener) {
-    this.actual_.listeningCreditCards--;
+    this.methodCalled('removePersonalDataManagerListener');
   }
 
-  getCreditCardList(
-      callback: (entries: chrome.autofillPrivate.CreditCardEntry[]) => void) {
-    this.actual_.requestedCreditCards++;
-    callback(this.data.creditCards);
+  getCreditCardList() {
+    this.methodCalled('getCreditCardList');
+    return Promise.resolve(this.data.creditCards);
   }
 
-  getUpiIdList(callback: (entries: string[]) => void) {
-    this.actual_.requestedUpiIds++;
-    callback(this.data.upiIds);
+  getUpiIdList() {
+    this.methodCalled('getUpiIdList');
+    return Promise.resolve(this.data.upiIds);
   }
 
   clearCachedCreditCard(_guid: string) {
-    this.actual_.clearedCachedCreditCards++;
+    this.methodCalled('clearCachedCreditCard');
   }
 
   logServerCardLinkClicked() {}
@@ -505,18 +578,30 @@ export class TestPaymentsManager implements PaymentsManagerProxy {
   migrateCreditCards() {}
 
   removeCreditCard(_guid: string) {
-    this.actual_.removedCreditCards++;
+    this.methodCalled('removeCreditCard');
   }
 
   saveCreditCard(_creditCard: chrome.autofillPrivate.CreditCardEntry) {}
 
-  setCreditCardFIDOAuthEnabledState(_enabled: boolean) {}
+  setCreditCardFidoAuthEnabledState(_enabled: boolean) {}
 
   addVirtualCard(_cardId: string) {
-    this.actual_.addedVirtualCards++;
+    this.methodCalled('addVirtualCard');
   }
 
   removeVirtualCard(_cardId: string) {}
+
+  saveIban(_iban: chrome.autofillPrivate.IbanEntry) {}
+
+  removeIban(_guid: string) {
+    this.methodCalled('removeIban');
+  }
+
+  getIbanList() {
+    this.methodCalled('getIbanList');
+    return Promise.resolve(this.data.ibans);
+  }
+
 
   setIsUserVerifyingPlatformAuthenticatorAvailable(available: boolean|null) {
     this.isUserVerifyingPlatformAuthenticatorAvailable_ = available;
@@ -530,12 +615,29 @@ export class TestPaymentsManager implements PaymentsManagerProxy {
    * Verifies expectations.
    */
   assertExpectations(expected: PaymentsManagerExpectations) {
-    const actual = this.actual_;
-    assertEquals(expected.requestedCreditCards, actual.requestedCreditCards);
-    assertEquals(expected.listeningCreditCards, actual.listeningCreditCards);
-    assertEquals(expected.removedCreditCards, actual.removedCreditCards);
     assertEquals(
-        expected.clearedCachedCreditCards, actual.clearedCachedCreditCards);
-    assertEquals(expected.addedVirtualCards, actual.addedVirtualCards);
+        expected.requestedCreditCards, this.getCallCount('getCreditCardList'),
+        'requestedCreditCards mismatch');
+    assertEquals(
+        expected.listeningCreditCards,
+        this.getCallCount('setPersonalDataManagerListener') -
+            this.getCallCount('removePersonalDataManagerListener'),
+        'listeningCreditCards mismatch');
+    assertEquals(
+        expected.removedCreditCards, this.getCallCount('removeCreditCard'),
+        'removedCreditCards mismatch');
+    assertEquals(
+        expected.clearedCachedCreditCards,
+        this.getCallCount('clearCachedCreditCard'),
+        'clearedCachedCreditCards mismatch');
+    assertEquals(
+        expected.addedVirtualCards, this.getCallCount('addVirtualCard'),
+        'addedVirtualCards mismatch');
+    assertEquals(
+        expected.requestedIbans, this.getCallCount('getIbanList'),
+        'requestedIbans mismatch');
+    assertEquals(
+        expected.removedIbans, this.getCallCount('removeIban'),
+        'removedIbans mismatch');
   }
 }

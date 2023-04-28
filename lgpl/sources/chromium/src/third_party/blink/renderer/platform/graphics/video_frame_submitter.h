@@ -74,9 +74,10 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   // cc::mojom::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
       WTF::Vector<viz::ReturnedResource> resources) override;
-  void OnBeginFrame(
-      const viz::BeginFrameArgs&,
-      const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&) override;
+  void OnBeginFrame(const viz::BeginFrameArgs&,
+                    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&,
+                    bool frame_ack,
+                    WTF::Vector<viz::ReturnedResource> resources) override;
   void OnBeginFramePausedChanged(bool paused) override {}
   void ReclaimResources(WTF::Vector<viz::ReturnedResource> resources) override;
   void OnCompositorFrameTransitionDirectiveProcessed(
@@ -204,7 +205,7 @@ class PLATFORM_EXPORT VideoFrameSubmitter
 
   base::OneShotTimer empty_frame_timer_;
 
-  absl::optional<int> last_frame_id_;
+  absl::optional<media::VideoFrame::ID> last_frame_id_;
 
   // We use cc::FrameSorter directly, rather than via
   // cc::CompositorFrameReportingController because video frames do not progress

@@ -51,12 +51,14 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
 #include "libavutil/parseutils.h"
+#include "libavutil/pixdesc.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/rational.h"
 #include "libavutil/samplefmt.h"
 #include "libavutil/stereo3d.h"
 
 #include "libavcodec/av1.h"
+#include "libavcodec/codec_desc.h"
 #include "libavcodec/xiph.h"
 #include "libavcodec/mpeg4audio.h"
 
@@ -1322,7 +1324,7 @@ static void mkv_write_video_color(EbmlWriter *writer, const AVStream *st,
         par->chroma_location <= AVCHROMA_LOC_TOP) {
         int xpos, ypos;
 
-        avcodec_enum_to_chroma_pos(&xpos, &ypos, par->chroma_location);
+        av_chroma_location_enum_to_pos(&xpos, &ypos, par->chroma_location);
         ebml_writer_add_uint(writer, MATROSKA_ID_VIDEOCOLORCHROMASITINGHORZ,
                              (xpos >> 7) + 1);
         ebml_writer_add_uint(writer, MATROSKA_ID_VIDEOCOLORCHROMASITINGVERT,
@@ -2046,7 +2048,7 @@ static int mkv_write_tag(MatroskaMuxContext *mkv, const AVDictionary *m,
 
     mkv_write_tag_targets(mkv, tmp_bc, elementid, uid);
 
-    while ((t = av_dict_get(m, "", t, AV_DICT_IGNORE_SUFFIX))) {
+    while ((t = av_dict_iterate(m, t))) {
         if (mkv_check_tag_name(t->key, elementid)) {
             ret = mkv_write_simpletag(tmp_bc, t);
             if (ret < 0)

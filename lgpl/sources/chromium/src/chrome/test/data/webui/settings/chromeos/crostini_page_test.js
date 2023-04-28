@@ -4,14 +4,14 @@
 
 import {CrostiniBrowserProxyImpl, GuestOsBrowserProxyImpl} from 'chrome://os-settings/chromeos/lazy_load.js';
 import {Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
-import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util.js';
+import {webUIListenerCallback} from 'chrome://resources/ash/common/cr.m.js';
+import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
+import {getDeepActiveElement} from 'chrome://resources/ash/common/util.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 import {eventToPromise, isVisible} from 'chrome://webui-test/test_util.js';
 
-import {assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 import {TestCrostiniBrowserProxy} from './test_crostini_browser_proxy.js';
 import {TestGuestOsBrowserProxy} from './test_guest_os_browser_proxy.js';
@@ -423,9 +423,7 @@ suite('CrostiniPageTests', function() {
         setCrostiniPrefs(false);
 
         await eventToPromise('popstate', window);
-        assertEquals(
-            Router.getInstance().getCurrentRoute(),
-            routes.CROSTINI);
+        assertEquals(Router.getInstance().currentRoute, routes.CROSTINI);
         assertTrue(!!crostiniPage.shadowRoot.querySelector('#enable'));
       });
 
@@ -448,14 +446,11 @@ suite('CrostiniPageTests', function() {
 
       test('HideOnDisable', async function() {
         assertEquals(
-            Router.getInstance().getCurrentRoute(),
-            routes.CROSTINI_DETAILS);
+            Router.getInstance().currentRoute, routes.CROSTINI_DETAILS);
         setCrostiniPrefs(false);
 
         await eventToPromise('popstate', window);
-        assertEquals(
-            Router.getInstance().getCurrentRoute(),
-            routes.CROSTINI);
+        assertEquals(Router.getInstance().currentRoute, routes.CROSTINI);
       });
 
       test('DiskResizeOpensWhenClicked', async function() {

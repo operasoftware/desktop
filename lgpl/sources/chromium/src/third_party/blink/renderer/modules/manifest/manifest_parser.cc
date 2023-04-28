@@ -7,7 +7,6 @@
 #include <string>
 
 #include "base/feature_list.h"
-#include "base/strings/stringprintf.h"
 #include "net/base/mime_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "third_party/blink/public/common/features.h"
@@ -23,7 +22,13 @@
 #include "third_party/blink/public/platform/url_conversion.h"
 #include "third_party/blink/public/platform/web_icon_sizes_parser.h"
 #include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/renderer/core/css/media_list.h"
+#include "third_party/blink/renderer/core/css/media_query_evaluator.h"
+#include "third_party/blink/renderer/core/css/media_values.h"
+#include "third_party/blink/renderer/core/css/media_values_cached.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
+#include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/permissions_policy/permissions_policy_parser.h"
 #include "third_party/blink/renderer/modules/manifest/manifest_uma_util.h"
 #include "third_party/blink/renderer/modules/navigatorcontentutils/navigator_content_utils.h"
@@ -42,9 +47,10 @@ namespace blink {
 
 namespace {
 
-static constexpr char kUrlHandlerWildcardPrefix[] = "%2A.";
+static constexpr char kOriginWildcardPrefix[] = "%2A.";
 // Keep in sync with web_app_origin_association_task.cc.
 static wtf_size_t kMaxUrlHandlersSize = 10;
+static wtf_size_t kMaxScopeExtensionsSize = 10;
 static wtf_size_t kMaxShortcutsSize = 10;
 static wtf_size_t kMaxOriginLength = 2000;
 
@@ -75,9 +81,7 @@ bool URLIsWithinScope(const KURL& url, const KURL& scope) {
          url.GetPath().StartsWith(scope.GetPath());
 }
 
-// This function should be kept in sync with IsHostValidForUrlHandler in
-// manifest_mojom_traits.cc.
-bool IsHostValidForUrlHandler(String host) {
+bool IsHostValidForScopeExtension(String host) {
   if (url::HostIsIPAddress(host.Utf8()))
     return true;
 
@@ -135,13 +139,14 @@ void ManifestParser::SetFileHandlerExtensionLimitForTesting(int limit) {
 bool ManifestParser::Parse() {
   DCHECK(!manifest_);
 
+  // TODO(crbug.com/1264024): Deprecate JSON comments here, if possible.
   JSONParseError error;
   bool has_comments = false;
-  std::unique_ptr<JSONValue> root = ParseJSON(data_, &error, &has_comments);
+  std::unique_ptr<JSONValue> root =
+      ParseJSONWithCommentsDeprecated(data_, &error, &has_comments);
   manifest_ = mojom::blink::Manifest::New();
   if (!root) {
     AddErrorInfo(error.message, true, error.line, error.column);
-    ManifestUmaUtil::ParseFailed();
     failed_ = true;
     return false;
   }
@@ -149,7 +154,6 @@ bool ManifestParser::Parse() {
   std::unique_ptr<JSONObject> root_object = JSONObject::From(std::move(root));
   if (!root_object) {
     AddErrorInfo("root element must be a valid JSON object.", true);
-    ManifestUmaUtil::ParseFailed();
     failed_ = true;
     return false;
   }
@@ -173,6 +177,7 @@ bool ManifestParser::Parse() {
   manifest_->file_handlers = ParseFileHandlers(root_object.get());
   manifest_->protocol_handlers = ParseProtocolHandlers(root_object.get());
   manifest_->url_handlers = ParseUrlHandlers(root_object.get());
+  manifest_->scope_extensions = ParseScopeExtensions(root_object.get());
   manifest_->lock_screen = ParseLockScreen(root_object.get());
   manifest_->note_taking = ParseNoteTaking(root_object.get());
   manifest_->related_applications = ParseRelatedApplications(root_object.get());
@@ -193,7 +198,6 @@ bool ManifestParser::Parse() {
   manifest_->gcm_sender_id = ParseGCMSenderID(root_object.get());
   manifest_->shortcuts = ParseShortcuts(root_object.get());
 
-  manifest_->isolated_storage = ParseIsolatedStorage(root_object.get());
   manifest_->permissions_policy =
       ParseIsolatedAppPermissions(root_object.get());
 
@@ -205,6 +209,18 @@ bool ManifestParser::Parse() {
 
   if (RuntimeEnabledFeatures::WebAppDarkModeEnabled(execution_context_)) {
     manifest_->user_preferences = ParseUserPreferences(root_object.get());
+
+    absl::optional<RGBA32> dark_theme_color =
+        ParseDarkColorOverride(root_object.get(), "theme_colors");
+    manifest_->has_dark_theme_color = dark_theme_color.has_value();
+    if (manifest_->has_dark_theme_color)
+      manifest_->dark_theme_color = *dark_theme_color;
+
+    absl::optional<RGBA32> dark_background_color =
+        ParseDarkColorOverride(root_object.get(), "background_colors");
+    manifest_->has_dark_background_color = dark_background_color.has_value();
+    if (manifest_->has_dark_background_color)
+      manifest_->dark_background_color = *dark_background_color;
   }
 
   if (RuntimeEnabledFeatures::WebAppTabStripEnabled(execution_context_) &&
@@ -218,8 +234,8 @@ bool ManifestParser::Parse() {
   return has_comments;
 }
 
-const mojom::blink::ManifestPtr& ManifestParser::manifest() const {
-  return manifest_;
+mojom::blink::ManifestPtr ManifestParser::TakeManifest() {
+  return std::move(manifest_);
 }
 
 void ManifestParser::TakeErrors(
@@ -1426,16 +1442,16 @@ ManifestParser::ParseUrlHandler(const JSONObject* object) {
   String host = origin->Host();
   auto url_handler = mojom::blink::ManifestUrlHandler::New();
   // Check for wildcard *.
-  if (host.StartsWith(kUrlHandlerWildcardPrefix)) {
+  if (host.StartsWith(kOriginWildcardPrefix)) {
     url_handler->has_origin_wildcard = true;
     // Trim the wildcard prefix to get the effective host. Minus one to exclude
     // the length of the null terminator.
-    host = host.Substring(sizeof(kUrlHandlerWildcardPrefix) - 1);
+    host = host.Substring(sizeof(kOriginWildcardPrefix) - 1);
   } else {
     url_handler->has_origin_wildcard = false;
   }
 
-  bool host_valid = IsHostValidForUrlHandler(host);
+  bool host_valid = IsHostValidForScopeExtension(host);
   if (!host_valid) {
     AddErrorInfo(
         "url_handlers entry ignored, domain of required property 'origin' is "
@@ -1455,6 +1471,164 @@ ManifestParser::ParseUrlHandler(const JSONObject* object) {
 
   url_handler->origin = origin;
   return std::move(url_handler);
+}
+
+Vector<mojom::blink::ManifestScopeExtensionPtr>
+ManifestParser::ParseScopeExtensions(const JSONObject* from) {
+  Vector<mojom::blink::ManifestScopeExtensionPtr> scope_extensions;
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kWebAppEnableScopeExtensions) ||
+      !from->Get("scope_extensions")) {
+    return scope_extensions;
+  }
+  JSONArray* extensions_list = from->GetArray("scope_extensions");
+  if (!extensions_list) {
+    AddErrorInfo("property 'scope_extensions' ignored, type array expected.");
+    return scope_extensions;
+  }
+
+  JSONValue::ValueType expected_entry_type = JSONValue::kTypeNull;
+  for (wtf_size_t i = 0; i < extensions_list->size(); ++i) {
+    if (i == kMaxScopeExtensionsSize) {
+      AddErrorInfo("property 'scope_extensions' contains more than " +
+                   String::Number(kMaxScopeExtensionsSize) +
+                   " valid elements, only the first " +
+                   String::Number(kMaxScopeExtensionsSize) + " are parsed.");
+      break;
+    }
+
+    const JSONValue* extensions_entry = extensions_list->at(i);
+    if (!extensions_entry) {
+      AddErrorInfo("scope_extensions entry ignored, entry is null.");
+      continue;
+    }
+
+    JSONValue::ValueType entry_type = extensions_entry->GetType();
+    if (entry_type != JSONValue::kTypeString &&
+        entry_type != JSONValue::kTypeObject) {
+      AddErrorInfo(
+          "scope_extensions entry ignored, type string or object expected.");
+      continue;
+    }
+
+    // Check whether first scope extension entry in the list is a string or
+    // object to make sure that following entries have the same type, ignoring
+    // entries that are null or other types.
+    if (expected_entry_type != JSONValue::kTypeString &&
+        expected_entry_type != JSONValue::kTypeObject) {
+      expected_entry_type = entry_type;
+    }
+
+    absl::optional<mojom::blink::ManifestScopeExtensionPtr> scope_extension =
+        absl::nullopt;
+    if (expected_entry_type == JSONValue::kTypeString) {
+      String scope_extension_origin;
+      if (!extensions_entry->AsString(&scope_extension_origin)) {
+        AddErrorInfo("scope_extensions entry ignored, type string expected.");
+        continue;
+      }
+      scope_extension = ParseScopeExtensionOrigin(scope_extension_origin);
+    } else {
+      const JSONObject* extension_object = JSONObject::Cast(extensions_entry);
+      if (!extension_object) {
+        AddErrorInfo("scope_extensions entry ignored, type object expected.");
+        continue;
+      }
+      scope_extension = ParseScopeExtension(extension_object);
+    }
+
+    if (!scope_extension) {
+      continue;
+    }
+    scope_extensions.push_back(std::move(scope_extension.value()));
+  }
+  return scope_extensions;
+}
+
+absl::optional<mojom::blink::ManifestScopeExtensionPtr>
+ManifestParser::ParseScopeExtension(const JSONObject* object) {
+  DCHECK(base::FeatureList::IsEnabled(
+      blink::features::kWebAppEnableScopeExtensions));
+  if (!object->Get("origin")) {
+    AddErrorInfo(
+        "scope_extensions entry ignored, required property 'origin' is "
+        "missing.");
+    return absl::nullopt;
+  }
+  const absl::optional<String> origin_string =
+      ParseString(object, "origin", Trim(true));
+  if (!origin_string.has_value()) {
+    return absl::nullopt;
+  }
+
+  return ParseScopeExtensionOrigin(*origin_string);
+}
+
+absl::optional<mojom::blink::ManifestScopeExtensionPtr>
+ManifestParser::ParseScopeExtensionOrigin(const String& origin_string) {
+  DCHECK(base::FeatureList::IsEnabled(
+      blink::features::kWebAppEnableScopeExtensions));
+
+  // TODO(crbug.com/1250011): pre-process for input without scheme.
+  // (eg. example.com instead of https://example.com) because we can always
+  // assume the use of https for scope extensions. Remove this TODO if we decide
+  // to require fully specified https scheme in this origin input.
+
+  if (origin_string.length() > kMaxOriginLength) {
+    AddErrorInfo(
+        "scope_extensions entry ignored, 'origin' exceeds maximum character "
+        "length of " +
+        String::Number(kMaxOriginLength) + " .");
+    return absl::nullopt;
+  }
+
+  auto origin = SecurityOrigin::CreateFromString(origin_string);
+  if (!origin || origin->IsOpaque()) {
+    AddErrorInfo(
+        "scope_extensions entry ignored, required property 'origin' is "
+        "invalid.");
+    return absl::nullopt;
+  }
+  if (origin->Protocol() != url::kHttpsScheme) {
+    AddErrorInfo(
+        "scope_extensions entry ignored, required property 'origin' must use "
+        "the https scheme.");
+    return absl::nullopt;
+  }
+
+  String host = origin->Host();
+  auto scope_extension = mojom::blink::ManifestScopeExtension::New();
+  // Check for wildcard *.
+  if (host.StartsWith(kOriginWildcardPrefix)) {
+    scope_extension->has_origin_wildcard = true;
+    // Trim the wildcard prefix to get the effective host. Minus one to exclude
+    // the length of the null terminator.
+    host = host.Substring(sizeof(kOriginWildcardPrefix) - 1);
+  } else {
+    scope_extension->has_origin_wildcard = false;
+  }
+
+  bool host_valid = IsHostValidForScopeExtension(host);
+  if (!host_valid) {
+    AddErrorInfo(
+        "scope_extensions entry ignored, domain of required property 'origin' "
+        "is invalid.");
+    return absl::nullopt;
+  }
+
+  if (scope_extension->has_origin_wildcard) {
+    origin = SecurityOrigin::CreateFromValidTuple(origin->Protocol(), host,
+                                                  origin->Port());
+    if (!origin) {
+      AddErrorInfo(
+          "scope_extensions entry ignored, required property 'origin' is "
+          "invalid.");
+      return absl::nullopt;
+    }
+  }
+
+  scope_extension->origin = origin;
+  return std::move(scope_extension);
 }
 
 KURL ManifestParser::ParseLockScreenStartUrl(const JSONObject* lock_screen) {
@@ -1606,15 +1780,6 @@ String ManifestParser::ParseGCMSenderID(const JSONObject* object) {
   absl::optional<String> gcm_sender_id =
       ParseString(object, "gcm_sender_id", Trim(true));
   return gcm_sender_id.has_value() ? *gcm_sender_id : String();
-}
-
-bool ManifestParser::ParseIsolatedStorage(const JSONObject* object) {
-  bool is_storage_isolated = ParseBoolean(object, "isolated_storage", false);
-  if (is_storage_isolated && manifest_->scope.GetPath() != "/") {
-    AddErrorInfo("Isolated storage is only supported with a scope of \"/\".");
-    return false;
-  }
-  return is_storage_isolated;
 }
 
 Vector<blink::ParsedPermissionsPolicyDeclaration>
@@ -1863,6 +2028,59 @@ mojom::blink::ManifestUserPreferencesPtr ManifestParser::ParseUserPreferences(
   }
 
   return result;
+}
+
+absl::optional<RGBA32> ManifestParser::ParseDarkColorOverride(
+    const JSONObject* object,
+    const String& key) {
+  JSONValue* json_value = object->Get(key);
+  if (!json_value)
+    return absl::nullopt;
+
+  JSONArray* colors_list = object->GetArray(key);
+  if (!colors_list) {
+    AddErrorInfo("property '" + key + "' ignored, type array expected.");
+    return absl::nullopt;
+  }
+
+  MediaValuesCached::MediaValuesCachedData media_values_data;
+  media_values_data.preferred_color_scheme =
+      mojom::blink::PreferredColorScheme::kDark;
+
+  MediaQueryEvaluator media_query_evaluator(
+      MakeGarbageCollected<MediaValuesCached>(media_values_data));
+
+  for (wtf_size_t i = 0; i < colors_list->size(); ++i) {
+    const JSONObject* list_item = JSONObject::Cast(colors_list->at(i));
+    if (!list_item)
+      continue;
+
+    absl::optional<String> media_query =
+        ParseString(list_item, "media", Trim(false));
+    absl::optional<RGBA32> color = ParseColor(list_item, "color");
+    if (!media_query.has_value() || !color.has_value())
+      continue;
+
+    auto tokens = CSSTokenizer(media_query.value()).TokenizeToEOF();
+    CSSParserTokenRange range(tokens);
+    while (!range.AtEnd()) {
+      if (range.Peek().GetType() == kIdentToken &&
+          (range.Peek().Value().ToString().LowerASCII() !=
+               "prefers-color-scheme" &&
+           range.Peek().Id() != CSSValueID::kDark)) {
+        // Skip the query if it contains anything other than
+        // "(prefers-color-scheme: dark)".
+        break;
+      }
+      range.Consume();
+      if (range.AtEnd() && media_query_evaluator.Eval(*MediaQuerySet::Create(
+                               media_query.value(), execution_context_))) {
+        return color.value();
+      }
+    }
+  }
+
+  return absl::nullopt;
 }
 
 mojom::blink::ManifestTabStripPtr ManifestParser::ParseTabStrip(

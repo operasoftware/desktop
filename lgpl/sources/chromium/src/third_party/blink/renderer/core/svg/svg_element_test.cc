@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/svg/svg_element_rare_data.h"
@@ -16,10 +17,6 @@ namespace blink {
 class SVGElementTest : public PageTestBase {};
 
 TEST_F(SVGElementTest, BaseComputedStyleForSMILWithContainerQueries) {
-  ScopedCSSContainerQueriesForTest scoped_cq(true);
-  ScopedCSSContainerSkipStyleRecalcForTest scoped_skip(true);
-  ScopedLayoutNGForTest scoped_ng(true);
-
   GetDocument().body()->setInnerHTML(R"HTML(
     <style>
       #rect2 { display: none }
@@ -71,10 +68,6 @@ TEST_F(SVGElementTest, BaseComputedStyleForSMILWithContainerQueries) {
 }
 
 TEST_F(SVGElementTest, ContainerUnitContext) {
-  ScopedCSSContainerQueriesForTest scoped_cq(true);
-  ScopedCSSContainerSkipStyleRecalcForTest scoped_skip(true);
-  ScopedLayoutNGForTest scoped_ng(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       #container, #svg { container-type:size; }

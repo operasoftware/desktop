@@ -25,6 +25,7 @@
 #include "libavutil/dict.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
+#include "libavcodec/codec_desc.h"
 #include "avformat.h"
 #include "avlanguage.h"
 #include "avio_internal.h"
@@ -569,10 +570,10 @@ static int asf_write_header1(AVFormatContext *s, int64_t file_size,
         end_header(pb, hpos);
     }
     if (metadata_count) {
-        AVDictionaryEntry *tag = NULL;
+        const AVDictionaryEntry *tag = NULL;
         hpos = put_header(pb, &ff_asf_extended_content_header);
         avio_wl16(pb, metadata_count);
-        while ((tag = av_dict_get(s->metadata, "", tag, AV_DICT_IGNORE_SUFFIX))) {
+        while ((tag = av_dict_iterate(s->metadata, tag))) {
             put_str16(pb, dyn_buf, tag->key);
             avio_wl16(pb, 0);
             put_str16(pb, dyn_buf, tag->value);

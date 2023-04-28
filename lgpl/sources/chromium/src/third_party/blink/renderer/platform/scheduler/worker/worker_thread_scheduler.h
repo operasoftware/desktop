@@ -29,7 +29,7 @@ class UkmRecorder;
 namespace blink {
 namespace scheduler {
 
-class WorkerScheduler;
+class WorkerSchedulerImpl;
 class WorkerSchedulerProxy;
 class WakeUpBudgetPool;
 class CPUTimeBudgetPool;
@@ -50,6 +50,7 @@ class PLATFORM_EXPORT WorkerThreadScheduler : public NonMainThreadSchedulerBase,
 
   // ThreadScheduler implementation:
   scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> CleanupTaskRunner() override;
   bool ShouldYieldForHighPriorityWork() override;
   void AddTaskObserver(base::TaskObserver* task_observer) override;
   void RemoveTaskObserver(base::TaskObserver* task_observer) override;
@@ -86,8 +87,8 @@ class PLATFORM_EXPORT WorkerThreadScheduler : public NonMainThreadSchedulerBase,
 
   // Each WorkerScheduler should notify NonMainThreadSchedulerImpl when it is
   // created or destroyed.
-  void RegisterWorkerScheduler(WorkerScheduler* worker_scheduler);
-  void UnregisterWorkerScheduler(WorkerScheduler* worker_scheduler);
+  void RegisterWorkerScheduler(WorkerSchedulerImpl* worker_scheduler);
+  void UnregisterWorkerScheduler(WorkerSchedulerImpl* worker_scheduler);
 
   // Returns the control task queue.  Tasks posted to this queue are executed
   // with the highest priority. Care must be taken to avoid starvation of other
@@ -116,7 +117,7 @@ class PLATFORM_EXPORT WorkerThreadScheduler : public NonMainThreadSchedulerBase,
   void SetCPUTimeBudgetPoolForTesting(
       std::unique_ptr<CPUTimeBudgetPool> cpu_time_budget_pool);
 
-  HashSet<WorkerScheduler*>& GetWorkerSchedulersForTesting();
+  HashSet<WorkerSchedulerImpl*>& GetWorkerSchedulersForTesting();
 
   void SetUkmTaskSamplingRateForTest(double rate);
   void SetUkmRecorderForTest(std::unique_ptr<ukm::UkmRecorder> ukm_recorder);
@@ -124,6 +125,12 @@ class PLATFORM_EXPORT WorkerThreadScheduler : public NonMainThreadSchedulerBase,
   virtual void PerformMicrotaskCheckpoint();
 
  private:
+  // ThreadSchedulerBase overrides
+  base::SequencedTaskRunner* GetVirtualTimeTaskRunner() override;
+  void OnVirtualTimeDisabled() override;
+  void OnVirtualTimePaused() override;
+  void OnVirtualTimeResumed() override;
+
   void MaybeStartLongIdlePeriod();
 
   void RecordTaskUkm(
@@ -135,7 +142,6 @@ class PLATFORM_EXPORT WorkerThreadScheduler : public NonMainThreadSchedulerBase,
   scoped_refptr<NonMainThreadTaskQueue> idle_helper_queue_;
   IdleHelper idle_helper_;
   bool initialized_ = false;
-  scoped_refptr<NonMainThreadTaskQueue> control_task_queue_;
   scoped_refptr<base::SingleThreadTaskRunner> v8_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
   SchedulingLifecycleState lifecycle_state_;
@@ -147,7 +153,7 @@ class PLATFORM_EXPORT WorkerThreadScheduler : public NonMainThreadSchedulerBase,
   TraceableVariableController traceable_variable_controller_;
 
   // Worker schedulers associated with this thread.
-  HashSet<WorkerScheduler*> worker_schedulers_;
+  HashSet<WorkerSchedulerImpl*> worker_schedulers_;
 
   std::unique_ptr<WakeUpBudgetPool> wake_up_budget_pool_;
   std::unique_ptr<CPUTimeBudgetPool> cpu_time_budget_pool_;

@@ -33,6 +33,7 @@
 #include "base/functional/function_ref.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/process/process_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/trees/layer_tree_host.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -48,7 +49,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_iterator_result_value.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/properties/css_unresolved_property.h"
@@ -58,7 +58,6 @@
 #include "third_party/blink/renderer/core/dom/dom_string_list.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
-#include "third_party/blink/renderer/core/dom/iterator.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/range.h"
@@ -180,6 +179,7 @@
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/graphics/paint/raster_invalidation_tracking.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_handle.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
@@ -387,7 +387,7 @@ TestReadableStreamSource::Optimizer::PerformInProcessOptimization(
   ExecutionContext* context = ExecutionContext::From(script_state);
 
   Reply reply = CrossThreadBindOnce(&TestReadableStreamSource::Attach,
-                                    WrapCrossThreadPersistent(source));
+                                    MakeUnwrappingCrossThreadHandle(source));
 
   PostCrossThreadTask(
       *task_runner_, FROM_HERE,
@@ -605,7 +605,7 @@ TestWritableStreamSink::Optimizer::PerformInProcessOptimization(
 
   ExecutionContext* context = ExecutionContext::From(script_state);
   Reply reply = CrossThreadBindOnce(&TestWritableStreamSink::Attach,
-                                    WrapCrossThreadPersistent(sink));
+                                    MakeUnwrappingCrossThreadHandle(sink));
   PostCrossThreadTask(
       *task_runner_, FROM_HERE,
       CrossThreadBindOnce(std::move(callback_),
@@ -1105,10 +1105,10 @@ String Internals::elementLayoutTreeAsText(Element* element,
 }
 
 CSSStyleDeclaration* Internals::computedStyleIncludingVisitedInfo(
-    Node* node) const {
-  DCHECK(node);
+    Element* element) const {
+  DCHECK(element);
   bool allow_visited_style = true;
-  return MakeGarbageCollected<CSSComputedStyleDeclaration>(node,
+  return MakeGarbageCollected<CSSComputedStyleDeclaration>(element,
                                                            allow_visited_style);
 }
 
@@ -1228,7 +1228,7 @@ Vector<String> Internals::formControlStateOfHistoryItem(
                                       "No history item is available.");
     return Vector<String>();
   }
-  return main_item->FormState();
+  return main_item->GetDocumentState();
 }
 
 void Internals::setFormControlStateOfHistoryItem(
@@ -1242,8 +1242,8 @@ void Internals::setFormControlStateOfHistoryItem(
                                       "No history item is available.");
     return;
   }
-  main_item->ClearFormState();
-  main_item->SetFormState(state);
+  main_item->ClearDocumentState();
+  main_item->SetDocumentState(state);
 }
 
 DOMWindow* Internals::pagePopupWindow() const {
@@ -1808,20 +1808,6 @@ void Internals::setAutofilledValue(Element* element,
   }
 }
 
-void Internals::setEditingValue(Element* element,
-                                const String& value,
-                                ExceptionState& exception_state) {
-  DCHECK(element);
-  auto* html_input_element = DynamicTo<HTMLInputElement>(element);
-  if (!html_input_element) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidNodeTypeError,
-                                      "The element provided is not an INPUT.");
-    return;
-  }
-
-  html_input_element->SetEditingValue(value);
-}
-
 void Internals::setAutofilled(Element* element,
                               bool enabled,
                               ExceptionState& exception_state) {
@@ -2017,6 +2003,32 @@ Node* Internals::touchNodeAdjustedToBestContextMenuNode(
   gfx::Point adjusted_point;
   document->GetFrame()->GetEventHandler().BestContextMenuNodeForHitTestResult(
       location, result, adjusted_point, target_node);
+  return target_node;
+}
+
+Node* Internals::touchNodeAdjustedToBestStylusWritableNode(
+    int x,
+    int y,
+    int width,
+    int height,
+    Document* document,
+    ExceptionState& exception_state) {
+  DCHECK(document);
+  if (!document->GetFrame()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
+                                      "The document provided is invalid.");
+    return nullptr;
+  }
+
+  HitTestLocation location;
+  HitTestResult result;
+  HitTestRect(location, result, x, y, width, height, document);
+  Node* target_node = nullptr;
+  gfx::Point adjusted_point;
+  document->GetFrame()
+      ->GetEventHandler()
+      .BestStylusWritableNodeForHitTestResult(location, result, adjusted_point,
+                                              target_node);
   return target_node;
 }
 
@@ -2260,6 +2272,9 @@ HitTestLayerRectList* Internals::touchEventTargetLayerRects(
   document->View()->UpdateAllLifecyclePhasesForTest();
 
   auto* hit_test_rects = MakeGarbageCollected<HitTestLayerRectList>();
+  if (!document->View()->RootCcLayer()) {
+    return hit_test_rects;
+  }
   for (const auto& layer : document->View()->RootCcLayer()->children()) {
     const cc::TouchActionRegion& touch_action_region =
         layer->touch_action_region();
@@ -3142,8 +3157,8 @@ DOMArrayBuffer* Internals::serializeObject(
 ScriptValue Internals::deserializeBuffer(v8::Isolate* isolate,
                                          DOMArrayBuffer* buffer) const {
   scoped_refptr<SerializedScriptValue> serialized_value =
-      SerializedScriptValue::Create(static_cast<const char*>(buffer->Data()),
-                                    buffer->ByteLength());
+      SerializedScriptValue::Create(base::make_span(
+          static_cast<const uint8_t*>(buffer->Data()), buffer->ByteLength()));
   return ScriptValue(isolate, serialized_value->Deserialize(isolate));
 }
 
@@ -3583,7 +3598,8 @@ Vector<String> Internals::getCSSPropertyLonghands() const {
   Vector<String> result;
   for (CSSPropertyID property : CSSPropertyIDList()) {
     const CSSProperty& property_class = CSSProperty::Get(property);
-    if (property_class.IsLonghand()) {
+    if (property_class.IsWebExposed(document_->GetExecutionContext()) &&
+        property_class.IsLonghand()) {
       result.push_back(property_class.GetPropertyNameString());
     }
   }
@@ -3594,7 +3610,8 @@ Vector<String> Internals::getCSSPropertyShorthands() const {
   Vector<String> result;
   for (CSSPropertyID property : CSSPropertyIDList()) {
     const CSSProperty& property_class = CSSProperty::Get(property);
-    if (property_class.IsShorthand()) {
+    if (property_class.IsWebExposed(document_->GetExecutionContext()) &&
+        property_class.IsShorthand()) {
       result.push_back(property_class.GetPropertyNameString());
     }
   }
@@ -3605,8 +3622,11 @@ Vector<String> Internals::getCSSPropertyAliases() const {
   Vector<String> result;
   for (CSSPropertyID alias : kCSSPropertyAliasList) {
     DCHECK(IsPropertyAlias(alias));
-    result.push_back(CSSUnresolvedProperty::GetAliasProperty(alias)
-                         ->GetPropertyNameString());
+    const CSSUnresolvedProperty* property_class =
+        CSSUnresolvedProperty::GetAliasProperty(alias);
+    if (property_class->IsWebExposed(document_->GetExecutionContext())) {
+      result.push_back(property_class->GetPropertyNameString());
+    }
   }
   return result;
 }
@@ -3735,10 +3755,6 @@ Vector<String> Internals::supportedTextEncodingLabels() const {
 
 void Internals::simulateRasterUnderInvalidations(bool enable) {
   RasterInvalidationTracking::SimulateRasterUnderInvalidations(enable);
-}
-
-unsigned Internals::LifecycleUpdateCount() const {
-  return document_->View()->LifecycleUpdateCountForTesting();
 }
 
 void Internals::DisableIntersectionObserverThrottleDelay() const {
@@ -3913,9 +3929,9 @@ ScriptValue Internals::createWritableStreamAndSink(
   auto internal_sink = std::make_unique<TestWritableStreamSink::InternalSink>(
       context->GetTaskRunner(TaskType::kInternalDefault),
       CrossThreadBindOnce(&TestWritableStreamSink::Resolve,
-                          WrapCrossThreadPersistent(resolver)),
+                          MakeUnwrappingCrossThreadHandle(resolver)),
       CrossThreadBindOnce(&TestWritableStreamSink::Reject,
-                          WrapCrossThreadPersistent(resolver)));
+                          MakeUnwrappingCrossThreadHandle(resolver)));
   auto* sink = MakeGarbageCollected<TestWritableStreamSink>(script_state, type);
 
   sink->Attach(std::move(internal_sink));

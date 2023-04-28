@@ -32,6 +32,7 @@ namespace blink {
 
 class Document;
 class Length;
+class TreeScope;
 
 class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
  public:
@@ -80,6 +81,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return class_type_ == kBorderImageSliceClass;
   }
   bool IsColorValue() const { return class_type_ == kColorClass; }
+  bool IsColorMixValue() const { return class_type_ == kColorMixClass; }
   bool IsCounterValue() const { return class_type_ == kCounterClass; }
   bool IsCursorImageValue() const { return class_type_ == kCursorImageClass; }
   bool IsCrossfadeValue() const { return class_type_ == kCrossfadeClass; }
@@ -131,6 +133,9 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsShadowValue() const { return class_type_ == kShadowClass; }
   bool IsStringValue() const { return class_type_ == kStringClass; }
   bool IsURIValue() const { return class_type_ == kURIClass; }
+  bool IsLinearTimingFunctionValue() const {
+    return class_type_ == kLinearTimingFunctionClass;
+  }
   bool IsCubicBezierTimingFunctionValue() const {
     return class_type_ == kCubicBezierTimingFunctionClass;
   }
@@ -172,6 +177,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsCyclicVariableValue() const {
     return class_type_ == kCyclicVariableValueClass;
   }
+  bool IsAlternateValue() const { return class_type_ == kAlternateClass; }
   bool IsAxisValue() const { return class_type_ == kAxisClass; }
   bool IsShorthandWrapperValue() const {
     return class_type_ == kKeyframeShorthandClass;
@@ -187,6 +193,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   }
 
   bool IsScrollValue() const { return class_type_ == kScrollClass; }
+  bool IsViewValue() const { return class_type_ == kViewClass; }
   bool IsRatioValue() const { return class_type_ == kRatioClass; }
 
   bool HasFailedOrCanceledSubresources() const;
@@ -195,6 +202,16 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   bool operator==(const CSSValue&) const;
   bool operator!=(const CSSValue& o) const { return !(*this == o); }
+
+  // Returns the same CSS value, but populated with the given tree scope for
+  // tree-scoped names and references.
+  const CSSValue& EnsureScopedValue(const TreeScope* tree_scope) const {
+    if (!needs_tree_scope_population_) {
+      return *this;
+    }
+    return PopulateWithTreeScope(tree_scope);
+  }
+  bool IsScopedValue() const { return !needs_tree_scope_population_; }
 
   void TraceAfterDispatch(blink::Visitor* visitor) const {}
   void Trace(Visitor*) const;
@@ -205,6 +222,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kMathFunctionClass,
     kIdentifierClass,
     kColorClass,
+    kColorMixClass,
     kCounterClass,
     kQuadClass,
     kCustomIdentClass,
@@ -213,6 +231,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kValuePairClass,
     kLightDarkValuePairClass,
     kScrollClass,
+    kViewClass,
     kRatioClass,
 
     // Basic shape classes.
@@ -236,6 +255,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kConicGradientClass,
 
     // Timing function classes.
+    kLinearTimingFunctionClass,
     kCubicBezierTimingFunctionClass,
     kStepsTimingFunctionClass,
 
@@ -246,6 +266,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kFontFamilyClass,
     kFontStyleRangeClass,
     kFontVariationClass,
+    kAlternateClass,
 
     kInheritedClass,
     kInitialClass,
@@ -291,36 +312,40 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   ClassType GetClassType() const { return static_cast<ClassType>(class_type_); }
 
+  const CSSValue& PopulateWithTreeScope(const TreeScope*) const;
+
   explicit CSSValue(ClassType class_type)
-      : numeric_literal_unit_type_(0),
-        value_list_separator_(kSpaceSeparator),
-        allows_negative_percentage_reference_(false),
+      : allows_negative_percentage_reference_(false),
+        needs_tree_scope_population_(false),
         class_type_(class_type) {}
 
   // NOTE: This class is non-virtual for memory and performance reasons.
   // Don't go making it virtual again unless you know exactly what you're doing!
 
  protected:
-  // The bits in this section are only used by specific subclasses but kept here
-  // to maximize struct packing.
-  // The bits are ordered and split into groups to such that from the
-  // perspective of each subclass, each field is a separate memory location.
-  // Using NOLINT here allows to use uint8_t as bitfield type which reduces
-  // size of CSSValue from 4 bytes to 3 bytes.
+  // The value in this section are only used by specific subclasses but kept
+  // here to maximize struct packing. If we need space for more, we could use
+  // bitfields, but we don't currently (and Clang creates better code if we
+  // avoid it). (This class used to be 3 and not 4 bytes, but this doesn't
+  // actually save any memory, due to padding.)
 
   // CSSNumericLiteralValue bits:
-  // This field hold CSSPrimitiveValue::UnitType.
-  uint8_t numeric_literal_unit_type_ : 7;  // NOLINT
-
-  // Force a new memory location. This will make TSAN treat the 2 fields above
-  // this line as a separate memory location than the 2 fields below it.
-  char : 0;
+  // This field holds CSSPrimitiveValue::UnitType.
+  uint8_t numeric_literal_unit_type_ = 0;
 
   // CSSNumericLiteralValue bits:
-  uint8_t value_list_separator_ : kValueListSeparatorBits;  // NOLINT
+  uint8_t value_list_separator_ = kSpaceSeparator;
 
   // CSSMathFunctionValue:
   uint8_t allows_negative_percentage_reference_ : 1;  // NOLINT
+
+  // Any CSS value that defines/references a global name should be tree-scoped.
+  // However, to allow sharing StyleSheetContents, we don't directly populate
+  // CSS values with tree scope in parsed results, but wait until resolving an
+  // element's style.
+  // The flag is true if the value contains such references but hasn't been
+  // populated with a tree scope.
+  uint8_t needs_tree_scope_population_ : 1;  // NOLINT
 
  private:
   const uint8_t class_type_;  // ClassType

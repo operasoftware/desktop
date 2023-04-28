@@ -114,6 +114,8 @@ TEST_F(CSSPrimitiveValueTest, IsResolution) {
   EXPECT_FALSE(Create({5.0, UnitType::kNumber})->IsResolution());
   EXPECT_FALSE(Create({5.0, UnitType::kDegrees})->IsResolution());
   EXPECT_TRUE(Create({5.0, UnitType::kDotsPerPixel})->IsResolution());
+  EXPECT_TRUE(Create({5.0, UnitType::kX})->IsResolution());
+  EXPECT_TRUE(Create({5.0, UnitType::kDotsPerInch})->IsResolution());
   EXPECT_TRUE(Create({5.0, UnitType::kDotsPerCentimeter})->IsResolution());
 }
 
@@ -241,8 +243,6 @@ TEST_F(CSSPrimitiveValueTest, TestCanonicalizingNumberUnitCategory) {
 }
 
 TEST_F(CSSPrimitiveValueTest, HasContainerRelativeUnits) {
-  ScopedCSSContainerQueriesForTest scoped_feature(true);
-
   EXPECT_TRUE(HasContainerRelativeUnits("1cqw"));
   EXPECT_TRUE(HasContainerRelativeUnits("1cqh"));
   EXPECT_TRUE(HasContainerRelativeUnits("1cqi"));

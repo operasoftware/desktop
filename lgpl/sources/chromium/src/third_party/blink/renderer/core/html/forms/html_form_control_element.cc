@@ -129,7 +129,7 @@ void HTMLFormControlElement::ParseAttribute(
     UseCounter::Count(GetDocument(), WebFeature::kFormAttribute);
   } else if (name == html_names::kReadonlyAttr) {
     if (params.old_value.IsNull() != params.new_value.IsNull()) {
-      UpdateWillValidateCache();
+      ReadonlyAttributeChanged();
       PseudoStateChanged(CSSSelector::kPseudoReadOnly);
       PseudoStateChanged(CSSSelector::kPseudoReadWrite);
       InvalidateIfHasEffectiveAppearance();
@@ -158,6 +158,8 @@ void HTMLFormControlElement::DisabledAttributeChanged() {
   // Replace |CheckedStateChanged| with a generic tree changed event.
   if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
     cache->CheckedStateChanged(this);
+
+  CheckAndPossiblyClosePopoverStack();
 }
 
 void HTMLFormControlElement::RequiredAttributeChanged() {
@@ -244,6 +246,7 @@ Node::InsertionNotificationRequest HTMLFormControlElement::InsertedInto(
 void HTMLFormControlElement::RemovedFrom(ContainerNode& insertion_point) {
   HTMLElement::RemovedFrom(insertion_point);
   ListedElement::RemovedFrom(insertion_point);
+  CheckAndPossiblyClosePopoverStack();
 }
 
 void HTMLFormControlElement::WillChangeForm() {
@@ -256,6 +259,7 @@ void HTMLFormControlElement::DidChangeForm() {
   ListedElement::DidChangeForm();
   if (formOwner() && isConnected() && CanBeSuccessfulSubmitButton())
     formOwner()->InvalidateDefaultButtonStyle();
+  CheckAndPossiblyClosePopoverStack();
 }
 
 HTMLFormElement* HTMLFormControlElement::formOwner() const {
@@ -320,90 +324,102 @@ bool HTMLFormControlElement::IsSuccessfulSubmitButton() const {
   return CanBeSuccessfulSubmitButton() && !IsDisabledFormControl();
 }
 
-// The element is returned if a) that element exists, b) it is a valid Popup
-// element, and c) this form control supports popup triggering. If multiple
+// The element is returned if a) that element exists, b) it is a valid Popover
+// element, and c) this form control supports popover triggering. If multiple
 // toggle attributes are present:
 //  1. Only one idref will ever be used, if multiple attributes are present.
-//  2. If 'popuptoggletarget' is present, its IDREF will be used.
-//  3. If 'popupshowtarget' is present and 'popuptoggletarget' isn't present
-//     or its value doesn't match that of popupshowtarget, only popupshowtarget
-//     will be used.
-//  4. If both 'popupshowtarget' and 'popuphidetarget' are present and their
+//  2. If 'popovertoggletarget' is present, its IDREF will be used.
+//  3. If 'popovershowtarget' is present and 'popovertoggletarget' isn't present
+//     or its value doesn't match that of popovershowtarget, only
+//     popovershowtarget will be used.
+//  4. If both 'popovershowtarget' and 'popoverhidetarget' are present and their
 //     values match, the behavior is to toggle.
-HTMLFormControlElement::PopupTargetElement
-HTMLFormControlElement::popupTargetElement() const {
-  const PopupTargetElement no_element{.element = nullptr,
-                                      .action = PopupTriggerAction::kNone,
-                                      .attribute_name = g_null_name};
-  if (!RuntimeEnabledFeatures::HTMLPopupAttributeEnabled(
+HTMLFormControlElement::PopoverTargetElement
+HTMLFormControlElement::popoverTargetElement() {
+  const PopoverTargetElement no_element{.popover = nullptr,
+                                        .action = PopoverTriggerAction::kNone,
+                                        .attribute_name = g_null_name};
+  if (!RuntimeEnabledFeatures::HTMLPopoverAttributeEnabled(
           GetDocument().GetExecutionContext()) ||
       !IsInTreeScope() ||
-      SupportsPopupTriggering() == PopupTriggerSupport::kNone) {
+      SupportsPopoverTriggering() == PopoverTriggerSupport::kNone ||
+      IsDisabledFormControl() || (Form() && IsSuccessfulSubmitButton())) {
     return no_element;
   }
 
-  AtomicString idref;
-  QualifiedName attribute_name = html_names::kPopuptoggletargetAttr;
-  PopupTriggerAction action = PopupTriggerAction::kToggle;
-  if (FastHasAttribute(html_names::kPopuptoggletargetAttr)) {
-    idref = FastGetAttribute(html_names::kPopuptoggletargetAttr);
-  } else if (FastHasAttribute(html_names::kPopupshowtargetAttr)) {
-    idref = FastGetAttribute(html_names::kPopupshowtargetAttr);
-    action = PopupTriggerAction::kShow;
-    attribute_name = html_names::kPopupshowtargetAttr;
+  Element* target_element;
+  QualifiedName attribute_name = html_names::kPopovertoggletargetAttr;
+  PopoverTriggerAction action = PopoverTriggerAction::kToggle;
+  target_element = GetElementAttribute(html_names::kPopovertoggletargetAttr);
+  if (!target_element) {
+    target_element = GetElementAttribute(html_names::kPopovershowtargetAttr);
+    if (target_element) {
+      action = PopoverTriggerAction::kShow;
+      attribute_name = html_names::kPopovershowtargetAttr;
+    }
   }
-  if (FastHasAttribute(html_names::kPopuphidetargetAttr)) {
-    if (idref.IsNull()) {
-      idref = FastGetAttribute(html_names::kPopuphidetargetAttr);
-      action = PopupTriggerAction::kHide;
-      attribute_name = html_names::kPopuphidetargetAttr;
-    } else if (FastGetAttribute(html_names::kPopuphidetargetAttr) == idref) {
-      action = PopupTriggerAction::kToggle;
+  if (Element* hide_target =
+          GetElementAttribute(html_names::kPopoverhidetargetAttr)) {
+    if (!target_element) {
+      target_element = hide_target;
+      action = PopoverTriggerAction::kHide;
+      attribute_name = html_names::kPopoverhidetargetAttr;
+    } else if (hide_target == target_element) {
+      action = PopoverTriggerAction::kToggle;
       // Leave attribute_name as-is in this case.
     }
   }
-  if (idref.IsNull())
+  if (!target_element) {
     return no_element;
-  Element* popup_element = GetTreeScope().getElementById(idref);
-  if (!popup_element || !popup_element->HasPopupAttribute())
+  }
+  auto* target_popover = DynamicTo<HTMLElement>(target_element);
+  if (!target_popover || !target_popover->HasPopoverAttribute()) {
     return no_element;
-  return PopupTargetElement{.element = popup_element,
-                            .action = action,
-                            .attribute_name = attribute_name};
+  }
+  return PopoverTargetElement{.popover = target_popover,
+                              .action = action,
+                              .attribute_name = attribute_name};
 }
 
 void HTMLFormControlElement::DefaultEventHandler(Event& event) {
   if (!IsDisabledFormControl()) {
-    auto popup = popupTargetElement();
-    if (popup.element) {
-      auto trigger_support = SupportsPopupTriggering();
-      DCHECK_NE(popup.action, PopupTriggerAction::kNone);
-      DCHECK_NE(trigger_support, PopupTriggerSupport::kNone);
-      // Note that the order is: `mousedown` which runs popup light dismiss
+    auto popover = popoverTargetElement();
+    if (popover.popover) {
+      DCHECK(RuntimeEnabledFeatures::HTMLPopoverAttributeEnabled(
+          GetDocument().GetExecutionContext()));
+      auto trigger_support = SupportsPopoverTriggering();
+      DCHECK_NE(popover.action, PopoverTriggerAction::kNone);
+      DCHECK_NE(trigger_support, PopoverTriggerSupport::kNone);
+      // Note that the order is: `mousedown` which runs popover light dismiss
       // code, then (for clicked elements) focus is set to the clicked
       // element, then |DOMActivate| runs here. Also note that the light
-      // dismiss code will not hide popups when an activating element is
+      // dismiss code will not hide popovers when an activating element is
       // clicked. Taking that together, if the clicked control is a triggering
-      // element for a popup, light dismiss will do nothing, focus will be set
+      // element for a popover, light dismiss will do nothing, focus will be set
       // to the triggering element, then this code will run and will set focus
       // to the previously focused element. If instead the clicked control is
       // not a triggering element, then the light dismiss code will hide the
-      // popup and set focus to the previously focused element, then the
+      // popover and set focus to the previously focused element, then the
       // normal focus management code will reset focus to the clicked control.
-      bool can_show = !popup.element->popupOpen() &&
-                      (popup.action == PopupTriggerAction::kToggle ||
-                       popup.action == PopupTriggerAction::kShow);
-      bool can_hide = popup.element->popupOpen() &&
-                      (popup.action == PopupTriggerAction::kToggle ||
-                       popup.action == PopupTriggerAction::kHide);
+      bool can_show =
+          popover.popover->IsPopoverReady(PopoverTriggerAction::kShow,
+                                          /*exception_state=*/nullptr) &&
+          (popover.action == PopoverTriggerAction::kToggle ||
+           popover.action == PopoverTriggerAction::kShow);
+      bool can_hide =
+          popover.popover->IsPopoverReady(PopoverTriggerAction::kHide,
+                                          /*exception_state=*/nullptr) &&
+          (popover.action == PopoverTriggerAction::kToggle ||
+           popover.action == PopoverTriggerAction::kHide);
       if (event.type() == event_type_names::kDOMActivate &&
           (!Form() || !IsSuccessfulSubmitButton())) {
         if (can_hide) {
-          popup.element->HidePopUpInternal(
-              HidePopupFocusBehavior::kFocusPreviousElement,
-              HidePopupForcingLevel::kHideAfterAnimations);
+          popover.popover->HidePopoverInternal(
+              HidePopoverFocusBehavior::kFocusPreviousElement,
+              HidePopoverTransitionBehavior::kFireEventsAndWaitForTransitions,
+              /*exception_state=*/nullptr);
         } else if (can_show) {
-          popup.element->InvokePopup(this);
+          popover.popover->InvokePopover(this);
         }
       }
     }

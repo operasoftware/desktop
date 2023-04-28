@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BREAKOUT_BOX_FRAME_QUEUE_UNDERLYING_SOURCE_H_
 
 #include "base/synchronization/lock.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/video_frame.h"
@@ -108,7 +109,7 @@ class FrameQueueUnderlyingSource
 
   base::Lock& GetMonitorLock();
 
-  void MaybeMonitorPopFrameId(int frame_id);
+  void MaybeMonitorPopFrameId(media::VideoFrame::ID frame_id);
   void MonitorPopFrameLocked(const NativeFrameType& media_frame)
       EXCLUSIVE_LOCKS_REQUIRED(GetMonitorLock());
   void MonitorPushFrameLocked(const NativeFrameType& media_frame)

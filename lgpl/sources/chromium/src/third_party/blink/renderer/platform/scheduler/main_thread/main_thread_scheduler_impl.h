@@ -9,7 +9,6 @@
 #include <memory>
 #include <stack>
 
-#include "base/atomicops.h"
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
@@ -19,18 +18,20 @@
 #include "base/synchronization/lock.h"
 #include "base/task/sequence_manager/task_queue.h"
 #include "base/task/sequence_manager/task_time_observer.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_log.h"
 #include "build/build_config.h"
 #include "components/power_scheduler/power_mode_voter.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
+#include "third_party/blink/renderer/platform/allow_discouraged_type.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/common/features.h"
 #include "third_party/blink/renderer/platform/scheduler/common/idle_helper.h"
 #include "third_party/blink/renderer/platform/scheduler/common/pollable_thread_safe_flag.h"
+#include "third_party/blink/renderer/platform/scheduler/common/task_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/common/thread_scheduler_base.h"
 #include "third_party/blink/renderer/platform/scheduler/common/tracing_helper.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/deadline_task_runner.h"
@@ -128,8 +129,8 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     // Prioritise one BeginMainFrame after an input task.
     bool prioritize_compositing_after_input;
 
-    // If enabled, base::ThreadTaskRunnerHandle::Get() and
-    // base::SequencedTaskRunnerHandle::Get() returns the current active
+    // If enabled, base::SingleThreadTaskRunner::GetCurrentDefault() and
+    // base::SequencedTaskRunner::GetCurrentDefault() returns the current active
     // per-ASG task runner instead of the per-thread task runner.
     bool mbi_override_task_runner_handle;
 
@@ -142,6 +143,11 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     // equivalent to the existing behavior.
     CompositorTQPolicyDuringThreadedScroll
         compositor_tq_policy_during_threaded_scroll;
+
+    // If we haven't run BeginMainFrame in this many milliseconds, give the next
+    // BeginMainFrame task elevated priority.
+    base::TimeDelta prioritize_compositing_after_delay_pre_fcp;
+    base::TimeDelta prioritize_compositing_after_delay_post_fcp;
   };
 
   static const char* UseCaseToString(UseCase use_case);
@@ -157,6 +163,8 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
 
   // WebThreadScheduler implementation:
   std::unique_ptr<MainThread> CreateMainThread() override;
+  std::unique_ptr<WebAgentGroupScheduler> CreateWebAgentGroupScheduler()
+      override;
   // Note: this is also shared by the ThreadScheduler interface.
   scoped_refptr<base::SingleThreadTaskRunner> NonWakingTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> DeprecatedDefaultTaskRunner()
@@ -191,9 +199,10 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
                            base::TimeDelta delay,
                            Thread::IdleTask) override;
   scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> CleanupTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
-  std::unique_ptr<WebAgentGroupScheduler> CreateAgentGroupScheduler() override;
-  WebAgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
+  AgentGroupScheduler* CreateAgentGroupScheduler() override;
+  AgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
   void SetV8Isolate(v8::Isolate* isolate) override;
   base::TimeTicks MonotonicallyIncreasingVirtualTime() override;
 
@@ -309,8 +318,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
 
   // Note that the main's thread policy should be upto date to compute
   // the correct priority.
-  base::sequence_manager::TaskQueue::QueuePriority ComputePriority(
-      MainThreadTaskQueue* task_queue) const;
+  TaskPriority ComputePriority(MainThreadTaskQueue* task_queue) const;
 
   // Test helpers.
   MainThreadSchedulerHelper* GetSchedulerHelperForTesting();
@@ -359,7 +367,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
 
   base::WeakPtr<MainThreadSchedulerImpl> GetWeakPtr();
 
-  base::sequence_manager::TaskQueue::QueuePriority compositor_priority() const {
+  TaskPriority compositor_priority() const {
     return main_thread_only().compositor_priority;
   }
 
@@ -372,7 +380,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     return main_thread_only().main_thread_compositing_is_fast;
   }
 
-  QueuePriority find_in_page_priority() const {
+  TaskPriority find_in_page_priority() const {
     return main_thread_only().current_policy.find_in_page_priority();
   }
 
@@ -441,10 +449,10 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   void AddAgentGroupScheduler(AgentGroupSchedulerImpl*);
 
   struct AgentGroupSchedulerScope {
-    std::unique_ptr<base::ThreadTaskRunnerHandleOverride>
-        thread_task_runner_handle_override;
-    WebAgentGroupScheduler* previous_agent_group_scheduler;
-    WebAgentGroupScheduler* current_agent_group_scheduler;
+    std::unique_ptr<base::SingleThreadTaskRunner::CurrentHandleOverride>
+        single_thread_task_runner_current_handle_override;
+    WeakPersistent<AgentGroupScheduler> previous_agent_group_scheduler;
+    WeakPersistent<AgentGroupScheduler> current_agent_group_scheduler;
     scoped_refptr<base::SingleThreadTaskRunner> previous_task_runner;
     scoped_refptr<base::SingleThreadTaskRunner> current_task_runner;
     const char* trace_event_scope_name;
@@ -452,7 +460,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   };
 
   void BeginAgentGroupSchedulerScope(
-      WebAgentGroupScheduler* next_agent_group_scheduler);
+      AgentGroupScheduler* next_agent_group_scheduler);
   void EndAgentGroupSchedulerScope();
 
   bool IsAnyOrdinaryMainFrameWaitingForFirstContentfulPaint() const;
@@ -498,11 +506,8 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
       return should_pause_task_queues_for_android_webview_;
     }
 
-    base::sequence_manager::TaskQueue::QueuePriority& find_in_page_priority() {
-      return find_in_page_priority_;
-    }
-    base::sequence_manager::TaskQueue::QueuePriority find_in_page_priority()
-        const {
+    TaskPriority& find_in_page_priority() { return find_in_page_priority_; }
+    TaskPriority find_in_page_priority() const {
       return find_in_page_priority_;
     }
 
@@ -537,7 +542,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     bool should_pause_task_queues_{false};
     bool should_pause_task_queues_for_android_webview_{false};
 
-    base::sequence_manager::TaskQueue::QueuePriority find_in_page_priority_{
+    TaskPriority find_in_page_priority_{
         FindInPageBudgetPoolController::kFindInPageBudgetNotExhaustedPriority};
 
     UseCase use_case_{UseCase::kNone};
@@ -666,7 +671,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
 
   // Computes compositor priority based on various experiments and
   // the use case. Defaults to kNormalPriority.
-  TaskQueue::QueuePriority ComputeCompositorPriority() const;
+  TaskPriority ComputeCompositorPriority() const;
 
   // Used to update the compositor priority on the main thread.
   void UpdateCompositorTaskQueuePriority();
@@ -679,8 +684,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
 
   // Computes the priority for compositing based on the current use case.
   // Returns nullopt if the use case does not need to set the priority.
-  absl::optional<TaskQueue::QueuePriority>
-  ComputeCompositorPriorityFromUseCase() const;
+  absl::optional<TaskPriority> ComputeCompositorPriorityFromUseCase() const;
 
   static void RunIdleTask(Thread::IdleTask, base::TimeTicks deadline);
 
@@ -741,9 +745,10 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   scoped_refptr<MainThreadTaskQueue>
       back_forward_cache_ipc_tracking_task_queue_;
 
-  using TaskQueueVoterMap = std::map<
-      scoped_refptr<MainThreadTaskQueue>,
-      std::unique_ptr<base::sequence_manager::TaskQueue::QueueEnabledVoter>>;
+  using TaskQueueVoterMap ALLOW_DISCOURAGED_TYPE("TODO(crbug.com/1404327)") =
+      std::map<scoped_refptr<MainThreadTaskQueue>,
+               std::unique_ptr<
+                   base::sequence_manager::TaskQueue::QueueEnabledVoter>>;
 
   TaskQueueVoterMap task_runners_;
 
@@ -817,9 +822,8 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     TraceableState<absl::optional<TaskDescriptionForTracing>,
                    TracingCategory::kInfo>
         task_description_for_tracing;  // Don't use except for tracing.
-    TraceableState<
-        absl::optional<base::sequence_manager::TaskQueue::QueuePriority>,
-        TracingCategory::kInfo>
+    TraceableState<absl::optional<TaskPriority>,
+                   TracingCategory::kInfo>
         task_priority_for_tracing;  // Only used for tracing.
 
     // Holds task queues that are currently running.
@@ -844,8 +848,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     // kNormalPriority and is updated via UpdateCompositorTaskQueuePriority().
     // After 100ms with nothing running from this queue, the compositor will
     // be set to kVeryHighPriority until a frame is run.
-    TraceableState<TaskQueue::QueuePriority, TracingCategory::kDefault>
-        compositor_priority;
+    TraceableState<TaskPriority, TracingCategory::kDefault> compositor_priority;
     base::TimeTicks last_frame_time;
     bool should_prioritize_compositor_task_queue_after_delay;
     bool have_seen_a_frame;
@@ -860,7 +863,8 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     std::unique_ptr<power_scheduler::PowerModeVoter> audible_power_mode_voter;
 
     std::unique_ptr<TaskAttributionTracker> task_attribution_tracker;
-    WTF::HashSet<AgentGroupSchedulerImpl*> agent_group_schedulers;
+    Persistent<HeapHashSet<WeakMember<AgentGroupSchedulerImpl>>>
+        agent_group_schedulers;
   };
 
   struct AnyThread {
@@ -937,7 +941,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   }
 
   PollableThreadSafeFlag policy_may_need_update_;
-  WebAgentGroupScheduler* current_agent_group_scheduler_{nullptr};
+  WeakPersistent<AgentGroupScheduler> current_agent_group_scheduler_;
 
   base::WeakPtrFactory<MainThreadSchedulerImpl> weak_factory_{this};
 };

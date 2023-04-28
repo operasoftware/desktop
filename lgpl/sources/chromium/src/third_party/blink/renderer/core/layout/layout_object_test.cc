@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "ui/gfx/geometry/decomposed_transform.h"
 
 namespace blink {
 
@@ -448,10 +449,7 @@ TEST_F(
       EPosition::kFixed));
 
   auto offset = layout_object->OffsetFromContainer(span_layout_object);
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    EXPECT_EQ(PhysicalOffset(22, 11), offset);
-  else
-    EXPECT_EQ(PhysicalOffset(20, 10), offset);
+  EXPECT_EQ(PhysicalOffset(22, 11), offset);
 
   // Sanity check: Make sure we don't generate anonymous objects.
   EXPECT_EQ(nullptr, body_layout_object->SlowFirstChild()->NextSibling());
@@ -512,13 +510,8 @@ TEST_F(LayoutObjectTest, InlineFloatMismatch) {
 
   LayoutObject* float_obj = GetLayoutObjectByElementId("float_obj");
   LayoutObject* span = GetLayoutObjectByElementId("span");
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    // 10px for margin + 40px for inset.
-    EXPECT_EQ(PhysicalOffset(50, 0), float_obj->OffsetFromAncestor(span));
-  } else {
-    // 10px for margin, -40px because float is to the left of the span.
-    EXPECT_EQ(PhysicalOffset(-30, 0), float_obj->OffsetFromAncestor(span));
-  }
+  // 10px for margin + 40px for inset.
+  EXPECT_EQ(PhysicalOffset(50, 0), float_obj->OffsetFromAncestor(span));
 }
 
 TEST_F(LayoutObjectTest, FloatUnderInline) {
@@ -542,37 +535,22 @@ TEST_F(LayoutObjectTest, FloatUnderInline) {
 
   EXPECT_EQ(layered_div->Layer(), layered_div->PaintingLayer());
   EXPECT_EQ(layered_span->Layer(), layered_span->PaintingLayer());
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    // LayoutNG inline-level floats are children of their inline-level
-    // containers. As such LayoutNG paints these within the correct
-    // inline-level layer.
-    EXPECT_EQ(layered_span->Layer(), floating->PaintingLayer());
-    EXPECT_EQ(layered_span, floating->Container());
-  } else {
-    EXPECT_EQ(layered_div->Layer(), floating->PaintingLayer());
-    EXPECT_EQ(container, floating->Container());
-  }
+  // Inline-level floats are children of their inline-level containers. As such
+  // LayoutNG paints these within the correct inline-level layer.
+  EXPECT_EQ(layered_span->Layer(), floating->PaintingLayer());
+  EXPECT_EQ(layered_span, floating->Container());
   EXPECT_EQ(container, floating->ContainingBlock());
 
   LayoutObject::AncestorSkipInfo skip_info(layered_span);
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    EXPECT_EQ(layered_span, floating->Container(&skip_info));
-    EXPECT_FALSE(skip_info.AncestorSkipped());
-  } else {
-    EXPECT_EQ(container, floating->Container(&skip_info));
-    EXPECT_TRUE(skip_info.AncestorSkipped());
-
-    skip_info = LayoutObject::AncestorSkipInfo(container);
-    EXPECT_EQ(container, floating->Container(&skip_info));
-    EXPECT_FALSE(skip_info.AncestorSkipped());
-  }
+  EXPECT_EQ(layered_span, floating->Container(&skip_info));
+  EXPECT_FALSE(skip_info.AncestorSkipped());
 }
 
 TEST_F(LayoutObjectTest, MutableForPaintingClearPaintFlags) {
   LayoutObject* object = GetDocument().body()->GetLayoutObject();
   object->SetShouldDoFullPaintInvalidation();
   EXPECT_TRUE(object->ShouldDoFullPaintInvalidation());
-  EXPECT_TRUE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_TRUE(object->ShouldCheckLayoutForPaintInvalidation());
   object->SetShouldCheckForPaintInvalidation();
   EXPECT_TRUE(object->ShouldCheckForPaintInvalidation());
   object->SetSubtreeShouldCheckForPaintInvalidation();
@@ -602,6 +580,49 @@ TEST_F(LayoutObjectTest, MutableForPaintingClearPaintFlags) {
   EXPECT_FALSE(object->DescendantNeedsPaintPropertyUpdate());
 }
 
+TEST_F(LayoutObjectTest, DelayFullPaintInvalidation) {
+  LayoutObject* object = GetDocument().body()->GetLayoutObject();
+  object->SetShouldDoFullPaintInvalidation();
+  object->SetShouldDelayFullPaintInvalidation();
+  EXPECT_FALSE(object->ShouldDoFullPaintInvalidation());
+  EXPECT_TRUE(object->ShouldDelayFullPaintInvalidation());
+
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(object->ShouldDoFullPaintInvalidation());
+  // ShouldDelayFullPaintInvalidation is not preserved.
+  EXPECT_TRUE(object->ShouldDelayFullPaintInvalidation());
+
+  object->SetShouldDoFullPaintInvalidation();
+  EXPECT_TRUE(object->ShouldDoFullPaintInvalidation());
+  // ShouldDelayFullPaintInvalidation is reset by
+  // SetShouldDoFullPaintInvalidation().
+  EXPECT_FALSE(object->ShouldDelayFullPaintInvalidation());
+
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(object->ShouldDoFullPaintInvalidation());
+  EXPECT_FALSE(object->ShouldDelayFullPaintInvalidation());
+}
+
+TEST_F(LayoutObjectTest, SubtreeAndDelayFullPaintInvalidation) {
+  LayoutObject* object = GetDocument().body()->GetLayoutObject();
+  object->SetShouldDoFullPaintInvalidation();
+  object->SetShouldDelayFullPaintInvalidation();
+  object->SetSubtreeShouldDoFullPaintInvalidation();
+  EXPECT_TRUE(object->SubtreeShouldDoFullPaintInvalidation());
+  EXPECT_TRUE(object->ShouldDoFullPaintInvalidation());
+  EXPECT_FALSE(object->ShouldDelayFullPaintInvalidation());
+
+  object->SetShouldDelayFullPaintInvalidation();
+  EXPECT_TRUE(object->SubtreeShouldDoFullPaintInvalidation());
+  EXPECT_TRUE(object->ShouldDoFullPaintInvalidation());
+  EXPECT_FALSE(object->ShouldDelayFullPaintInvalidation());
+
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(object->SubtreeShouldDoFullPaintInvalidation());
+  EXPECT_FALSE(object->ShouldDoFullPaintInvalidation());
+  EXPECT_FALSE(object->ShouldDelayFullPaintInvalidation());
+}
+
 TEST_F(LayoutObjectTest, SubtreePaintPropertyUpdateReasons) {
   LayoutObject* object = GetDocument().body()->GetLayoutObject();
   object->AddSubtreePaintPropertyUpdateReason(
@@ -617,68 +638,73 @@ TEST_F(LayoutObjectTest, SubtreePaintPropertyUpdateReasons) {
   EXPECT_FALSE(object->NeedsPaintPropertyUpdate());
 }
 
-TEST_F(LayoutObjectTest, ShouldCheckGeometryForPaintInvalidation) {
+TEST_F(LayoutObjectTest, ShouldCheckLayoutForPaintInvalidation) {
   LayoutObject* object = GetDocument().body()->GetLayoutObject();
   LayoutObject* parent = object->Parent();
 
   object->SetShouldDoFullPaintInvalidation();
   EXPECT_TRUE(object->ShouldDoFullPaintInvalidation());
-  EXPECT_TRUE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_EQ(PaintInvalidationReason::kLayout,
+            object->FullPaintInvalidationReason());
+  EXPECT_TRUE(object->ShouldCheckLayoutForPaintInvalidation());
   EXPECT_TRUE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->ShouldCheckGeometryForPaintInvalidation());
-  EXPECT_TRUE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->ShouldCheckLayoutForPaintInvalidation());
+  EXPECT_TRUE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
   object->ClearPaintInvalidationFlags();
   EXPECT_FALSE(object->ShouldDoFullPaintInvalidation());
-  EXPECT_FALSE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(object->ShouldCheckLayoutForPaintInvalidation());
   parent->ClearPaintInvalidationFlags();
   EXPECT_FALSE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->ShouldCheckGeometryForPaintInvalidation());
-  EXPECT_FALSE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->ShouldCheckLayoutForPaintInvalidation());
+  EXPECT_FALSE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
 
   object->SetShouldCheckForPaintInvalidation();
   EXPECT_TRUE(object->ShouldCheckForPaintInvalidation());
-  EXPECT_TRUE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_TRUE(object->ShouldCheckLayoutForPaintInvalidation());
   EXPECT_TRUE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->ShouldCheckGeometryForPaintInvalidation());
-  EXPECT_TRUE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->ShouldCheckLayoutForPaintInvalidation());
+  EXPECT_TRUE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
   object->ClearPaintInvalidationFlags();
   EXPECT_FALSE(object->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(object->ShouldCheckLayoutForPaintInvalidation());
   parent->ClearPaintInvalidationFlags();
   EXPECT_FALSE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->ShouldCheckGeometryForPaintInvalidation());
-  EXPECT_FALSE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->ShouldCheckLayoutForPaintInvalidation());
+  EXPECT_FALSE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
 
-  object->SetShouldDoFullPaintInvalidationWithoutGeometryChange();
+  object->SetShouldDoFullPaintInvalidationWithoutLayoutChange(
+      PaintInvalidationReason::kStyle);
+  EXPECT_EQ(PaintInvalidationReason::kStyle,
+            object->FullPaintInvalidationReason());
   EXPECT_TRUE(object->ShouldDoFullPaintInvalidation());
-  EXPECT_FALSE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(object->ShouldCheckLayoutForPaintInvalidation());
   EXPECT_TRUE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->ShouldCheckGeometryForPaintInvalidation());
-  EXPECT_FALSE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->ShouldCheckLayoutForPaintInvalidation());
+  EXPECT_FALSE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
   object->SetShouldCheckForPaintInvalidation();
-  EXPECT_TRUE(object->ShouldCheckGeometryForPaintInvalidation());
-  EXPECT_TRUE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_TRUE(object->ShouldCheckLayoutForPaintInvalidation());
+  EXPECT_TRUE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
   object->ClearPaintInvalidationFlags();
   EXPECT_FALSE(object->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(object->ShouldCheckLayoutForPaintInvalidation());
   parent->ClearPaintInvalidationFlags();
   EXPECT_FALSE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
 
-  object->SetShouldCheckForPaintInvalidationWithoutGeometryChange();
+  object->SetShouldCheckForPaintInvalidationWithoutLayoutChange();
   EXPECT_TRUE(object->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(object->ShouldCheckLayoutForPaintInvalidation());
   EXPECT_TRUE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
   object->SetShouldCheckForPaintInvalidation();
-  EXPECT_TRUE(object->ShouldCheckGeometryForPaintInvalidation());
-  EXPECT_TRUE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_TRUE(object->ShouldCheckLayoutForPaintInvalidation());
+  EXPECT_TRUE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
   object->ClearPaintInvalidationFlags();
   EXPECT_FALSE(object->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(object->ShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(object->ShouldCheckLayoutForPaintInvalidation());
   parent->ClearPaintInvalidationFlags();
   EXPECT_FALSE(parent->ShouldCheckForPaintInvalidation());
-  EXPECT_FALSE(parent->DescendantShouldCheckGeometryForPaintInvalidation());
+  EXPECT_FALSE(parent->DescendantShouldCheckLayoutForPaintInvalidation());
 }
 
 TEST_F(LayoutObjectTest, AssociatedLayoutObjectOfFirstLetterPunctuations) {
@@ -778,12 +804,15 @@ TEST_F(LayoutObjectTest, VisualRect) {
   };
 
   MockLayoutObject* mock_object = MakeGarbageCollected<MockLayoutObject>();
-  auto style = GetDocument().GetStyleResolver().CreateComputedStyle();
-  mock_object->SetStyle(style.get());
+  const auto& style = GetDocument().GetStyleResolver().InitialStyle();
+  mock_object->SetStyle(&style);
   EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object->LocalVisualRect());
   EXPECT_EQ(PhysicalRect(10, 10, 20, 20), mock_object->LocalVisualRect());
 
-  style->SetVisibility(EVisibility::kHidden);
+  ComputedStyleBuilder builder(style);
+  builder.SetVisibility(EVisibility::kHidden);
+  mock_object->SetStyle(builder.TakeStyle(),
+                        LayoutObject::ApplyStyleChanges::kNo);
   EXPECT_CALL(*mock_object, VisualRectRespectsVisibility())
       .WillOnce(Return(true));
   EXPECT_TRUE(mock_object->LocalVisualRect().IsEmpty());
@@ -1341,9 +1370,6 @@ TEST_F(LayoutObjectSimTest, FirstLineBackgroundImageDirtyStyleCrash) {
 }
 
 TEST_F(LayoutObjectTest, NeedsLayoutOverflowRecalc) {
-  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
-    return;
-
   SetBodyInnerHTML(R"HTML(
     <div id='wrapper'>
       <div id='target'>foo</div>
@@ -1404,11 +1430,11 @@ TEST_F(LayoutObjectTest, PerspectiveIsNotParent) {
   auto* ancestor = GetLayoutBoxByElementId("ancestor");
   auto* child = GetLayoutBoxByElementId("child");
 
-  TransformationMatrix transform;
+  gfx::Transform transform;
   child->GetTransformFromContainer(ancestor, PhysicalOffset(), transform);
-  TransformationMatrix::DecomposedType decomposed;
-  EXPECT_TRUE(transform.Decompose(decomposed));
-  EXPECT_EQ(0, decomposed.perspective_z);
+  absl::optional<gfx::DecomposedTransform> decomp = transform.Decompose();
+  ASSERT_TRUE(decomp);
+  EXPECT_EQ(0, decomp->perspective[2]);
 }
 
 TEST_F(LayoutObjectTest, PerspectiveWithAnonymousTable) {
@@ -1424,11 +1450,11 @@ TEST_F(LayoutObjectTest, PerspectiveWithAnonymousTable) {
   auto* ancestor =
       To<LayoutBoxModelObject>(GetLayoutObjectByElementId("ancestor"));
 
-  TransformationMatrix transform;
+  gfx::Transform transform;
   child->GetTransformFromContainer(ancestor, PhysicalOffset(), transform);
-  TransformationMatrix::DecomposedType decomposed;
-  EXPECT_TRUE(transform.Decompose(decomposed));
-  EXPECT_EQ(-0.01, decomposed.perspective_z);
+  absl::optional<gfx::DecomposedTransform> decomp = transform.Decompose();
+  ASSERT_TRUE(decomp);
+  EXPECT_EQ(-0.01, decomp->perspective[2]);
 }
 
 TEST_F(LayoutObjectTest, LocalToAncestoRectIgnoreAncestorScroll) {
@@ -1557,8 +1583,6 @@ TEST_F(LayoutObjectTest, SetNeedsCollectInlinesForSvgText) {
 
 // crbug.com/1247686
 TEST_F(LayoutObjectTest, SetNeedsCollectInlinesForSvgInline) {
-  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
-    return;
   SetBodyInnerHTML(R"HTML(
     <div>
     <svg xmlns="http://www.w3.org/2000/svg" id="ancestor">

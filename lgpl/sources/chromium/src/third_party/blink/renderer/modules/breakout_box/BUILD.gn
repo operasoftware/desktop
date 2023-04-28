@@ -34,11 +34,6 @@ blink_modules_sources("breakout_box") {
     "video_track_generator.cc",
     "video_track_generator.h",
   ]
-
-  jumbo_excluded_sources = [
-    "media_stream_video_track_underlying_sink.cc",
-  ]
-
   deps = [
     "//third_party/blink/renderer/modules/mediastream:mediastream",
     "//third_party/blink/renderer/modules/webcodecs:webcodecs",

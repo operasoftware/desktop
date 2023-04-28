@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_grid_integer_repeat_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
+#include "third_party/blink/renderer/core/css/css_image_set_value.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
@@ -25,8 +26,9 @@ namespace blink {
 static int ComputeNumberOfTracks(const CSSValueList* value_list) {
   int number_of_tracks = 0;
   for (auto& value : *value_list) {
-    if (value->IsGridLineNamesValue())
+    if (value->IsGridLineNamesValue()) {
       continue;
+    }
     if (auto* repeat_value =
             DynamicTo<cssvalue::CSSGridIntegerRepeatValue>(*value)) {
       number_of_tracks +=
@@ -662,6 +664,123 @@ TEST_F(CSSPropertyUseCounterTest, CSSPropertyBackgroundImageWebkitImageSet) {
   EXPECT_TRUE(IsCounted(feature));
 }
 
+TEST_F(CSSPropertyUseCounterTest, CSSPropertyBackgroundImageImageSet) {
+  WebFeature feature = WebFeature::kImageSet;
+
+  ParseProperty(CSSPropertyID::kBackgroundImage, "none");
+  EXPECT_FALSE(IsCounted(feature));
+
+  ParseProperty(CSSPropertyID::kBackgroundImage, "image-set(url(foo) 2x)");
+  EXPECT_TRUE(IsCounted(feature));
+}
+
+void TestImageSetParsing(const String& testValue,
+                         const String& expectedCssText) {
+  const CSSValue* value = CSSParser::ParseSingleValue(
+      CSSPropertyID::kBackgroundImage, testValue,
+      StrictCSSParserContext(SecureContextMode::kSecureContext));
+  ASSERT_NE(value, nullptr);
+
+  const CSSValueList* val_list = To<CSSValueList>(value);
+  ASSERT_EQ(val_list->length(), 1U);
+
+  const CSSImageSetValue& image_set_value =
+      To<CSSImageSetValue>(val_list->First());
+  EXPECT_EQ(expectedCssText, image_set_value.CustomCSSText());
+}
+
+TEST(CSSPropertyParserTest, ImageSetDefaultResolution) {
+  TestImageSetParsing("image-set(url(foo))", "image-set(url(\"foo\") 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetResolutionUnitX) {
+  TestImageSetParsing("image-set(url(foo) 3x)", "image-set(url(\"foo\") 3x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetResolutionUnitDppx) {
+  TestImageSetParsing("image-set(url(foo) 3dppx)",
+                      "image-set(url(\"foo\") 3dppx)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetResolutionUnitDpi) {
+  TestImageSetParsing("image-set(url(foo) 96dpi)",
+                      "image-set(url(\"foo\") 96dpi)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetResolutionUnitDpcm) {
+  TestImageSetParsing("image-set(url(foo) 37dpcm)",
+                      "image-set(url(\"foo\") 37dpcm)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetUrlFunction) {
+  TestImageSetParsing("image-set(url('foo') 1x)", "image-set(url(\"foo\") 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetUrlFunctionEmptyStrUrl) {
+  TestImageSetParsing("image-set(url('') 1x)", "image-set(url(\"\") 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetUrlFunctionNoQuotationMarks) {
+  TestImageSetParsing("image-set(url(foo) 1x)", "image-set(url(\"foo\") 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetNoUrlFunction) {
+  TestImageSetParsing("image-set('foo' 1x)", "image-set(url(\"foo\") 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetEmptyStrUrl) {
+  TestImageSetParsing("image-set('' 1x)", "image-set(url(\"\") 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetLinearGradient) {
+  TestImageSetParsing("image-set(linear-gradient(red, blue) 1x)",
+                      "image-set(linear-gradient(red, blue) 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetRepeatingLinearGradient) {
+  TestImageSetParsing("image-set(repeating-linear-gradient(red, blue 25%) 1x)",
+                      "image-set(repeating-linear-gradient(red, blue 25%) 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetRadialGradient) {
+  TestImageSetParsing("image-set(radial-gradient(red, blue) 1x)",
+                      "image-set(radial-gradient(red, blue) 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetRepeatingRadialGradient) {
+  TestImageSetParsing("image-set(repeating-radial-gradient(red, blue 25%) 1x)",
+                      "image-set(repeating-radial-gradient(red, blue 25%) 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetConicGradient) {
+  TestImageSetParsing("image-set(conic-gradient(red, blue) 1x)",
+                      "image-set(conic-gradient(red, blue) 1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetRepeatingConicGradient) {
+  TestImageSetParsing("image-set(repeating-conic-gradient(red, blue 25%) 1x)",
+                      "image-set(repeating-conic-gradient(red, blue 25%) 1x)");
+}
+
+void TestImageSetParsingFailure(const String& testValue) {
+  const CSSValue* value = CSSParser::ParseSingleValue(
+      CSSPropertyID::kBackgroundImage, testValue,
+      StrictCSSParserContext(SecureContextMode::kSecureContext));
+  ASSERT_EQ(value, nullptr);
+}
+
+TEST(CSSPropertyParserTest, ImageSetEmpty) {
+  TestImageSetParsingFailure("image-set()");
+}
+
+TEST(CSSPropertyParserTest, ImageSetMissingUrl) {
+  TestImageSetParsingFailure("image-set(1x)");
+}
+
+TEST(CSSPropertyParserTest, ImageSetOnlyOneGradientColor) {
+  TestImageSetParsingFailure("image-set(linear-gradient(red) 1x)");
+}
+
 TEST(CSSPropertyParserTest, InternalLightDarkAuthor) {
   auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
@@ -727,6 +846,7 @@ TEST(CSSPropertyParserTest, UAInternalLightDarkBackgroundImage) {
       {"-internal-light-dark(url(light.png), url(dark.png))", true},
       {"-internal-light-dark(url(light.png), none)", true},
       {"-internal-light-dark(none, -webkit-image-set(url(dark.png) 1x))", true},
+      {"-internal-light-dark(none, image-set(url(dark.png) 1x))", true},
       {"-internal-light-dark(  none  ,  none   )", true},
       {"-internal-light-dark(  url(light.png)  ,  url(dark.png)   )", true},
   };
@@ -770,6 +890,7 @@ TEST(CSSPropertyParserTest, UAInternalLightDarkBackgroundShorthand) {
       {"-internal-light-dark(url(light.png), url(dark.png))", true},
       {"-internal-light-dark(url(light.png), none)", true},
       {"-internal-light-dark(none, -webkit-image-set(url(dark.png) 1x))", true},
+      {"-internal-light-dark(none, image-set(url(dark.png) 1x))", true},
       {"-internal-light-dark(  none  ,  none   )", true},
       {"-internal-light-dark(  url(light.png)  ,  url(dark.png)   )", true},
   };
@@ -812,7 +933,8 @@ TEST(CSSPropertyParserTest, ParseRevertLayer) {
 
 // anchor() and anchor-size() shouldn't parse when the feature is disabled.
 TEST(CSSPropertyParserTest, AnchorPositioningDisabled) {
-  ScopedCSSAnchorPositioningForTest disabled_scope(false);
+  ScopedHTMLSelectMenuElementForTest select_menu_disabled(false);
+  ScopedCSSAnchorPositioningForTest anchor_positioning_disabled(false);
 
   auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);

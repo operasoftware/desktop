@@ -3,18 +3,16 @@
 // found in the LICENSE file.
 
 import 'chrome://webui-test/mojo_webui_test_support.js';
-import 'chrome://read-later.top-chrome/bookmarks/bookmarks_list.js';
+import 'chrome://bookmarks-side-panel.top-chrome/bookmarks_list.js';
 
-import {BookmarkFolderElement} from 'chrome://read-later.top-chrome/bookmarks/bookmark_folder.js';
-import {BookmarksApiProxyImpl} from 'chrome://read-later.top-chrome/bookmarks/bookmarks_api_proxy.js';
-import {BookmarksListElement} from 'chrome://read-later.top-chrome/bookmarks/bookmarks_list.js';
-import {ShoppingListApiProxyImpl} from 'chrome://read-later.top-chrome/bookmarks/commerce/shopping_list_api_proxy.js';
+import {BookmarkFolderElement} from 'chrome://bookmarks-side-panel.top-chrome/bookmark_folder.js';
+import {BookmarksApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_api_proxy.js';
+import {BookmarksListElement} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_list.js';
+import {ShoppingListApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/commerce/shopping_list_api_proxy.js';
 import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
-import {PluralStringProxyImpl} from 'chrome://resources/js/plural_string_proxy.js';
 import {down, keyDownOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
-import {TestPluralStringProxy} from 'chrome://webui-test/test_plural_string_proxy.js';
 
 import {TestShoppingListApiProxy} from './commerce/test_shopping_list_api_proxy.js';
 import {TestBookmarksApiProxy} from './test_bookmarks_api_proxy.js';
@@ -73,8 +71,7 @@ suite('SidePanelBookmarksListInteractiveUITest', () => {
   }
 
   setup(async () => {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
     bookmarksApi = new TestBookmarksApiProxy();
     bookmarksApi.setFolders(JSON.parse(JSON.stringify(folders)));
@@ -82,9 +79,6 @@ suite('SidePanelBookmarksListInteractiveUITest', () => {
 
     const shoppingListApi = new TestShoppingListApiProxy();
     ShoppingListApiProxyImpl.setInstance(shoppingListApi);
-
-    const pluralString = new TestPluralStringProxy();
-    PluralStringProxyImpl.setInstance(pluralString);
 
     bookmarksList = document.createElement('bookmarks-list');
     document.body.appendChild(bookmarksList);

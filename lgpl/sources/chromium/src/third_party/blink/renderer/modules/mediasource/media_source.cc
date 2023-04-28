@@ -7,6 +7,7 @@
 #include <memory>
 #include <tuple>
 
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
@@ -60,21 +61,6 @@ using blink::WebMediaSource;
 using blink::WebSourceBuffer;
 
 namespace blink {
-
-namespace {
-// These values are written to logs. New enum values can be added, but existing
-// ones must never be renumbered or deleted and reused.
-enum class MseExecutionContext {
-  kWindow = 0,
-
-  kDedicatedWorker = 1,
-
-  // TODO(https://crbug.com/1054566): Consider supporting MSE usage in
-  // SharedWorkers.
-  kSharedWorker = 2,
-  kMaxValue = kSharedWorker
-};
-}  // namespace
 
 static AtomicString ReadyStateToString(MediaSource::ReadyState state) {
   AtomicString result;
@@ -148,23 +134,9 @@ MediaSource::MediaSource(ExecutionContext* context)
              GetExecutionContext()) ||
          IsMainThread());
 
-  MseExecutionContext type = MseExecutionContext::kWindow;
   if (!IsMainThread()) {
-    if (context->IsDedicatedWorkerGlobalScope()) {
-      type = MseExecutionContext::kDedicatedWorker;
-    } else if (context->IsSharedWorkerGlobalScope()) {
-      type = MseExecutionContext::kSharedWorker;
-    } else {
-      CHECK(false) << "Invalid execution context for MSE usage";
-    }
+    DCHECK(context->IsDedicatedWorkerGlobalScope());
   }
-  base::UmaHistogramEnumeration("Media.MSE.ExecutionContext", type);
-
-  // TODO(https://crbug.com/1054566): Also consider supporting experimental
-  // usage of MediaSource API from shared worker contexts. Meanwhile, IDL limits
-  // constructor exposure to not include shared worker.
-  CHECK_NE(type, MseExecutionContext::kSharedWorker)
-      << "MSE is not supported from SharedWorkers";
 }
 
 MediaSource::~MediaSource() {
@@ -566,15 +538,23 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
   ContentType filtered_content_type = content_type;
 
 #if BUILDFLAG(ENABLE_PLATFORM_ENCRYPTED_DOLBY_VISION)
-  // Here, we special-case when encrypted Dolby Vision (DV) is supported but
-  // clear DV is not supported. isTypeSupported(fully qualified type with DV
-  // codec) should say false on such platform, but addSourceBuffer(same) and
-  // changeType(same) shouldn't fail just due to having DV codec. We use
-  // `enforce_codec_specificity` to understand if we are servicing
+  // When build flag ENABLE_PLATFORM_ENCRYPTED_DOLBY_VISION and feature
+  // kPlatformEncryptedDolbyVision are both enabled, encrypted Dolby Vision is
+  // allowed in Media Source while clear Dolby Vision is not allowed.
+  // In this case:
+  // - isTypeSupported(fully qualified type with DV codec) should say false on
+  // such platform, but addSourceBuffer(same) and changeType(same) shouldn't
+  // fail just due to having DV codec.
+  // - We use `enforce_codec_specificity` to understand if we are servicing
   // isTypeSupported (if true) vs addSourceBuffer or changeType (if false). When
   // `enforce_codec_specificity` is false, we'll remove any detected DV codec
   // from the codecs in the `filtered_content_type`.
-  if (!enforce_codec_specificity) {
+  // - When `kAllowClearDolbyVisionInMseWhenPlatformEncryptedDvEnabled` is
+  // specified, allow DV regardless of `enforce_codec_specificity`.
+  if (base::FeatureList::IsEnabled(media::kPlatformEncryptedDolbyVision) &&
+      (base::FeatureList::IsEnabled(
+           media::kAllowClearDolbyVisionInMseWhenPlatformEncryptedDvEnabled) ||
+       !enforce_codec_specificity)) {
     // Remove any detected DolbyVision codec from the query to GetSupportsType.
     std::string filtered_codecs;
     std::vector<std::string> parsed_codec_ids;

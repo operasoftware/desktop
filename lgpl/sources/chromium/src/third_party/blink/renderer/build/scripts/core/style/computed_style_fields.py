@@ -138,9 +138,10 @@ class Field(object):
 
     def __init__(self, field_role, name_for_methods, property_name, type_name,
                  wrapper_pointer_name, field_template, size, default_value,
-                 custom_copy, custom_compare, mutable, getter_method_name,
-                 setter_method_name, initial_method_name,
-                 computed_style_custom_functions, **kwargs):
+                 derived_from, custom_copy, custom_compare, mutable,
+                 getter_method_name, setter_method_name, initial_method_name,
+                 computed_style_custom_functions,
+                 computed_style_protected_functions, **kwargs):
         name_source = NameStyleConverter(name_for_methods)
         self.name = name_source.to_class_data_member()
         self.property_name = property_name
@@ -150,6 +151,7 @@ class Field(object):
         self.field_template = field_template
         self.size = size
         self.default_value = default_value
+        self.derived_from = derived_from
         self.custom_copy = custom_copy
         self.custom_compare = custom_compare
         self.mutable = mutable
@@ -167,7 +169,14 @@ class Field(object):
         self.initial_method_name = initial_method_name
         self.resetter_method_name = name_source.to_function_name(
             prefix='reset')
+        self.internal_resetter_method_name = NameStyleConverter(
+            self.resetter_method_name).to_function_name(suffix='internal')
         self.computed_style_custom_functions = computed_style_custom_functions
+        self.computed_style_protected_functions = computed_style_protected_functions
+        self.getter_visibility = self.get_visibility('getter')
+        self.setter_visibility = self.get_visibility('setter')
+        self.resetter_visibility = self.get_visibility('resetter')
+
         # Only bitfields have sizes.
         self.is_bit_field = self.size is not None
 
@@ -192,3 +201,10 @@ class Field(object):
                 suffix=suffix)
         assert len(kwargs) == 0, \
             'Unexpected arguments provided to Field: ' + str(kwargs)
+
+    def get_visibility(self, function):
+        if function in self.computed_style_protected_functions:
+            return 'protected'
+        if function in self.computed_style_custom_functions:
+            return 'protected'
+        return 'public'

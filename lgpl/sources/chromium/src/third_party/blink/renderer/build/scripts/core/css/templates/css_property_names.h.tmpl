@@ -59,6 +59,7 @@ const int kNumCSSPropertyIDs = static_cast<int>(kLastUnresolvedCSSProperty) + 1;
 
 const size_t kMaxCSSPropertyNameLength = {{max_name_length}};
 constexpr size_t kCSSPropertyIDBitLength = {{property_id_bit_length}};
+constexpr size_t kMaxShorthandExpansion = {{max_shorthand_expansion}};
 
 static_assert((static_cast<size_t>(1) << kCSSPropertyIDBitLength) >
                   static_cast<size_t>(kLastUnresolvedCSSProperty),
@@ -69,7 +70,7 @@ static_assert(CSSPropertyID::kColor == kFirstHighPriorityCSSProperty,
 static_assert(CSSPropertyID::kZoom == kLastHighPriorityCSSProperty,
               "CSSPropertyID::kZoom is the last high-priority property");
 static_assert((static_cast<int>(kLastHighPriorityCSSProperty) -
-               static_cast<int>(kFirstHighPriorityCSSProperty)) == 29,
+               static_cast<int>(kFirstHighPriorityCSSProperty)) == 31,
               "There should a low number of high-priority properties");
 
 inline int GetCSSPropertyIDIndex(CSSPropertyID id) {
@@ -153,15 +154,9 @@ mojom::blink::CSSSampleId CORE_EXPORT GetCSSSampleId(CSSPropertyID id);
 namespace WTF {
 template <>
 struct HashTraits<blink::CSSPropertyID>
-    : GenericHashTraits<blink::CSSPropertyID> {
-  static const bool kEmptyValueIsZero = true;
-  static void ConstructDeletedValue(blink::CSSPropertyID& slot, bool) {
-    slot = static_cast<blink::CSSPropertyID>(blink::kNumCSSPropertyIDs);
-  }
-  static bool IsDeletedValue(blink::CSSPropertyID value) {
-    return static_cast<int>(value) == blink::kNumCSSPropertyIDs;
-  }
-};
+    : EnumHashTraits<blink::CSSPropertyID,
+                     blink::CSSPropertyID::kInvalid,
+                     blink::kNumCSSPropertyIDs> {};
 }  // namespace WTF
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PROPERTY_NAMES_H_

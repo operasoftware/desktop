@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_CREDENTIALMANAGEMENT_CREDENTIAL_MANAGER_PROXY_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CREDENTIALMANAGEMENT_CREDENTIAL_MANAGER_PROXY_H_
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/payments/payment_credential.mojom-blink.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom-blink.h"
@@ -59,6 +59,9 @@ class MODULES_EXPORT CredentialManagerProxy
   // Must be called only with argument representing a valid
   // context corresponding to an attached window.
   static CredentialManagerProxy* From(ScriptState*);
+  static CredentialManagerProxy* From(ExecutionContext*);
+
+  static CredentialManagerProxy* From(LocalDOMWindow*);
 
  private:
   template <typename Interface>

@@ -38,10 +38,6 @@ blink_modules_sources("mediarecorder") {
     "vpx_encoder.h",
   ]
 
-  jumbo_excluded_sources = [
-    "vpx_encoder.cc",
-  ]
-
   deps = [
     ":buildflags",
     "//build:chromeos_buildflags",
@@ -62,10 +58,6 @@ blink_modules_sources("mediarecorder") {
     sources += [
       "h264_encoder.cc",
       "h264_encoder.h",
-    ]
-
-    jumbo_excluded_sources += [
-      "h264_encoder.cc",
     ]
 
     deps += [ "//third_party/openh264:encoder" ]

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/opera_desktop.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("peerconnection") {
@@ -68,6 +69,14 @@ blink_modules_sources("peerconnection") {
     "rtc_encoded_video_frame.h",
     "rtc_encoded_video_frame_delegate.cc",
     "rtc_encoded_video_frame_delegate.h",
+    "rtc_encoded_video_receiver_sink_optimizer.cc",
+    "rtc_encoded_video_receiver_sink_optimizer.h",
+    "rtc_encoded_video_receiver_source_optimizer.cc",
+    "rtc_encoded_video_receiver_source_optimizer.h",
+    "rtc_encoded_video_sender_sink_optimizer.cc",
+    "rtc_encoded_video_sender_sink_optimizer.h",
+    "rtc_encoded_video_sender_source_optimizer.cc",
+    "rtc_encoded_video_sender_source_optimizer.h",
     "rtc_encoded_video_underlying_sink.cc",
     "rtc_encoded_video_underlying_sink.h",
     "rtc_encoded_video_underlying_source.cc",
@@ -151,14 +160,9 @@ blink_modules_sources("peerconnection") {
     "webrtc_video_perf_reporter.h",
   ]
 
-  jumbo_excluded_sources = [
-    "peer_connection_tracker.cc",
-    "rtc_peer_connection_handler.cc",
-    "rtc_rtp_sender_impl.cc",
-  ]
-
   public_deps = [ "//third_party/webrtc_overrides:webrtc_component" ]
   deps = [
+    "//build:chromecast_buildflags",
     "//components/webrtc:thread_wrapper",
     "//services/metrics/public/cpp:ukm_builders",
     "//third_party/abseil-cpp:absl",
@@ -166,14 +170,17 @@ blink_modules_sources("peerconnection") {
     "//third_party/blink/renderer/modules/crypto",
     "//third_party/blink/renderer/modules/mediastream",
     "//third_party/blink/renderer/modules/webrtc",
-    "//third_party/re2",
   ]
+
+  if (opera_desktop && is_linux) {
+    deps += [ "//media" ]
+  }
 
   allow_circular_includes_from =
       [ "//third_party/blink/renderer/modules/mediastream" ]
 }
 
-jumbo_source_set("test_support") {
+source_set("test_support") {
   testonly = true
 
   sources = [
@@ -199,6 +206,7 @@ jumbo_source_set("test_support") {
     "//testing/gmock",
     "//third_party/blink/public:test_headers",
     "//third_party/blink/renderer/modules",
+    "//third_party/blink/renderer/modules/mediastream:test_support",
     "//third_party/blink/renderer/platform",
     "//third_party/blink/renderer/platform:test_support",
     "//third_party/webrtc_overrides:webrtc_component",

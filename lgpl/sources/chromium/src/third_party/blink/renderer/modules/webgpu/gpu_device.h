@@ -20,7 +20,6 @@ namespace blink {
 class ExecutionContext;
 class HTMLCanvasElement;
 class GPUAdapter;
-class GPUAdapter;
 class GPUBuffer;
 class GPUBufferDescriptor;
 class GPUCommandEncoder;
@@ -83,9 +82,10 @@ class GPUDevice final : public EventTargetWithInlineData,
 
   GPUQueue* queue();
 
-  void destroy(ScriptState* script_state);
+  void destroy(v8::Isolate* isolate);
 
-  GPUBuffer* createBuffer(const GPUBufferDescriptor* descriptor);
+  GPUBuffer* createBuffer(const GPUBufferDescriptor* descriptor,
+                          ExceptionState& exception_state);
   GPUTexture* createTexture(const GPUTextureDescriptor* descriptor,
                             ExceptionState& exception_state);
   GPUTexture* experimentalImportTexture(HTMLCanvasElement* canvas,
@@ -167,7 +167,7 @@ class GPUDevice final : public EventTargetWithInlineData,
 
   void DestroyAllExternalTextures();
   void DissociateMailboxes();
-  void UnmapAllMappableBuffers(ScriptState* script_state);
+  void UnmapAllMappableBuffers(v8::Isolate* isolate);
 
   void OnUncapturedError(WGPUErrorType errorType, const char* message);
   void OnLogging(WGPULoggingType loggingType, const char* message);
@@ -178,11 +178,13 @@ class GPUDevice final : public EventTargetWithInlineData,
                                const char* message);
 
   void OnCreateRenderPipelineAsyncCallback(ScriptPromiseResolver* resolver,
+                                           absl::optional<String> label,
                                            WGPUCreatePipelineAsyncStatus status,
                                            WGPURenderPipeline render_pipeline,
                                            const char* message);
   void OnCreateComputePipelineAsyncCallback(
       ScriptPromiseResolver* resolver,
+      absl::optional<String> label,
       WGPUCreatePipelineAsyncStatus status,
       WGPUComputePipeline compute_pipeline,
       const char* message);

@@ -107,13 +107,25 @@ class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
   // an argument (see bug 829408).
   NamedPropertySetterResult AnonymousNamedSetter(ScriptState*,
                                                  const AtomicString& name,
-                                                 const ScriptValue& value);
+                                                 v8::Local<v8::Value> value);
   NamedPropertyDeleterResult AnonymousNamedDeleter(const AtomicString& name);
   void NamedPropertyEnumerator(Vector<String>& names, ExceptionState&);
   bool NamedPropertyQuery(const AtomicString&, ExceptionState&);
 
  protected:
   explicit CSSStyleDeclaration(ExecutionContext* context);
+
+ private:
+  // Fast path for when we know the value given from the script
+  // is a number, not a string; saves the round-tripping to and from
+  // strings in V8.
+  //
+  // Returns true if the fast path succeeded (in which case we need to
+  // go through the normal string path).
+  virtual bool FastPathSetProperty(CSSPropertyID unresolved_property,
+                                   double value) {
+    return false;
+  }
 };
 
 }  // namespace blink

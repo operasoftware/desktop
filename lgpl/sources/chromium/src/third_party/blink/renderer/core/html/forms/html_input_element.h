@@ -40,6 +40,7 @@
 namespace blink {
 
 class AXObject;
+class ComputedStyleBuilder;
 class DragData;
 class ExceptionState;
 class FileList;
@@ -55,7 +56,7 @@ struct DateTimeChooserParameters;
 
 class CORE_EXPORT HTMLInputElement
     : public TextControlElement,
-      public ActiveScriptWrappable<HTMLInputElement> {
+      public LazyActiveScriptWrappable<HTMLInputElement> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -134,7 +135,7 @@ class CORE_EXPORT HTMLInputElement
   bool ShouldAppearChecked() const;
   bool ShouldAppearIndeterminate() const override;
 
-  PopupTriggerSupport SupportsPopupTriggering() const override;
+  PopoverTriggerSupport SupportsPopoverTriggering() const override;
 
   // Returns null if this isn't associated with any radio button group.
   RadioButtonGroupScope* GetRadioButtonGroupScope() const;
@@ -170,8 +171,6 @@ class CORE_EXPORT HTMLInputElement
   // WebAutofillState::kPreviewed state if |value| is non-empty, or
   // WebAutofillState::kNotFilled otherwise.
   void SetSuggestedValue(const String& value) override;
-
-  void SetEditingValue(const String&);
 
   ScriptValue valueAsDate(ScriptState* script_state) const;
   void setValueAsDate(ScriptState* script_state,
@@ -216,7 +215,7 @@ class CORE_EXPORT HTMLInputElement
                                    unsigned end,
                                    ExceptionState&);
 
-  bool LayoutObjectIsNeeded(const ComputedStyle&) const final;
+  bool LayoutObjectIsNeeded(const DisplayStyle&) const final;
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   void DetachLayoutTree(bool performing_reattach) final;
   void UpdateSelectionOnFocus(SelectionBehaviorOnFocus,
@@ -464,8 +463,7 @@ class CORE_EXPORT HTMLInputElement
 
   void AddToRadioButtonGroup();
   void RemoveFromRadioButtonGroup();
-  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
-      const StyleRecalcContext&) override;
+  void AdjustStyle(ComputedStyleBuilder&) override;
 
   void MaybeReportPiiMetrics();
 

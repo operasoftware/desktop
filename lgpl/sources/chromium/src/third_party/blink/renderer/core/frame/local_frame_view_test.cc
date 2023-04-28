@@ -19,7 +19,7 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_printer.h"
-#include "third_party/blink/renderer/core/paint/paint_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
 #include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
@@ -677,7 +677,7 @@ TEST_F(LocalFrameViewTest, StartOfLifecycleTaskRunsOnFullLifecycle) {
   TestCallback callback;
 
   frame_view->EnqueueStartOfLifecycleTask(
-      base::BindOnce(&TestCallback::Increment, base::Unretained(&callback)));
+      WTF::BindOnce(&TestCallback::Increment, WTF::Unretained(&callback)));
   EXPECT_EQ(callback.calls, 0);
 
   frame_view->UpdateAllLifecyclePhasesExceptPaint(DocumentUpdateReason::kTest);

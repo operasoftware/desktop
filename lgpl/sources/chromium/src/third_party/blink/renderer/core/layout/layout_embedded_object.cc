@@ -95,12 +95,15 @@ void LayoutEmbeddedObject::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
 
-  UpdateLogicalWidth();
-  UpdateLogicalHeight();
+  if (!RuntimeEnabledFeatures::LayoutNGReplacedNoBoxSettersEnabled()) {
+    UpdateLogicalWidth();
+    UpdateLogicalHeight();
+  }
 
   ClearLayoutOverflow();
 
-  UpdateAfterLayout();
+  if (!RuntimeEnabledFeatures::LayoutNGUnifyUpdateAfterLayoutEnabled())
+    UpdateAfterLayout();
 
   if (!GetEmbeddedContentView() && GetFrameView())
     GetFrameView()->AddPartToUpdate(*this);

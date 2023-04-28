@@ -8,7 +8,7 @@ import {MetricsReporterImpl} from 'chrome://resources/js/metrics_reporter/metric
 import {keyDownOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 import {ProfileData, RecentlyClosedTab, Tab, TabGroupColor, TabSearchApiProxyImpl, TabSearchAppElement, TabSearchItem} from 'chrome://tab-search.top-chrome/tab_search.js';
 import {assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {MockedMetricsReporter} from 'chrome://webui-test/metrics_reporter/mocked_metrics_reporter.js';
+import {MockedMetricsReporter} from 'chrome://webui-test/mocked_metrics_reporter.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 
 import {createProfileData, createTab, generateSampleDataFromSiteNames, generateSampleRecentlyClosedTabs, generateSampleRecentlyClosedTabsFromSiteNames, generateSampleTabsFromSiteNames, SAMPLE_RECENTLY_CLOSED_DATA, SAMPLE_WINDOW_HEIGHT, sampleToken} from './tab_search_test_data.js';
@@ -52,8 +52,7 @@ suite('TabSearchAppTest', () => {
 
     tabSearchApp = document.createElement('tab-search-app');
 
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     document.body.appendChild(tabSearchApp);
     await flushTasks();
   }
@@ -229,7 +228,6 @@ suite('TabSearchAppTest', () => {
       title: 'PayPal',
       url: {url: 'https://www.paypal.com'},
       lastActiveElapsedText: '',
-      groupId: undefined,
       lastActiveTime: {internalValue: BigInt(11)},
     };
 
@@ -495,7 +493,6 @@ suite('TabSearchAppTest', () => {
         url: {url: 'https://www.sampletab.com'},
         lastActiveTime: {internalValue: BigInt(3)},
         lastActiveElapsedText: '',
-        groupId: undefined,
       }],
     });
     await flushTasks();
@@ -598,16 +595,16 @@ suite('TabSearchAppTest', () => {
     });
   });
 
-  test('Verify showUI() is called correctly', async () => {
+  test('Verify showUi() is called correctly', async () => {
     await setupTest(createProfileData());
     await waitAfterNextRender(tabSearchApp);
 
     // Make sure that tab data has been received.
     verifyTabIds(queryRows(), [1, 5, 6, 2, 3, 4]);
 
-    // Ensure that showUI() has been called after the initial data has been
+    // Ensure that showUi() has been called after the initial data has been
     // rendered.
-    await testProxy.whenCalled('showUI');
+    await testProxy.whenCalled('showUi');
 
     // Force a change to filtered tab data that would result in a
     // re-render.
@@ -617,8 +614,8 @@ suite('TabSearchAppTest', () => {
     await waitAfterNextRender(tabSearchApp);
     verifyTabIds(queryRows(), [2]);
 
-    // |showUI()| should still have only been called once.
-    assertEquals(1, testProxy.getCallCount('showUI'));
+    // |showUi()| should still have only been called once.
+    assertEquals(1, testProxy.getCallCount('showUi'));
   });
 
   test('Sort by most recent active tabs', async () => {

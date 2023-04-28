@@ -6,8 +6,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_AD_AUCTION_NAVIGATOR_AUCTION_H_
 
 #include <stdint.h>
+#include <memory>
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/public/common/fenced_frame/redacted_fenced_frame_config.h"
 #include "third_party/blink/public/mojom/interest_group/ad_auction_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/interest_group/interest_group_types.mojom-blink.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
@@ -23,17 +25,19 @@
 
 namespace blink {
 
-class AbortSignal;
 class AdRequestConfig;
 class Ads;
 class AuctionAdInterestGroup;
 class AuctionAdConfig;
+class ScopedAbortState;
 class ScriptPromiseResolver;
+class V8UnionFencedFrameConfigOrUSVString;
 
 class MODULES_EXPORT NavigatorAuction final
     : public GarbageCollected<NavigatorAuction>,
       public Supplement<Navigator> {
  public:
+  class AuctionHandle;
   static const char kSupplementName[];
 
   explicit NavigatorAuction(Navigator&);
@@ -94,24 +98,27 @@ class MODULES_EXPORT NavigatorAuction final
                                             ExceptionState& exception_state);
 
   ScriptPromise deprecatedURNToURL(ScriptState* script_state,
-                                   const String& uuid_url_string,
+                                   const String& urn_uuid,
+                                   bool send_reports,
                                    ExceptionState& exception_state);
 
-  static ScriptPromise deprecatedURNToURL(ScriptState* script_state,
-                                          Navigator& navigator,
-                                          const String& uuid_url_string,
-                                          ExceptionState& exception_state);
+  static ScriptPromise deprecatedURNToURL(
+      ScriptState* script_state,
+      Navigator& navigator,
+      const V8UnionFencedFrameConfigOrUSVString* urn_or_config,
+      bool send_reports,
+      ExceptionState& exception_state);
 
   ScriptPromise deprecatedReplaceInURN(
       ScriptState* script_state,
-      const String& uuid_url_string,
+      const String& urn_uuid,
       const Vector<std::pair<String, String>>& replacement,
       ExceptionState& exception_state);
 
   static ScriptPromise deprecatedReplaceInURN(
       ScriptState* script_state,
       Navigator& navigator,
-      const String& uuid_url_string,
+      const V8UnionFencedFrameConfigOrUSVString* urn_or_config,
       const Vector<std::pair<String, String>>& replacement,
       ExceptionState& exception_state);
 
@@ -138,8 +145,6 @@ class MODULES_EXPORT NavigatorAuction final
   }
 
  private:
-  class AuctionHandle;
-
   // Pending cross-site interest group joins and leaves. These may be added to a
   // queue before being passed to the browser process.
 
@@ -179,10 +184,12 @@ class MODULES_EXPORT NavigatorAuction final
   void FinalizeAdComplete(ScriptPromiseResolver* resolver,
                           const absl::optional<KURL>& creative_url);
   // Completion callback for Mojo call made by runAdAuction().
-  void AuctionComplete(ScriptPromiseResolver*,
-                       AbortSignal*,
-                       bool manually_aborted,
-                       const absl::optional<KURL>&);
+  void AuctionComplete(
+      ScriptPromiseResolver*,
+      std::unique_ptr<ScopedAbortState>,
+      bool resolve_to_config,
+      bool manually_aborted,
+      const absl::optional<FencedFrame::RedactedFencedFrameConfig>&);
   // Completion callback for Mojo call made by deprecatedURNToURL().
   void GetURLFromURNComplete(ScriptPromiseResolver*,
                              const absl::optional<KURL>&);

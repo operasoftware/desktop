@@ -3,8 +3,9 @@
 // This file is an original work developed by Opera.
 
 #include "third_party/blink/renderer/modules/mediarecorder/platform_video_encoder_adapter.h"
+#include <memory>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
@@ -33,6 +34,7 @@ class TestVideoEncoder final : public media::VideoEncoder {
   // VideoDecoder implementation.
   void Initialize(media::VideoCodecProfile profile,
                   const Options& options,
+                  EncoderInfoCB info_cb,
                   OutputCB output_cb,
                   EncoderStatusCB done_cb) override {
     options_ = options;
@@ -85,7 +87,7 @@ class PlatformVideoEncoderAdapterTest : public testing::Test {
   PlatformVideoEncoderAdapterTest() {
     auto encoder = std::make_unique<TestVideoEncoder>();
     encoder_ = encoder.get();
-    adapter_ = base::MakeRefCounted<PlatformVideoEncoderAdapter>(
+    adapter_ = std::make_unique<PlatformVideoEncoderAdapter>(
         std::move(encoder),
         VideoTrackRecorder::CodecProfile(VideoTrackRecorder::CodecId::kH264),
         media::BindToCurrentLoop(base::BindRepeating(
@@ -93,8 +95,7 @@ class PlatformVideoEncoderAdapterTest : public testing::Test {
             base::Unretained(this))),
         media::BindToCurrentLoop(base::BindRepeating(
             &PlatformVideoEncoderAdapterTest::OnError, base::Unretained(this))),
-        /*bits_per_second=*/0, MakeTestFrame()->visible_rect().size(),
-        scheduler::GetSequencedTaskRunnerForTesting());
+        /*bits_per_second=*/0, MakeTestFrame()->visible_rect().size());
   }
 
   PlatformVideoEncoderAdapter& adapter() { return *adapter_; }
@@ -138,7 +139,7 @@ class PlatformVideoEncoderAdapterTest : public testing::Test {
 
   std::unique_ptr<base::RunLoop> run_loop_;
 
-  scoped_refptr<PlatformVideoEncoderAdapter> adapter_;
+  std::unique_ptr<PlatformVideoEncoderAdapter> adapter_;
   base::raw_ptr<TestVideoEncoder> encoder_;
 
   absl::optional<int> expected_encode_result_count_;

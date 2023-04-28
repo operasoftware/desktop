@@ -10,7 +10,7 @@ import {hexColorToSkColor, skColorToRgba} from 'chrome://resources/js/color_util
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
 import {assertDeepEquals, assertEquals, assertFalse, assertGE, assertLE, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
-import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
+import {TestMock} from 'chrome://webui-test/test_mock.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 
 import {assertNotStyle, assertStyle, installMock, keydown} from './test_support.js';
@@ -53,8 +53,6 @@ function createImageDoodle(width: number = 500, height: number = 200): Doodle {
         height,
         backgroundColor: {value: 0xffffffff},
         imageImpressionLogUrl: {url: 'https://log.com'},
-        animationUrl: undefined,
-        animationImpressionLogUrl: undefined,
       },
       dark: {
         imageUrl: {url: createImageDataUrl(width, height, 'blue')},
@@ -68,20 +66,17 @@ function createImageDoodle(width: number = 500, height: number = 200): Doodle {
         height,
         backgroundColor: {value: 0x000000ff},
         imageImpressionLogUrl: {url: 'https://dark_log.com'},
-        animationUrl: undefined,
-        animationImpressionLogUrl: undefined,
       },
       onClickUrl: {url: 'https://foo.com'},
       shareUrl: {url: 'https://foo.com'},
     },
-    interactive: undefined,
     description: '',
   };
 }
 
 suite('NewTabPageLogoTest', () => {
-  let windowProxy: TestBrowserProxy;
-  let handler: TestBrowserProxy;
+  let windowProxy: TestMock<WindowProxy>;
+  let handler: TestMock<PageHandlerRemote>;
 
   async function createLogo(doodle: Doodle|null = null): Promise<LogoElement> {
     handler.setResultFor('getDoodle', Promise.resolve({
@@ -95,8 +90,7 @@ suite('NewTabPageLogoTest', () => {
   }
 
   setup(() => {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
     windowProxy = installMock(WindowProxy);
     windowProxy.setResultFor('createIframeSrc', '');
@@ -280,7 +274,6 @@ suite('NewTabPageLogoTest', () => {
         width: 200,
         height: 100,
       },
-      image: undefined,
       description: '',
     });
     logo.dark = false;
@@ -312,7 +305,6 @@ suite('NewTabPageLogoTest', () => {
         width: 200,
         height: 100,
       },
-      image: undefined,
       description: '',
     });
 
@@ -401,7 +393,6 @@ suite('NewTabPageLogoTest', () => {
         width: 1000,
         height: 500,
       },
-      image: undefined,
       description: '',
     });
 
@@ -420,7 +411,6 @@ suite('NewTabPageLogoTest', () => {
         width: 200,
         height: 100,
       },
-      image: undefined,
       description: '',
     });
     const transitionend = eventToPromise('transitionend', $$(logo, '#iframe')!);
@@ -459,7 +449,6 @@ suite('NewTabPageLogoTest', () => {
         width: 200,
         height: 100,
       },
-      image: undefined,
       description: '',
     });
     const height = $$<HTMLElement>(logo, '#iframe')!.offsetHeight;
@@ -489,7 +478,6 @@ suite('NewTabPageLogoTest', () => {
         width: 200,
         height: 100,
       },
-      image: undefined,
       description: '',
     });
     logo.dark = false;

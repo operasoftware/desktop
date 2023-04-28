@@ -14,7 +14,7 @@ import {assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 import {isVisible} from 'chrome://webui-test/test_util.js';
 
-import {createDefaultAccelerator, createUserAccelerator} from './shortcut_customization_test_util.js';
+import {createStandardAcceleratorInfo, createUserAcceleratorInfo} from './shortcut_customization_test_util.js';
 
 suite('acceleratorEditViewTest', function() {
   let editViewElement: AcceleratorEditViewElement|null = null;
@@ -45,7 +45,7 @@ suite('acceleratorEditViewTest', function() {
   }
 
   test('LoadsBasicEditView', async () => {
-    const acceleratorInfo = createUserAccelerator(
+    const acceleratorInfo = createUserAcceleratorInfo(
         Modifier.CONTROL | Modifier.SHIFT,
         /*key=*/ 71,
         /*keyDisplay=*/ 'g');
@@ -72,33 +72,14 @@ suite('acceleratorEditViewTest', function() {
     assertFalse(isVisible(getElementById('cancelButtonContainer')));
   });
 
-  test('LockedAccelerator', async () => {
-    const acceleratorInfo = createUserAccelerator(
-        Modifier.CONTROL | Modifier.SHIFT,
-        /*key=*/ 71,
-        /*keyDisplay=*/ 'g',
-        /*locked=*/ true);
-
-    editViewElement!.acceleratorInfo = acceleratorInfo;
-    await flush();
-
-    // Check that the edit buttons are not visible.
-    assertFalse(
-        !!editViewElement!.shadowRoot!.querySelector('#editButtonsContainer'));
-    assertFalse(
-        !!editViewElement!.shadowRoot!.querySelector('#cancelButtonContainer'));
-    // Lock icon should be visible.
-    assertTrue(isVisible(getElementById('lockContainer')));
-  });
-
   test('DetectShortcutConflict', async () => {
-    const acceleratorInfo = createDefaultAccelerator(
+    const acceleratorInfo = createStandardAcceleratorInfo(
         Modifier.ALT,
         /*key=*/ 221,
         /*keyDisplay=*/ ']');
 
     editViewElement!.acceleratorInfo = acceleratorInfo;
-    editViewElement!.source = AcceleratorSource.ASH;
+    editViewElement!.source = AcceleratorSource.kAsh;
     editViewElement!.action = 1;
     await flushTasks();
 

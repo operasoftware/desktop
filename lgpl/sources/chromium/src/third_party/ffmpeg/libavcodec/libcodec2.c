@@ -189,9 +189,7 @@ const FFCodec ff_libcodec2_decoder = {
     .init                   = libcodec2_init_decoder,
     .close                  = libcodec2_close,
     FF_CODEC_DECODE_CB(libcodec2_decode),
-#if FF_API_OLD_CHANNEL_LAYOUT
-    .p.channel_layouts      = (const uint64_t[]) { AV_CH_LAYOUT_MONO, 0 },
-#endif
+    CODEC_OLD_CHANNEL_LAYOUTS(AV_CH_LAYOUT_MONO)
 };
 
 const FFCodec ff_libcodec2_encoder = {
@@ -199,7 +197,8 @@ const FFCodec ff_libcodec2_encoder = {
     CODEC_LONG_NAME("codec2 encoder using libcodec2"),
     .p.type                 = AVMEDIA_TYPE_AUDIO,
     .p.id                   = AV_CODEC_ID_CODEC2,
-    .p.capabilities         = AV_CODEC_CAP_DR1,
+    .p.capabilities         = AV_CODEC_CAP_DR1 |
+                              AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .p.supported_samplerates = (const int[]){ 8000, 0 },
     .p.sample_fmts          = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_NONE },
     .p.ch_layouts           = (const AVChannelLayout[]) { AV_CHANNEL_LAYOUT_MONO, { 0 } },
@@ -209,7 +208,5 @@ const FFCodec ff_libcodec2_encoder = {
     .init                   = libcodec2_init_encoder,
     .close                  = libcodec2_close,
     FF_CODEC_ENCODE_CB(libcodec2_encode),
-#if FF_API_OLD_CHANNEL_LAYOUT
-    .p.channel_layouts      = (const uint64_t[]) { AV_CH_LAYOUT_MONO, 0 },
-#endif
+    CODEC_OLD_CHANNEL_LAYOUTS(AV_CH_LAYOUT_MONO)
 };

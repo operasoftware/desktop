@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/features.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("webaudio") {
@@ -58,6 +59,8 @@ blink_modules_sources("webaudio") {
     "audio_scheduled_source_handler.h",
     "audio_scheduled_source_node.cc",
     "audio_scheduled_source_node.h",
+    "audio_sink_info.cc",
+    "audio_sink_info.h",
     "audio_summing_junction.cc",
     "audio_summing_junction.h",
     "audio_worklet.cc",
@@ -196,27 +199,6 @@ blink_modules_sources("webaudio") {
     "wave_shaper_processor.h",
   ]
 
-  jumbo_excluded_sources = [
-    "audio_basic_processor_handler.cc",
-    "audio_buffer_source_handler.cc",
-    "audio_worklet_handler.cc",
-    "biquad_filter_node.cc",
-    "channel_splitter_handler.cc",
-    "constant_source_handler.cc",
-    "convolver_handler.cc",
-    "delay_handler.cc",
-    "dynamics_compressor_handler.cc",
-    "gain_handler.cc",
-    "iir_filter_handler.cc",
-    "media_element_audio_source_handler.cc",
-    "media_stream_audio_source_handler.cc",
-    "oscillator_node.cc",
-    "realtime_audio_worklet_thread.cc",
-    "semi_realtime_audio_worklet_thread.cc",
-    "stereo_panner_handler.cc",
-    "wave_shaper_handler.cc",
-  ]
-
   if (is_win) {
     # Result of 32-bit shift implicitly converted to 64 bits.
     cflags = [ "/wd4334" ]
@@ -230,9 +212,12 @@ blink_modules_sources("webaudio") {
     sources += [ "cpu/arm/oscillator_kernel_neon.cc" ]
   }
   deps = [
+    "//media/mojo/clients",
     "//services/metrics/public/cpp:ukm_builders",
     "//third_party/blink/renderer/modules/mediastream",
+    "//third_party/blink/renderer/modules/peerconnection",
     "//third_party/blink/renderer/modules/permissions",
+    "//third_party/blink/renderer/modules/webrtc",
     "//third_party/fdlibm",
   ]
 }

@@ -144,10 +144,11 @@ error:
     return ret;
 }
 
-static int validate_codec_tag(AVFormatContext *s, AVStream *st)
+static int validate_codec_tag(const AVFormatContext *s, const AVStream *st)
 {
     const AVCodecTag *avctag;
     enum AVCodecID id = AV_CODEC_ID_NONE;
+    unsigned uppercase_tag = ff_toupper4(st->codecpar->codec_tag);
     int64_t tag  = -1;
 
     /**
@@ -159,7 +160,7 @@ static int validate_codec_tag(AVFormatContext *s, AVStream *st)
     for (int n = 0; s->oformat->codec_tag[n]; n++) {
         avctag = s->oformat->codec_tag[n];
         while (avctag->id != AV_CODEC_ID_NONE) {
-            if (ff_toupper4(avctag->tag) == ff_toupper4(st->codecpar->codec_tag)) {
+            if (ff_toupper4(avctag->tag) == uppercase_tag) {
                 id = avctag->id;
                 if (id == st->codecpar->codec_id)
                     return 1;
@@ -950,6 +951,7 @@ int ff_interleave_packet_per_dts(AVFormatContext *s, AVPacket *pkt,
 
     if (s->max_interleave_delta > 0 &&
         si->packet_buffer.head &&
+        si->packet_buffer.head->pkt.dts != AV_NOPTS_VALUE &&
         !flush &&
         si->nb_interleaved_streams == stream_count+noninterleaved_count
     ) {

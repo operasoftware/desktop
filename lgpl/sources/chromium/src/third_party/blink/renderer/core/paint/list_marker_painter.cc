@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/paint/list_marker_painter.h"
 
 #include "third_party/blink/renderer/core/css/counter_style.h"
+#include "third_party/blink/renderer/core/layout/layout_counter.h"
 #include "third_party/blink/renderer/core/layout/layout_list_item.h"
 #include "third_party/blink/renderer/core/layout/layout_list_marker.h"
 #include "third_party/blink/renderer/core/layout/list_marker.h"
@@ -87,8 +88,14 @@ void ListMarkerPainter::PaintSymbol(const PaintInfo& paint_info,
                                     const ComputedStyle& style,
                                     const LayoutRect& marker) {
   DCHECK(object);
-  DCHECK(style.ListStyleType());
-  DCHECK(style.ListStyleType()->IsCounterStyle());
+#if DCHECK_IS_ON()
+  if (object->IsCounter()) {
+    DCHECK(To<LayoutCounter>(object)->IsDirectionalSymbolMarker());
+  } else {
+    DCHECK(style.ListStyleType());
+    DCHECK(style.ListStyleType()->IsCounterStyle());
+  }
+#endif
   GraphicsContext& context = paint_info.context;
   Color color(object->ResolveColor(GetCSSPropertyColor()));
   if (BoxModelObjectPainter::ShouldForceWhiteBackgroundForPrintEconomy(
@@ -100,7 +107,7 @@ void ListMarkerPainter::PaintSymbol(const PaintInfo& paint_info,
   context.SetStrokeStyle(kSolidStroke);
   context.SetStrokeThickness(1.0f);
   gfx::Rect snapped_rect = ToPixelSnappedRect(marker);
-  const AtomicString& type = style.ListStyleType()->GetCounterStyleName();
+  const AtomicString& type = LayoutCounter::ListStyle(object, style);
   AutoDarkMode auto_dark_mode(
       PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kListSymbol));
   if (type == "disc") {
@@ -157,16 +164,14 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info) {
             layout_list_marker_.StyleRef(), marker_rect.size());
     if (!target_image)
       return;
-    // TODO(penglin): This should always be classified as 'icon'.
     const gfx::RectF src_rect(target_image->Rect());
     auto image_auto_dark_mode = ImageClassifierHelper::GetImageAutoDarkMode(
         *layout_list_marker_.GetFrame(), layout_list_marker_.StyleRef(),
         marker_rect, src_rect);
     // Since there is no way for the developer to specify decode behavior, use
     // kSync by default.
-    context.DrawImage(target_image.get(), Image::kSyncDecode,
-                      image_auto_dark_mode, ImagePaintTimingInfo(), marker_rect,
-                      &src_rect);
+    context.DrawImage(*target_image, Image::kSyncDecode, image_auto_dark_mode,
+                      ImagePaintTimingInfo(), marker_rect, &src_rect);
     return;
   }
 

@@ -38,7 +38,8 @@ class ExecutionContext;
 class MutableCSSPropertyValueSet;
 class StyleSheetContents;
 
-class AbstractPropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
+class CORE_EXPORT AbstractPropertySetCSSStyleDeclaration
+    : public CSSStyleDeclaration {
  public:
   virtual Element* ParentElement() const { return nullptr; }
   StyleSheetContents* ContextStyleSheet() const;
@@ -98,6 +99,8 @@ class AbstractPropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
   virtual void DidMutate(MutationType) {}
   virtual MutableCSSPropertyValueSet& PropertySet() const = 0;
   virtual bool IsKeyframeStyle() const { return false; }
+  bool FastPathSetProperty(CSSPropertyID unresolved_property,
+                           double value) override;
 };
 
 }  // namespace blink

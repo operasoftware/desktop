@@ -206,6 +206,7 @@ AudioDecoder::MakeMediaAudioDecoderConfig(const ConfigType& config,
       audio_type->codec, media::kSampleFormatPlanarF32, channel_layout,
       config.sampleRate(), extra_data, media::EncryptionScheme::kUnencrypted,
       base::TimeDelta() /* seek preroll */, 0 /* codec delay */);
+  media_config.set_aac_extra_data(std::move(extra_data));
 
   return media_config;
 }

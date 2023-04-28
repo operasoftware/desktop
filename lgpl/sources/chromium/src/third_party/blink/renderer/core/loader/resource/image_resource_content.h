@@ -135,7 +135,10 @@ class CORE_EXPORT ImageResourceContent final
 
   // Redirecting methods to Resource.
   const KURL& Url() const override;
-  base::TimeTicks LoadResponseEnd() const;
+  bool IsDataUrl() const override;
+  base::TimeTicks LoadStart() const override;
+  base::TimeTicks LoadEnd() const override;
+  AtomicString MediaType() const override;
   bool IsAccessAllowed() const;
   const ResourceResponse& GetResponse() const;
   absl::optional<ResourceError> GetResourceError() const;
@@ -192,7 +195,11 @@ class CORE_EXPORT ImageResourceContent final
 
   void SetImageResourceInfo(ImageResourceInfo*);
 
-  ResourcePriority PriorityFromObservers() const;
+  // Returns priority information to be used for setting the Resource's
+  // priority. This is NOT the current Resource's priority.
+  std::pair<ResourcePriority, ResourcePriority> PriorityFromObservers() const;
+  // Returns the current Resource's priroity used by MediaTiming.
+  absl::optional<WebURLRequest::Priority> RequestPriority() const override;
   scoped_refptr<const SharedBuffer> ResourceBuffer() const;
   bool ShouldUpdateImageImmediately() const;
   bool HasObservers() const {

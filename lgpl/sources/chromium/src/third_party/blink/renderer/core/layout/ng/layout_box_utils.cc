@@ -20,6 +20,8 @@ namespace blink {
 
 LayoutUnit LayoutBoxUtils::AvailableLogicalWidth(const LayoutBox& box,
                                                  const LayoutBlock* cb) {
+  // SVG <text> and <foreignObject> should not refer to its containing block.
+  DCHECK(!box.IsSVGChild());
   auto writing_mode = box.StyleRef().GetWritingMode();
   bool parallel_containing_block = IsParallelWritingMode(
       cb ? cb->StyleRef().GetWritingMode() : writing_mode, writing_mode);
@@ -45,6 +47,8 @@ LayoutUnit LayoutBoxUtils::AvailableLogicalWidth(const LayoutBox& box,
 
 LayoutUnit LayoutBoxUtils::AvailableLogicalHeight(const LayoutBox& box,
                                                   const LayoutBlock* cb) {
+  // SVG <text> and <foreignObject> should not refer to its containing block.
+  DCHECK(!box.IsSVGChild());
   auto writing_mode = box.StyleRef().GetWritingMode();
   bool parallel_containing_block = IsParallelWritingMode(
       cb ? cb->StyleRef().GetWritingMode() : writing_mode, writing_mode);
@@ -207,6 +211,37 @@ LayoutUnit LayoutBoxUtils::TotalBlockSize(const LayoutBox& box) {
                             ->ConsumedBlockSize();
   }
   return total_block_size;
+}
+
+// static
+LayoutPoint LayoutBoxUtils::ComputeLocation(
+    const NGPhysicalBoxFragment& child_fragment,
+    PhysicalOffset offset,
+    const NGPhysicalBoxFragment& container_fragment,
+    const NGBlockBreakToken* previous_container_break_token) {
+  if (UNLIKELY(container_fragment.Style().IsFlippedBlocksWritingMode())) {
+    // Move the physical offset to the right side of the child fragment,
+    // relative to the right edge of the container fragment. This is the
+    // block-start offset in vertical-rl, and the legacy engine expects always
+    // expects the block offset to be relative to block-start.
+    offset.left = container_fragment.Size().width - offset.left -
+                  child_fragment.Size().width;
+  }
+
+  if (UNLIKELY(previous_container_break_token)) {
+    // Add the amount of block-size previously (in previous fragmentainers)
+    // consumed by the container fragment. This will map the child's offset
+    // nicely into the flow thread coordinate system used by the legacy engine.
+    LayoutUnit consumed =
+        previous_container_break_token->ConsumedBlockSizeForLegacy();
+    if (container_fragment.Style().IsHorizontalWritingMode()) {
+      offset.top += consumed;
+    } else {
+      offset.left += consumed;
+    }
+  }
+
+  return offset.ToLayoutPoint();
 }
 
 }  // namespace blink

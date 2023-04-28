@@ -76,6 +76,10 @@
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "v8/include/v8.h"
 
+namespace network {
+class SharedURLLoaderFactory;
+}  // namespace network
+
 namespace blink {
 
 class AssociatedInterfaceProvider;
@@ -107,10 +111,15 @@ class WebRemotePlaybackClient;
 class WebServiceWorkerProvider;
 class WebSpellCheckPanelHostClient;
 class WebTextCheckClient;
+class URLLoader;
 class ResourceLoadInfoNotifierWrapper;
 enum class SyncCondition;
 struct Impression;
 struct MobileFriendliness;
+
+namespace scheduler {
+class TaskAttributionId;
+}  // namespace scheduler
 
 class CORE_EXPORT LocalFrameClient : public FrameClient {
  public:
@@ -156,12 +165,14 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
 
   virtual void BeginNavigation(
       const ResourceRequest&,
+      const KURL& requestor_base_url,
       mojom::RequestContextFrameType,
       LocalDOMWindow* origin_window,
       DocumentLoader*,
       WebNavigationType,
       NavigationPolicy,
       WebFrameLoadType,
+      mojom::blink::ForceHistoryPush,
       bool is_client_redirect,
       // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
       bool is_unfenced_top_navigation,
@@ -183,7 +194,10 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void DidStartLoading() = 0;
   virtual void DidStopLoading() = 0;
 
-  virtual bool NavigateBackForward(int offset) const = 0;
+  virtual bool NavigateBackForward(
+      int offset,
+      absl::optional<scheduler::TaskAttributionId>
+          soft_navigation_heuristics_task_id) const = 0;
 
   virtual void DidDispatchPingLoader(const KURL&) = 0;
 
@@ -204,6 +218,14 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   // propogates renderer loading behavior to the browser process for histograms.
   virtual void DidObserveLoadingBehavior(LoadingBehaviorFlag) {}
 
+  // Will be called when a sub resource load happens.
+  virtual void DidObserveSubresourceLoad(
+      uint32_t number_of_subresources_loaded,
+      uint32_t number_of_subresource_loads_handled_by_service_worker,
+      bool pervasive_payload_requested,
+      int64_t pervasive_bytes_fetched,
+      int64_t total_bytes_fetched) {}
+
   // Will be called when a new UseCounterFeature has been observed in a frame.
   // This propagates feature usage to the browser process for histograms.
   virtual void DidObserveNewFeatureUsage(const UseCounterFeature&) {}
@@ -215,18 +237,10 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void DidObserveLayoutShift(double score, bool after_input_or_scroll) {
   }
 
-  // Reports the number of LayoutBlock creation, and LayoutObject::UpdateLayout
-  // calls. All values are deltas since the last calls of this function.
-  virtual void DidObserveLayoutNg(uint32_t all_block_count,
-                                  uint32_t ng_block_count,
-                                  uint32_t all_call_count,
-                                  uint32_t ng_call_count) {}
-
   // Notifies the observers of the origins for which subresource redirect
   // optimizations can be preloaded.
   virtual void PreloadSubresourceOptimizationsForOrigins(
-      const WTF::HashSet<scoped_refptr<const SecurityOrigin>,
-                         SecurityOriginHash>& origins) {}
+      const WTF::HashSet<scoped_refptr<const SecurityOrigin>>& origins) {}
 
   // Transmits the change in the set of watched CSS selectors property that
   // match any element on the frame.
@@ -295,7 +309,9 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
 
   virtual void DidInsertVideoElement() = 0;
   virtual void DidCommitDocumentReplacementNavigation(DocumentLoader*) = 0;
-  virtual void DispatchDidClearWindowObjectInMainWorld() = 0;
+  virtual void DispatchDidClearWindowObjectInMainWorld(
+      v8::Isolate* isolate,
+      v8::MicrotaskQueue* microtask_queue) = 0;
   virtual void DocumentElementAvailable() = 0;
   virtual void RunScriptsAtDocumentElementAvailable() = 0;
   virtual void RunScriptsAtDocumentReady(bool document_is_empty) = 0;
@@ -352,7 +368,9 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
 
   virtual WebTextCheckClient* GetTextCheckerClient() const = 0;
 
-  virtual std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() = 0;
+  virtual scoped_refptr<network::SharedURLLoaderFactory>
+  GetURLLoaderFactory() = 0;
+  virtual std::unique_ptr<URLLoader> CreateURLLoaderForTesting() = 0;
 
   virtual void AnnotatedRegionsChanged() = 0;
 

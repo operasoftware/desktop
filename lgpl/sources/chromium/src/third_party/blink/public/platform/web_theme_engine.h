@@ -170,6 +170,7 @@ class WebThemeEngine {
     int value_rect_width;
     int value_rect_height;
     float zoom;
+    bool is_horizontal;
   };
 
   // Extra parameters for scrollbar thumb. Used only for overlay scrollbars.

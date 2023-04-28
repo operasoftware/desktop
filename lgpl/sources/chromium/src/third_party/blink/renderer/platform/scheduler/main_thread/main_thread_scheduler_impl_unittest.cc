@@ -8,9 +8,9 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/run_loop.h"
@@ -36,9 +36,10 @@
 #include "third_party/blink/public/common/input/web_touch_event.h"
 #include "third_party/blink/public/common/page/launching_process_state.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
+#include "third_party/blink/renderer/platform/scheduler/common/auto_advancing_virtual_time_domain.h"
 #include "third_party/blink/renderer/platform/scheduler/common/features.h"
+#include "third_party/blink/renderer/platform/scheduler/common/task_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/common/throttling/budget_pool.h"
-#include "third_party/blink/renderer/platform/scheduler/main_thread/auto_advancing_virtual_time_domain.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/find_in_page_budget_pool_controller.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_task_queue_controller.h"
@@ -59,7 +60,6 @@ using ::base::Feature;
 using ::base::sequence_manager::FakeTask;
 using ::base::sequence_manager::FakeTaskTiming;
 using blink::WebInputEvent;
-using FeatureAndParams = ::base::test::ScopedFeatureList::FeatureAndParams;
 using ::testing::InSequence;
 using ::testing::Mock;
 using ::testing::NiceMock;
@@ -76,10 +76,9 @@ constexpr base::TimeDelta kDelayForHighPriorityRendering =
 std::unique_ptr<PageSchedulerImpl> CreatePageScheduler(
     PageScheduler::Delegate* page_scheduler_delegate,
     ThreadSchedulerBase* scheduler,
-    WebAgentGroupScheduler& agent_group_scheduler) {
+    AgentGroupScheduler& agent_group_scheduler) {
   std::unique_ptr<PageScheduler> page_scheduler =
-      agent_group_scheduler.AsAgentGroupScheduler().CreatePageScheduler(
-          page_scheduler_delegate);
+      agent_group_scheduler.CreatePageScheduler(page_scheduler_delegate);
   std::unique_ptr<PageSchedulerImpl> page_scheduler_impl(
       static_cast<PageSchedulerImpl*>(page_scheduler.release()));
   return page_scheduler_impl;
@@ -383,6 +382,10 @@ class MainThreadSchedulerImplForTest : public MainThreadSchedulerImpl {
       std::move(on_microtask_checkpoint_).Run();
   }
 
+  void SetCurrentUseCase(UseCase use_case) {
+    SetCurrentUseCaseForTest(use_case);
+  }
+
   int update_policy_count_;
   Vector<String> use_cases_;
   base::OnceClosure on_microtask_checkpoint_;
@@ -402,7 +405,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
   }
 
   explicit MainThreadSchedulerImplTest(
-      std::vector<FeatureAndParams> features_to_enable) {
+      std::vector<::base::test::FeatureRefAndParams> features_to_enable) {
     feature_list_.InitWithFeaturesAndParameters(features_to_enable, {});
   }
 
@@ -421,6 +424,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
             nullptr, test_task_runner_, test_task_runner_->GetMockTickClock(),
             base::sequence_manager::SequenceManager::Settings::Builder()
                 .SetRandomisedSamplingEnabled(true)
+                .SetPrioritySettings(CreatePrioritySettings())
                 .Build())));
 
     EXPECT_EQ(ForceUpdatePolicyAndGetCurrentUseCase(), UseCase::kNone);
@@ -457,17 +461,15 @@ class MainThreadSchedulerImplTest : public testing::Test {
     v8_task_runner_ =
         scheduler_->V8TaskQueue()->GetTaskRunnerWithDefaultTaskType();
 
-    agent_group_scheduler_ = std::unique_ptr<AgentGroupSchedulerImpl>(
-        static_cast<AgentGroupSchedulerImpl*>(
-            scheduler_->CreateAgentGroupScheduler().release()));
+    agent_group_scheduler_ = static_cast<AgentGroupSchedulerImpl*>(
+        scheduler_->CreateAgentGroupScheduler());
     if (scheduler_->scheduling_settings()
             .mbi_compositor_task_runner_per_agent_scheduling_group) {
       compositor_task_runner_ = agent_group_scheduler_->CompositorTaskQueue()
                                     ->GetTaskRunnerWithDefaultTaskType();
     }
     page_scheduler_ = std::make_unique<NiceMock<MockPageSchedulerImpl>>(
-        scheduler_.get(),
-        static_cast<AgentGroupSchedulerImpl&>(*agent_group_scheduler_));
+        scheduler_.get(), *agent_group_scheduler_);
     main_frame_scheduler_ =
         CreateFrameScheduler(page_scheduler_.get(), nullptr,
                              /*is_in_embedded_frame_tree=*/false,
@@ -534,7 +536,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
     widget_scheduler_.reset();
     main_frame_scheduler_.reset();
     page_scheduler_.reset();
-    agent_group_scheduler_.reset();
+    agent_group_scheduler_ = nullptr;
     scheduler_->Shutdown();
     base::RunLoop().RunUntilIdle();
     scheduler_.reset();
@@ -1009,7 +1011,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
   scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner_;
 
   std::unique_ptr<MainThreadSchedulerImplForTest> scheduler_;
-  std::unique_ptr<AgentGroupSchedulerImpl> agent_group_scheduler_;
+  Persistent<AgentGroupSchedulerImpl> agent_group_scheduler_;
   std::unique_ptr<MockPageSchedulerImpl> page_scheduler_;
   std::unique_ptr<FrameSchedulerImpl> main_frame_scheduler_;
   scoped_refptr<WidgetScheduler> widget_scheduler_;
@@ -2862,7 +2864,7 @@ TEST_F(MainThreadSchedulerImplTest, SYNCHRONIZED_GESTURE_CompositingExpensive) {
 
   // Throttleable tasks should not have been starved by the expensive compositor
   // tasks.
-  EXPECT_EQ(TaskQueue::kNormalPriority,
+  EXPECT_EQ(TaskPriority::kNormalPriority,
             compositor_task_queue()->GetQueuePriority());
   EXPECT_EQ(1000u, run_order.size());
 }
@@ -2902,7 +2904,7 @@ TEST_F(MainThreadSchedulerImplTest, MAIN_THREAD_CUSTOM_INPUT_HANDLING) {
 
   // Throttleable tasks should not have been starved by the expensive compositor
   // tasks.
-  EXPECT_EQ(TaskQueue::kNormalPriority,
+  EXPECT_EQ(TaskPriority::kNormalPriority,
             compositor_task_queue()->GetQueuePriority());
   EXPECT_EQ(1000u, run_order.size());
 }
@@ -2940,7 +2942,7 @@ TEST_F(MainThreadSchedulerImplTest, MAIN_THREAD_GESTURE) {
     EXPECT_EQ(UseCase::kMainThreadGesture, CurrentUseCase()) << "i = " << i;
   }
 
-  EXPECT_EQ(TaskQueue::kHighestPriority,
+  EXPECT_EQ(TaskPriority::kHighestPriority,
             compositor_task_queue()->GetQueuePriority());
   EXPECT_EQ(279u, run_order.size());
 }
@@ -3340,12 +3342,10 @@ TEST_F(MainThreadSchedulerImplTest, FreezesCompositorQueueWhenAllPagesFrozen) {
   page_scheduler_.reset();
 
   std::unique_ptr<PageScheduler> sched_1 =
-      agent_group_scheduler_->AsAgentGroupScheduler().CreatePageScheduler(
-          nullptr);
+      agent_group_scheduler_->CreatePageScheduler(nullptr);
   sched_1->SetPageVisible(false);
   std::unique_ptr<PageScheduler> sched_2 =
-      agent_group_scheduler_->AsAgentGroupScheduler().CreatePageScheduler(
-          nullptr);
+      agent_group_scheduler_->CreatePageScheduler(nullptr);
   sched_2->SetPageVisible(false);
 
   Vector<String> run_order;
@@ -3364,8 +3364,7 @@ TEST_F(MainThreadSchedulerImplTest, FreezesCompositorQueueWhenAllPagesFrozen) {
 
   run_order.clear();
   std::unique_ptr<PageScheduler> sched_3 =
-      agent_group_scheduler_->AsAgentGroupScheduler().CreatePageScheduler(
-          nullptr);
+      agent_group_scheduler_->CreatePageScheduler(nullptr);
   sched_3->SetPageVisible(false);
   base::RunLoop().RunUntilIdle();
   EXPECT_THAT(run_order, testing::ElementsAre("C2"));
@@ -3395,6 +3394,7 @@ class MainThreadSchedulerImplWithInitalVirtualTimeTest
                 test_task_runner_->GetMockTickClock(),
                 base::sequence_manager::SequenceManager::Settings::Builder()
                     .SetRandomisedSamplingEnabled(true)
+                    .SetPrioritySettings(CreatePrioritySettings())
                     .Build()));
     main_thread_scheduler->EnableVirtualTime(
         /* initial_time= */ base::Time::FromJsTime(1000000.0));
@@ -3572,7 +3572,7 @@ TEST_F(BestEffortPriorityForFindInPageExperimentTest,
   PostTestTasks(&run_order, "F1 D1 F2 D2 F3 D3");
   EnableIdleTasks();
   EXPECT_EQ(scheduler_->find_in_page_priority(),
-            QueuePriority::kBestEffortPriority);
+            TaskPriority::kBestEffortPriority);
   base::RunLoop().RunUntilIdle();
   // Find-in-page tasks have "best-effort" priority, so they will be done after
   // the default tasks (which have normal priority).
@@ -3690,6 +3690,59 @@ TEST_F(MainThreadSchedulerImplTest, ThrottleHandleThrottlesQueue) {
   EXPECT_FALSE(throttleable_task_queue()->IsThrottled());
 }
 
+class PrioritizeCompositingAfterDelayTest : public MainThreadSchedulerImplTest {
+ public:
+  PrioritizeCompositingAfterDelayTest()
+      : MainThreadSchedulerImplTest({::base::test::FeatureRefAndParams(
+            kPrioritizeCompositingAfterDelayTrials,
+            {{"PreFCP", "120"}, {"PostFCP", "80"}})}) {}
+};
+
+TEST_F(PrioritizeCompositingAfterDelayTest, PreFCP) {
+  scheduler_->SetCurrentUseCase(UseCase::kEarlyLoading);
+  AdvanceTimeWithTask(base::Milliseconds(119));
+  Vector<String> run_order;
+  PostTestTasks(&run_order, "D1 CM1 P1");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_THAT(run_order, testing::ElementsAre("P1", "D1", "CM1"));
+
+  AdvanceTimeWithTask(base::Milliseconds(121));
+  run_order.clear();
+  PostTestTasks(&run_order, "D1 CM1 P1");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_THAT(run_order, testing::ElementsAre("P1", "CM1", "D1"));
+}
+
+TEST_F(PrioritizeCompositingAfterDelayTest, PostFCP) {
+  scheduler_->SetCurrentUseCase(UseCase::kNone);
+  AdvanceTimeWithTask(base::Milliseconds(79));
+  Vector<String> run_order;
+  PostTestTasks(&run_order, "D1 CM1 P1");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_THAT(run_order, testing::ElementsAre("P1", "D1", "CM1"));
+
+  AdvanceTimeWithTask(base::Milliseconds(81));
+  run_order.clear();
+  PostTestTasks(&run_order, "D1 CM1 P1");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_THAT(run_order, testing::ElementsAre("P1", "CM1", "D1"));
+}
+
+TEST_F(PrioritizeCompositingAfterDelayTest, DuringCompositorGesture) {
+  scheduler_->SetCurrentUseCase(UseCase::kCompositorGesture);
+  AdvanceTimeWithTask(base::Milliseconds(99));
+  Vector<String> run_order;
+  PostTestTasks(&run_order, "D1 CM1 P1");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_THAT(run_order, testing::ElementsAre("P1", "D1", "CM1"));
+
+  AdvanceTimeWithTask(base::Milliseconds(101));
+  run_order.clear();
+  PostTestTasks(&run_order, "P1 D1 CM1");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_THAT(run_order, testing::ElementsAre("P1", "CM1", "D1"));
+}
+
 struct CompositorTQPolicyDuringThreadedScrollTestParam {
   CompositorTQPolicyDuringThreadedScrollTestParam(
       CompositorTQPolicyDuringThreadedScroll policy,
@@ -3757,7 +3810,7 @@ TEST_P(CompositorTQPolicyDuringThreadedScrollTest, CompositorPriority) {
   EXPECT_EQ(UseCase::kCompositorGesture, CurrentUseCase());
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ,
     CompositorTQPolicyDuringThreadedScrollTest,
     testing::Values(

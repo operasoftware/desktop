@@ -30,19 +30,19 @@
 
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 
-#include "base/allocator/buildflags.h"
 #include "base/allocator/partition_alloc_features.h"
 #include "base/allocator/partition_alloc_support.h"
 #include "base/allocator/partition_allocator/memory_reclaimer.h"
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator.h"
 #include "base/allocator/partition_allocator/partition_alloc.h"
-#include "base/allocator/partition_allocator/partition_alloc_config.h"
+#include "base/allocator/partition_allocator/partition_alloc_buildflags.h"
 #include "base/allocator/partition_allocator/partition_root.h"
 #include "base/debug/alias.h"
 #include "base/feature_list.h"
 #include "base/no_destructor.h"
 #include "base/strings/safe_sprintf.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/thread_annotations.h"
 #include "build/build_config.h"
 #include "components/crash/core/common/crash_key.h"
@@ -54,7 +54,7 @@ namespace WTF {
 const char* const Partitions::kAllocatedObjectPoolName =
     "partition_alloc/allocated_objects";
 
-#if defined(PA_ALLOW_PCSCAN)
+#if BUILDFLAG(USE_STARSCAN)
 // Runs PCScan on WTF partitions.
 BASE_FEATURE(kPCScanBlinkPartitions,
              "PartitionAllocPCScanBlinkPartitions",
@@ -82,18 +82,21 @@ void Partitions::Initialize() {
 bool Partitions::InitializeOnce() {
   base::features::BackupRefPtrMode brp_mode =
       base::features::kBackupRefPtrModeParam.Get();
+#if BUILDFLAG(ENABLE_BACKUP_REF_PTR_SUPPORT)
+  const bool process_affected_by_brp_flag =
+      base::features::kBackupRefPtrEnabledProcessesParam.Get() ==
+          base::features::BackupRefPtrEnabledProcesses::kAllProcesses ||
+      base::features::kBackupRefPtrEnabledProcessesParam.Get() ==
+          base::features::BackupRefPtrEnabledProcesses::kBrowserAndRenderer;
   const bool enable_brp =
-#if BUILDFLAG(USE_BACKUP_REF_PTR)
       base::FeatureList::IsEnabled(
           base::features::kPartitionAllocBackupRefPtr) &&
       (brp_mode == base::features::BackupRefPtrMode::kEnabled ||
        brp_mode == base::features::BackupRefPtrMode::kEnabledWithoutZapping) &&
-      (base::features::kBackupRefPtrEnabledProcessesParam.Get() ==
-           base::features::BackupRefPtrEnabledProcesses::kAllProcesses ||
-       base::features::kBackupRefPtrEnabledProcessesParam.Get() ==
-           base::features::BackupRefPtrEnabledProcesses::kBrowserAndRenderer);
-#else
-      false;
+      process_affected_by_brp_flag;
+#else  // BUILDFLAG(ENABLE_BACKUP_REF_PTR_SUPPORT)
+  const bool process_affected_by_brp_flag = false;
+  const bool enable_brp = false;
 #endif
   const auto brp_setting =
       enable_brp ? partition_alloc::PartitionOptions::BackupRefPtr::kEnabled
@@ -102,14 +105,20 @@ bool Partitions::InitializeOnce() {
       enable_brp && brp_mode == base::features::BackupRefPtrMode::kEnabled
           ? partition_alloc::PartitionOptions::BackupRefPtrZapping::kEnabled
           : partition_alloc::PartitionOptions::BackupRefPtrZapping::kDisabled;
+  const auto add_dummy_ref_count_setting =
+      process_affected_by_brp_flag &&
+              brp_mode ==
+                  base::features::BackupRefPtrMode::kDisabledButAddDummyRefCount
+          ? partition_alloc::PartitionOptions::AddDummyRefCount::kEnabled
+          : partition_alloc::PartitionOptions::AddDummyRefCount::kDisabled;
   scan_is_enabled_ =
       !enable_brp &&
-#if defined(PA_ALLOW_PCSCAN)
+#if BUILDFLAG(USE_STARSCAN)
       (base::FeatureList::IsEnabled(base::features::kPartitionAllocPCScan) ||
        base::FeatureList::IsEnabled(kPCScanBlinkPartitions));
 #else
       false;
-#endif
+#endif  // BUILDFLAG(USE_STARSCAN)
 
   // FastMalloc doesn't provide isolation, only a (hopefully fast) malloc().
   // When PartitionAlloc is already the malloc() implementation, there is
@@ -138,6 +147,7 @@ bool Partitions::InitializeOnce() {
         brp_setting,
         brp_zapping_setting,
         partition_alloc::PartitionOptions::UseConfigurablePool::kNo,
+        add_dummy_ref_count_setting,
     });
     fast_malloc_root_ = fast_malloc_allocator->root();
   }
@@ -154,10 +164,11 @@ bool Partitions::InitializeOnce() {
       brp_setting,
       brp_zapping_setting,
       partition_alloc::PartitionOptions::UseConfigurablePool::kNo,
+      add_dummy_ref_count_setting,
   });
   buffer_root_ = buffer_allocator->root();
 
-#if defined(PA_ALLOW_PCSCAN)
+#if BUILDFLAG(USE_STARSCAN)
   if (scan_is_enabled_) {
     if (!partition_alloc::internal::PCScan::IsInitialized()) {
       partition_alloc::internal::PCScan::Initialize(
@@ -169,7 +180,7 @@ bool Partitions::InitializeOnce() {
     partition_alloc::internal::PCScan::RegisterScannableRoot(fast_malloc_root_);
     // Ignore other partitions for now.
   }
-#endif  // defined(PA_ALLOW_PCSCAN)
+#endif  // BUILDFLAG(USE_STARSCAN)
 
   if (!base::FeatureList::IsEnabled(
           base::features::kPartitionAllocUseAlternateDistribution)) {
@@ -211,14 +222,14 @@ void Partitions::InitializeArrayBufferPartition() {
 
   array_buffer_root_ = array_buffer_allocator->root();
 
-#if defined(PA_ALLOW_PCSCAN)
+#if BUILDFLAG(USE_STARSCAN)
   // PCScan relies on the fact that quarantinable allocations go to PA's
   // regular pool. This is not the case if configurable pool is available.
   if (scan_is_enabled_ && !array_buffer_root_->uses_configurable_pool()) {
     partition_alloc::internal::PCScan::RegisterNonScannableRoot(
         array_buffer_root_);
   }
-#endif  // defined(PA_ALLOW_PCSCAN)
+#endif  // BUILDFLAG(USE_STARSCAN)
   if (!base::FeatureList::IsEnabled(
           base::features::kPartitionAllocUseAlternateDistribution)) {
     array_buffer_root_->SwitchToDenserBucketDistribution();

@@ -5,11 +5,12 @@
 import 'chrome://webui-test/mojo_webui_test_support.js';
 
 import {BackgroundManager} from 'chrome://new-tab-page/new_tab_page.js';
+import {NtpBackgroundImageSource} from 'chrome://new-tab-page/new_tab_page.mojom-webui.js';
 import {assertEquals, assertFalse, assertNotReached, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 import {createBackgroundImage} from './test_support.js';
 
-class FakeIFrameElement extends HTMLIFrameElement {
+class FakeIframeElement extends HTMLIFrameElement {
   url: string|null = null;
 
   override get contentWindow() {
@@ -18,11 +19,11 @@ class FakeIFrameElement extends HTMLIFrameElement {
   }
 }
 
-customElements.define('fake-iframe', FakeIFrameElement, {extends: 'iframe'});
+customElements.define('fake-iframe', FakeIframeElement, {extends: 'iframe'});
 
 suite('NewTabPageBackgroundManagerTest', () => {
   let backgroundManager: BackgroundManager;
-  let backgroundImage: FakeIFrameElement;
+  let backgroundImage: FakeIframeElement;
 
   function wrapImageUrl(url: string): string {
     return `chrome-untrusted://new-tab-page/custom_background_image?url=${
@@ -30,10 +31,9 @@ suite('NewTabPageBackgroundManagerTest', () => {
   }
 
   setup(() => {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
-    backgroundImage = new FakeIFrameElement();
+    backgroundImage = new FakeIframeElement();
     backgroundImage.id = 'backgroundImage';
     document.body.appendChild(backgroundImage);
 
@@ -92,7 +92,7 @@ suite('NewTabPageBackgroundManagerTest', () => {
       positionX: 'left',
       positionY: 'top',
       scrimDisplay: 'none',
-      attributionUrl: undefined,
+      imageSource: NtpBackgroundImageSource.kFirstPartyThemeWithoutDailyRefresh,
     });
 
     // Assert.

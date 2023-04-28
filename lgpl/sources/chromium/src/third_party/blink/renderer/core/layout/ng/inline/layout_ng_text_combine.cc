@@ -33,11 +33,11 @@ LayoutNGTextCombine* LayoutNGTextCombine::CreateAnonymous(
   auto* const layout_object = MakeGarbageCollected<LayoutNGTextCombine>();
   auto& document = text_child->GetDocument();
   layout_object->SetDocumentForAnonymous(&document);
-  scoped_refptr<ComputedStyle> new_style =
-      document.GetStyleResolver().CreateAnonymousStyleWithDisplay(
+  ComputedStyleBuilder new_style_builder =
+      document.GetStyleResolver().CreateAnonymousStyleBuilderWithDisplay(
           text_child->StyleRef(), EDisplay::kInlineBlock);
-  StyleAdjuster::AdjustStyleForTextCombine(*new_style);
-  layout_object->SetStyle(std::move(new_style));
+  StyleAdjuster::AdjustStyleForTextCombine(new_style_builder);
+  layout_object->SetStyle(new_style_builder.TakeStyle());
   layout_object->AddChild(text_child);
   LayoutNGTextCombine::AssertStyleIsValid(text_child->StyleRef());
   return layout_object;
@@ -56,7 +56,7 @@ void LayoutNGTextCombine::AssertStyleIsValid(const ComputedStyle& style) {
   DCHECK_EQ(style.GetTextEmphasisMark(), TextEmphasisMark::kNone);
   DCHECK_EQ(style.GetWritingMode(), WritingMode::kHorizontalTb);
   DCHECK_EQ(style.LetterSpacing(), 0.0f);
-  DCHECK_EQ(style.TextDecorationsInEffect(), TextDecorationLine::kNone);
+  DCHECK(!style.HasAppliedTextDecorations());
   DCHECK_EQ(style.TextIndent(), Length::Fixed());
   DCHECK_EQ(style.GetFont().GetFontDescription().Orientation(),
             FontOrientation::kHorizontal);
@@ -228,7 +228,7 @@ PhysicalRect LayoutNGTextCombine::RecalcContentsInkOverflow() const {
   const PhysicalRect text_rect = ComputeTextFrameRect(PhysicalOffset());
   LayoutRect ink_overflow = text_rect.ToLayoutRect();
 
-  if (!style.AppliedTextDecorations().empty()) {
+  if (style.HasAppliedTextDecorations()) {
     // |LayoutNGTextCombine| does not support decorating box, as it is not
     // supported in vertical flow and text-combine is only for vertical flow.
     const LayoutRect decoration_rect =

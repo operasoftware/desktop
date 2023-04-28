@@ -5,16 +5,10 @@
 #include "third_party/blink/renderer/core/loader/cookie_jar.h"
 
 #include "base/debug/dump_without_crashing.h"
-#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/strcat.h"
-#include "net/base/features.h"
-#include "net/cookies/parsed_cookie.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/common/origin_trials/trial_token.h"
-#include "third_party/blink/public/common/origin_trials/trial_token_result.h"
-#include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -52,30 +46,6 @@ bool ContainsTruncatingChar(UChar c) {
   return c == '\0' || c == '\r' || c == '\n';
 }
 
-bool ValidPartitionedCookiesOriginTrial(const ResourceResponse& response) {
-  // This should never be called if partitioned cookies are disabled.
-  DCHECK(base::FeatureList::IsEnabled(net::features::kPartitionedCookies));
-
-  if (!response.HttpHeaderFields().Contains("origin-trial"))
-    return false;
-
-  blink::TrialTokenValidator validator;
-  base::Time now(base::Time::Now());
-
-  GURL url(response.ResponseUrl());
-  if (!validator.IsTrialPossibleOnOrigin(url))
-    return false;
-
-  url::Origin origin = url::Origin::Create(url);
-  url::Origin third_party_origins[] = {origin};
-  StringUTF8Adaptor token_adaptor(response.HttpHeaderField("origin-trial"));
-  TrialTokenResult result = validator.ValidateToken(
-      token_adaptor.AsStringPiece(), origin, third_party_origins, now);
-
-  return result.Status() == blink::OriginTrialTokenStatus::kSuccess &&
-         result.ParsedToken()->feature_name() == "PartitionedCookies";
-}
-
 }  // namespace
 
 CookieJar::CookieJar(blink::Document* document)
@@ -97,12 +67,10 @@ void CookieJar::SetCookie(const String& value) {
   bool requested = RequestRestrictedCookieManagerIfNeeded();
   bool site_for_cookies_ok = true;
   bool top_frame_origin_ok = true;
-  backend_->SetCookieFromString(
-      cookie_url, document_->SiteForCookies(), document_->TopFrameOrigin(),
-      value,
-      RuntimeEnabledFeatures::PartitionedCookiesEnabled(
-          document_->GetExecutionContext()),
-      &site_for_cookies_ok, &top_frame_origin_ok);
+  backend_->SetCookieFromString(cookie_url, document_->SiteForCookies(),
+                                document_->TopFrameOrigin(),
+                                document_->HasStorageAccess(), value,
+                                &site_for_cookies_ok, &top_frame_origin_ok);
   last_operation_was_set_ = true;
   LogCookieHistogram("Blink.SetCookieTime.", requested, timer.Elapsed());
 
@@ -155,9 +123,7 @@ String CookieJar::Cookies() {
   String value;
   backend_->GetCookiesString(cookie_url, document_->SiteForCookies(),
                              document_->TopFrameOrigin(),
-                             RuntimeEnabledFeatures::PartitionedCookiesEnabled(
-                                 document_->GetExecutionContext()),
-                             &value);
+                             document_->HasStorageAccess(), &value);
   LogCookieHistogram("Blink.CookiesTime.", requested, timer.Elapsed());
   UpdateCacheAfterGetRequest(cookie_url, value);
 
@@ -174,7 +140,8 @@ bool CookieJar::CookiesEnabled() {
   bool requested = RequestRestrictedCookieManagerIfNeeded();
   bool cookies_enabled = false;
   backend_->CookiesEnabledFor(cookie_url, document_->SiteForCookies(),
-                              document_->TopFrameOrigin(), &cookies_enabled);
+                              document_->TopFrameOrigin(),
+                              document_->HasStorageAccess(), &cookies_enabled);
   LogCookieHistogram("Blink.CookiesEnabledTime.", requested, timer.Elapsed());
   return cookies_enabled;
 }
@@ -198,26 +165,11 @@ bool CookieJar::RequestRestrictedCookieManagerIfNeeded() {
   return false;
 }
 
-void CookieJar::CheckPartitionedCookiesOriginTrial(
-    const ResourceResponse& response) {
-  if (!response.HasPartitionedCookie() ||
-      !base::FeatureList::IsEnabled(net::features::kPartitionedCookies)) {
-    return;
-  }
-  if (!ValidPartitionedCookiesOriginTrial(response)) {
-    base::ElapsedTimer timer;
-    bool requested = RequestRestrictedCookieManagerIfNeeded();
-    LogCookieHistogram("Blink.CookiesEnabledTime.", requested,
-                        timer.Elapsed());
-    backend_->ConvertPartitionedCookiesToUnpartitioned(response.ResponseUrl());
-  }
-}
-
 void CookieJar::UpdateCacheAfterGetRequest(const KURL& cookie_url,
                                            const String& cookie_string) {
-  absl::optional<unsigned> new_hash = WTF::HashInts(
-      KURLHash::GetHash(cookie_url),
-      cookie_string.IsNull() ? 0 : StringHash::GetHash(cookie_string));
+  absl::optional<unsigned> new_hash =
+      WTF::HashInts(WTF::GetHash(cookie_url),
+                    cookie_string.IsNull() ? 0 : WTF::GetHash(cookie_string));
 
   CookieCacheLookupResult result =
       CookieCacheLookupResult::kCacheMissFirstAccess;

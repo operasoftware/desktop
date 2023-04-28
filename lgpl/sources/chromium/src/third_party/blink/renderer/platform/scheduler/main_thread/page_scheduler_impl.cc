@@ -6,9 +6,9 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/debug/stack_trace.h"
+#include "base/functional/bind.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
@@ -785,7 +785,7 @@ MainThreadSchedulerImpl* PageSchedulerImpl::GetMainThreadScheduler() const {
 }
 
 AgentGroupSchedulerImpl& PageSchedulerImpl::GetAgentGroupScheduler() {
-  return agent_group_scheduler_;
+  return *agent_group_scheduler_;
 }
 
 VirtualTimeController* PageSchedulerImpl::GetVirtualTimeController() {

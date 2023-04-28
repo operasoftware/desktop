@@ -36,6 +36,7 @@ using PropertyResolver = StringKeyframe::PropertyResolver;
 
 StringKeyframe::StringKeyframe(const StringKeyframe& copy_from)
     : Keyframe(copy_from.offset_, copy_from.composite_, copy_from.easing_),
+      tree_scope_(copy_from.tree_scope_),
       input_properties_(copy_from.input_properties_),
       presentation_attribute_map_(
           copy_from.presentation_attribute_map_->MutableCopy()),
@@ -55,9 +56,10 @@ MutableCSSPropertyValueSet::SetResult StringKeyframe::SetCSSPropertyValue(
   bool is_animation_tainted = true;
 
   auto* property_map = CreateCssPropertyValueSet();
-  MutableCSSPropertyValueSet::SetResult result = property_map->SetProperty(
-      custom_property_name, value, false, secure_context_mode,
-      style_sheet_contents, is_animation_tainted);
+  MutableCSSPropertyValueSet::SetResult result =
+      property_map->ParseAndSetCustomProperty(
+          custom_property_name, value, false, secure_context_mode,
+          style_sheet_contents, is_animation_tainted);
 
   const CSSValue* parsed_value =
       property_map->GetPropertyCSSValue(custom_property_name);
@@ -87,7 +89,7 @@ MutableCSSPropertyValueSet::SetResult StringKeyframe::SetCSSPropertyValue(
 
   auto* property_value_set = CreateCssPropertyValueSet();
   MutableCSSPropertyValueSet::SetResult result =
-      property_value_set->SetProperty(
+      property_value_set->ParseAndSetProperty(
           property_id, value, false, secure_context_mode, style_sheet_contents);
 
   // TODO(crbug.com/1132078): Add flag to CSSProperty to track if it is for a
@@ -154,9 +156,9 @@ void StringKeyframe::SetPresentationAttributeValue(
     StyleSheetContents* style_sheet_contents) {
   DCHECK_NE(property.PropertyID(), CSSPropertyID::kInvalid);
   if (!CSSAnimations::IsAnimationAffectingProperty(property)) {
-    presentation_attribute_map_->SetProperty(property.PropertyID(), value,
-                                             false, secure_context_mode,
-                                             style_sheet_contents);
+    presentation_attribute_map_->ParseAndSetProperty(
+        property.PropertyID(), value, false, secure_context_mode,
+        style_sheet_contents);
   }
 }
 
@@ -240,6 +242,7 @@ void StringKeyframe::AddKeyframePropertiesToV8Object(
 }
 
 void StringKeyframe::Trace(Visitor* visitor) const {
+  visitor->Trace(tree_scope_);
   visitor->Trace(input_properties_);
   visitor->Trace(css_property_map_);
   visitor->Trace(presentation_attribute_map_);
@@ -282,7 +285,8 @@ void StringKeyframe::EnsureCssPropertyMap() const {
     if (property_handle.IsCSSCustomProperty()) {
       CSSPropertyName property_name(property_handle.CustomPropertyName());
       const CSSValue* value = entry.value->CssValue();
-      css_property_map_->SetProperty(CSSPropertyValue(property_name, *value));
+      css_property_map_->SetLonghandProperty(
+          CSSPropertyValue(property_name, *value));
     } else {
       PropertyResolver* resolver = entry.value;
       if (resolver->IsLogical() || resolver->IsShorthand())

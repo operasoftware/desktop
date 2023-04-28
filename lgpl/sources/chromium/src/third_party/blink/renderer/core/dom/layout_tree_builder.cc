@@ -55,16 +55,19 @@ LayoutTreeBuilderForElement::LayoutTreeBuilderForElement(
 }
 
 LayoutObject* LayoutTreeBuilderForElement::NextLayoutObject() const {
-  if (node_->IsFirstLetterPseudoElement())
+  if (node_->IsFirstLetterPseudoElement()) {
     return context_.next_sibling;
-  if (node_->IsInTopLayer())
+  }
+  if (style_->IsInTopLayer(*node_)) {
     return LayoutTreeBuilderTraversal::NextInTopLayer(*node_);
+  }
   return LayoutTreeBuilder::NextLayoutObject();
 }
 
 LayoutObject* LayoutTreeBuilderForElement::ParentLayoutObject() const {
-  if (node_->IsInTopLayer())
+  if (style_->IsInTopLayer(*node_)) {
     return node_->GetDocument().GetLayoutView();
+  }
   return context_.parent;
 }
 
@@ -79,7 +82,7 @@ void LayoutTreeBuilderForElement::CreateLayoutObject() {
   // If we are in the top layer and the parent layout object without top layer
   // adjustment can't have children, then don't render.
   // https://github.com/w3c/csswg-drafts/issues/6939#issuecomment-1016671534
-  if (node_->IsInTopLayer() && context_.parent &&
+  if (style_->IsInTopLayer(*node_) && context_.parent &&
       !context_.parent->CanHaveChildren() &&
       node_->GetPseudoId() != kPseudoIdBackdrop) {
     return;
@@ -119,7 +122,7 @@ void LayoutTreeBuilderForElement::CreateLayoutObject() {
   parent_layout_object->AddChild(new_layout_object, next_layout_object);
 }
 
-scoped_refptr<ComputedStyle>
+scoped_refptr<const ComputedStyle>
 LayoutTreeBuilderForText::CreateInlineWrapperStyleForDisplayContentsIfNeeded()
     const {
   // If the parent element is not a display:contents element, the style and the
@@ -135,7 +138,7 @@ LayoutTreeBuilderForText::CreateInlineWrapperStyleForDisplayContentsIfNeeded()
 
 LayoutObject*
 LayoutTreeBuilderForText::CreateInlineWrapperForDisplayContentsIfNeeded(
-    ComputedStyle* wrapper_style) const {
+    const ComputedStyle* wrapper_style) const {
   if (!wrapper_style)
     return nullptr;
 
@@ -158,7 +161,7 @@ void LayoutTreeBuilderForText::CreateLayoutObject() {
   const ComputedStyle* style = style_.get();
   LayoutObject* layout_object_parent = context_.parent;
   LayoutObject* next_layout_object = NextLayoutObject();
-  scoped_refptr<ComputedStyle> nullable_wrapper_style =
+  scoped_refptr<const ComputedStyle> nullable_wrapper_style =
       CreateInlineWrapperStyleForDisplayContentsIfNeeded();
   if (LayoutObject* wrapper = CreateInlineWrapperForDisplayContentsIfNeeded(
           nullable_wrapper_style.get())) {

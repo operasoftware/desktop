@@ -16,6 +16,7 @@
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 #include "third_party/blink/renderer/core/animation/interpolable_shader.h"
 #include "third_party/blink/renderer/core/css/css_shader_value.h"
+#include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
@@ -80,9 +81,18 @@ std::unique_ptr<InterpolableFilter> InterpolableFilter::MaybeCreate(
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
     case FilterOperation::OperationType::kGpuShader: {
       const auto& shader = To<GpuShaderFilterOperation>(filter);
+      auto list = std::make_unique<InterpolableList>(shader.Args()->length());
+      for (wtf_size_t i = 0; i < shader.Args()->length(); i++) {
+        const auto* arg_value =
+            DynamicTo<CSSPrimitiveValue>(shader.Args()->Item(i));
+        DCHECK(arg_value && arg_value->IsNumber());
+        list->Set(i, std::make_unique<InterpolableNumber>(
+                         arg_value->GetDoubleValue()));
+      }
+
       value = std::make_unique<InterpolableShader>(
           shader.RelativeUrl(), shader.AbsoluteUrl(), shader.GetReferrer(),
-          shader.Resource(), shader.AnimationFrame());
+          shader.Resource(), std::move(list), shader.AnimationFrame());
       break;
     }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
@@ -237,7 +247,7 @@ FilterOperation* InterpolableFilter::CreateFilterOperation(
       const auto& shader = To<InterpolableShader>(*value_);
       const auto* shader_value = MakeGarbageCollected<CSSShaderValue>(
           shader.relative_url(), KURL(shader.absolute_url()), shader.referrer(),
-          shader.animation_frame());
+          shader.CreateArgsList(), shader.animation_frame());
 
       auto* resource =
           state.GetElementStyleResources().GetGpuShaderResourceFromValue(
@@ -245,7 +255,7 @@ FilterOperation* InterpolableFilter::CreateFilterOperation(
 
       return MakeGarbageCollected<GpuShaderFilterOperation>(
           shader.relative_url(), shader.absolute_url(), shader.referrer(),
-          resource, shader.animation_frame());
+          resource, shader_value->Args(), shader.animation_frame());
     }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 

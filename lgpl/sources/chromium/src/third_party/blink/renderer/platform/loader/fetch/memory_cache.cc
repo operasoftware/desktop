@@ -25,8 +25,9 @@
 #include <utility>
 
 #include "base/auto_reset.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
@@ -34,6 +35,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
 #include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -386,8 +388,8 @@ void MemoryCache::Prune() {
     } else {
       // Defer.
       task_runner_->PostTask(
-          FROM_HERE, base::BindOnce(&MemoryCache::PruneNow,
-                                    base::Unretained(this), kAutomaticPrune));
+          FROM_HERE, WTF::BindOnce(&MemoryCache::PruneNow,
+                                   WrapWeakPersistent(this), kAutomaticPrune));
       prune_pending_ = true;
     }
   }

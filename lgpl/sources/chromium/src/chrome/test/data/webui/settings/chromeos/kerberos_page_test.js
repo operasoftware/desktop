@@ -5,7 +5,7 @@
 import {KerberosAccountsBrowserProxyImpl, Route, Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {assertEquals, assertFalse} from '../../chai_assert.js';
+import {assertEquals, assertFalse} from 'chrome://webui-test/chai_assert.js';
 
 import {TestKerberosAccountsBrowserProxy} from './test_kerberos_accounts_browser_proxy.js';
 
@@ -47,6 +47,6 @@ suite('KerberosPageTests', function() {
     // Sub-page trigger navigates to Kerberos Accounts V2.
     subpageTrigger.click();
     assertEquals(
-        Router.getInstance().getCurrentRoute(), routes.KERBEROS_ACCOUNTS_V2);
+        Router.getInstance().currentRoute, routes.KERBEROS_ACCOUNTS_V2);
   });
 });

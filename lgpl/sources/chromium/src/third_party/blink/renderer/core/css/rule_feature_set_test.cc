@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
 #include "third_party/blink/renderer/core/css/invalidation/invalidation_set.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_selector.h"
 #include "third_party/blink/renderer/core/css/rule_set.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -21,6 +20,7 @@
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -36,7 +36,8 @@ class RuleFeatureSetTest : public testing::Test {
   RuleFeatureSetTest() = default;
 
   void SetUp() override {
-    document_ = HTMLDocument::CreateForTest();
+    document_ =
+        HTMLDocument::CreateForTest(execution_context_.GetExecutionContext());
     auto* html = MakeGarbageCollected<HTMLHtmlElement>(*document_);
     html->AppendChild(MakeGarbageCollected<HTMLBodyElement>(*document_));
     document_->AppendChild(html);
@@ -45,12 +46,14 @@ class RuleFeatureSetTest : public testing::Test {
   }
 
   RuleFeatureSet::SelectorPreMatch CollectFeatures(
-      const String& selector_text) {
-    return CollectFeaturesTo(selector_text, rule_feature_set_);
+      const String& selector_text,
+      StyleRule* parent_rule_for_nesting = nullptr) {
+    return CollectFeaturesTo(selector_text, rule_feature_set_,
+                             parent_rule_for_nesting);
   }
 
   static RuleFeatureSet::SelectorPreMatch CollectFeaturesTo(
-      CSSSelectorVector& selector_vector,
+      base::span<CSSSelector> selector_vector,
       const StyleScope* style_scope,
       RuleFeatureSet& set) {
     if (selector_vector.empty()) {
@@ -71,19 +74,21 @@ class RuleFeatureSetTest : public testing::Test {
         RuleFeatureSet::SelectorPreMatch::kSelectorNeverMatches;
     for (const CSSSelector* s = style_rule->FirstSelector(); s;
          s = CSSSelectorList::Next(*s)) {
-      if (set.CollectFeaturesFromSelector(*s, style_scope))
+      if (set.CollectFeaturesFromSelector(*s, style_scope)) {
         result = RuleFeatureSet::SelectorPreMatch::kSelectorMayMatch;
+      }
     }
     return result;
   }
 
   static RuleFeatureSet::SelectorPreMatch CollectFeaturesTo(
       const String& selector_text,
-      RuleFeatureSet& set) {
-    Arena arena;
-    CSSSelectorVector selector_vector = CSSParser::ParseSelector(
-        StrictCSSParserContext(SecureContextMode::kInsecureContext), nullptr,
-        selector_text, arena);
+      RuleFeatureSet& set,
+      StyleRule* parent_rule_for_nesting) {
+    HeapVector<CSSSelector> arena;
+    base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
+        StrictCSSParserContext(SecureContextMode::kInsecureContext),
+        parent_rule_for_nesting, nullptr, selector_text, arena);
     return CollectFeaturesTo(selector_vector, nullptr /* style_scope */, set);
   }
 
@@ -151,8 +156,9 @@ class RuleFeatureSetTest : public testing::Test {
   HashSet<AtomicString> ToHashSet(
       typename InvalidationSet::Backing<type>::Range range) {
     HashSet<AtomicString> hash_set;
-    for (auto str : range)
+    for (auto str : range) {
       hash_set.insert(str);
+    }
     return hash_set;
   }
 
@@ -694,6 +700,9 @@ class RuleFeatureSetTest : public testing::Test {
     return HasRefCountForInvalidationSet(
         rule_feature_set.pseudo_invalidation_sets_, key, ref_count);
   }
+
+ protected:
+  ScopedNullExecutionContext execution_context_;
 
  private:
   RuleFeatureSet rule_feature_set_;
@@ -1957,14 +1966,19 @@ class RuleFeatureSetRefTest : public RuleFeatureSetTest {
     Compare(main_set, ref_set);
   }
 
-  virtual void CollectTo(const char*, RuleFeatureSet&) const = 0;
+  virtual void CollectTo(
+      const char*,
+      RuleFeatureSet&,
+      StyleRule* parent_rule_for_nesting = nullptr) const = 0;
   virtual void Compare(const RuleFeatureSet&, const RuleFeatureSet&) const = 0;
 };
 
 class RuleFeatureSetSelectorRefTest : public RuleFeatureSetRefTest {
  public:
-  void CollectTo(const char* text, RuleFeatureSet& set) const override {
-    CollectFeaturesTo(text, set);
+  void CollectTo(const char* text,
+                 RuleFeatureSet& set,
+                 StyleRule* parent_rule_for_nesting = nullptr) const override {
+    CollectFeaturesTo(text, set, parent_rule_for_nesting);
   }
 };
 
@@ -2055,8 +2069,11 @@ class RuleFeatureSetScopeRefTest
  public:
   RuleFeatureSetScopeRefTest() : ScopedCSSScopeForTest(true) {}
 
-  void CollectTo(const char* text, RuleFeatureSet& set) const override {
-    Document* document = Document::CreateForTest();
+  void CollectTo(const char* text,
+                 RuleFeatureSet& set,
+                 StyleRule* parent_rule_for_nesting = nullptr) const override {
+    Document* document =
+        Document::CreateForTest(execution_context_.GetExecutionContext());
     StyleRuleBase* rule = css_test_helpers::ParseRule(*document, text);
     ASSERT_TRUE(rule);
 
@@ -2822,12 +2839,37 @@ TEST_F(RuleFeatureSetTest, isPseudoContainingComplexInsideHas19) {
   }
 }
 
-TEST_F(RuleFeatureSetTest, BloomFilterForClassSelfInvalidation) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures(
-      /*enabled_features=*/{blink::features::kInvalidationSetClassBloomFilter},
-      /*disabled_features=*/{});
+TEST_F(RuleFeatureSetTest, NestedSelector) {
+  // Create a parent rule.
+  HeapVector<CSSSelector> arena;
+  base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
+      StrictCSSParserContext(SecureContextMode::kInsecureContext),
+      /*parent_rule_for_nesting=*/nullptr, nullptr, ".a, .b", arena);
+  auto* parent_rule = StyleRule::Create(
+      selector_vector,
+      MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode));
 
+  EXPECT_EQ(RuleFeatureSet::kSelectorMayMatch,
+            CollectFeatures("& .c", parent_rule));
+
+  for (const char* parent_class : {"a", "b"}) {
+    SCOPED_TRACE(parent_class);
+
+    InvalidationLists invalidation_lists;
+    CollectInvalidationSetsForClass(invalidation_lists, parent_class);
+    EXPECT_TRUE(HasClassInvalidation("c", invalidation_lists.descendants));
+    EXPECT_TRUE(HasNoInvalidation(invalidation_lists.siblings));
+  }
+
+  {
+    InvalidationLists invalidation_lists;
+    CollectInvalidationSetsForClass(invalidation_lists, "c");
+    EXPECT_TRUE(HasSelfInvalidation(invalidation_lists.descendants));
+    EXPECT_TRUE(HasNoInvalidation(invalidation_lists.siblings));
+  }
+}
+
+TEST_F(RuleFeatureSetTest, BloomFilterForClassSelfInvalidation) {
   // Add enough dummy classes that the filter will be created.
   for (unsigned i = 0; i < 100; ++i) {
     CollectFeatures(".dummy");
@@ -2851,11 +2893,6 @@ TEST_F(RuleFeatureSetTest, BloomFilterForClassSelfInvalidation) {
 }
 
 TEST_F(RuleFeatureSetTest, BloomFilterForIdSelfInvalidation) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures(
-      /*enabled_features=*/{blink::features::kInvalidationSetClassBloomFilter},
-      /*disabled_features=*/{});
-
   // Add enough dummy IDs that the filter will be created.
   for (unsigned i = 0; i < 100; ++i) {
     CollectFeatures("#dummy");

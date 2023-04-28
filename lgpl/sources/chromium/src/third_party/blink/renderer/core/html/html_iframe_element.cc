@@ -154,9 +154,13 @@ void HTMLIFrameElement::CollectStyleForPresentationAttribute(
     // off if set to zero.
     if (!value.ToInt()) {
       // Add a rule that nulls out our border width.
-      AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kBorderWidth, 0,
-          CSSPrimitiveValue::UnitType::kPixels);
+      for (CSSPropertyID property_id :
+           {CSSPropertyID::kBorderTopWidth, CSSPropertyID::kBorderBottomWidth,
+            CSSPropertyID::kBorderLeftWidth,
+            CSSPropertyID::kBorderRightWidth}) {
+        AddPropertyToPresentationAttributeStyle(
+            style, property_id, 0, CSSPrimitiveValue::UnitType::kPixels);
+      }
     }
   } else {
     HTMLFrameElementBase::CollectStyleForPresentationAttribute(name, value,
@@ -268,11 +272,11 @@ void HTMLIFrameElement::ParseAttribute(
       should_call_did_change_attributes = true;
       UseCounter::Count(GetDocument(), WebFeature::kIFrameCSPAttribute);
     }
-  } else if (name == html_names::kAnonymousAttr &&
+  } else if (name == html_names::kCredentiallessAttr &&
              AnonymousIframeEnabled(GetExecutionContext())) {
     bool new_value = !value.IsNull();
-    if (anonymous_ != new_value) {
-      anonymous_ = new_value;
+    if (credentialless_ != new_value) {
+      credentialless_ = new_value;
       should_call_did_change_attributes = true;
     }
   } else if (name == html_names::kAllowAttr) {
@@ -439,7 +443,7 @@ ParsedPermissionsPolicy HTMLIFrameElement::ConstructContainerPolicy() const {
   return container_policy;
 }
 
-bool HTMLIFrameElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
+bool HTMLIFrameElement::LayoutObjectIsNeeded(const DisplayStyle& style) const {
   return ContentFrame() && !collapsed_by_client_ &&
          HTMLElement::LayoutObjectIsNeeded(style);
 }
@@ -505,35 +509,26 @@ HTMLIFrameElement::ConstructTrustTokenParams() const {
     return nullptr;
   }
 
-  // Trust token redemption and signing (but not issuance) require that the
-  // trust-token-redemption permissions policy be present.
-  bool operation_requires_permissions_policy =
-      parsed_params->type ==
-          network::mojom::blink::TrustTokenOperationType::kRedemption ||
-      parsed_params->type ==
-          network::mojom::blink::TrustTokenOperationType::kSigning;
+  // Only the send-redemption-record (the kSigning variant) operation is
+  // valid in the iframe context.
+  if (parsed_params->operation !=
+      network::mojom::blink::TrustTokenOperationType::kSigning) {
+    GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kError,
+        "Trust Tokens: Attempted a trusttoken operation which isn't "
+        "send-redemption-record in an iframe."));
+    return nullptr;
+  }
 
-  if (operation_requires_permissions_policy &&
-      (!GetExecutionContext()->IsFeatureEnabled(
-          mojom::blink::PermissionsPolicyFeature::kTrustTokenRedemption))) {
+  if (!GetExecutionContext()->IsFeatureEnabled(
+          mojom::blink::PermissionsPolicyFeature::kTrustTokenRedemption)) {
     GetExecutionContext()->AddConsoleMessage(
         MakeGarbageCollected<ConsoleMessage>(
             mojom::blink::ConsoleMessageSource::kOther,
             mojom::blink::ConsoleMessageLevel::kError,
             "Trust Tokens: Attempted redemption or signing without the "
             "trust-token-redemption Permissions Policy feature present."));
-    return nullptr;
-  }
-
-  if (parsed_params->type ==
-          network::mojom::blink::TrustTokenOperationType::kIssuance &&
-      !IsTrustTokenIssuanceAvailableInExecutionContext(
-          *GetExecutionContext())) {
-    GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::blink::ConsoleMessageSource::kOther,
-        mojom::blink::ConsoleMessageLevel::kError,
-        "Trust Tokens issuance is disabled except in "
-        "contexts with the TrustTokens Origin Trial enabled."));
     return nullptr;
   }
 
@@ -563,7 +558,7 @@ void HTMLIFrameElement::DidChangeAttributes() {
 
   auto attributes = mojom::blink::IframeAttributes::New();
   attributes->parsed_csp_attribute = csp.empty() ? nullptr : std::move(csp[0]);
-  attributes->anonymous = anonymous_;
+  attributes->credentialless = credentialless_;
 
   attributes->id = ConvertToReportValue(id_);
   attributes->name = ConvertToReportValue(name_);

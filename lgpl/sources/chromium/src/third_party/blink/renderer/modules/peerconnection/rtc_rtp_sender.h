@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_encoding_parameters.h"
@@ -18,6 +19,7 @@
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_encoded_audio_stream_transformer.h"
+#include "third_party/blink/renderer/platform/peerconnection/rtc_encoded_video_stream_transformer.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_rtp_sender_platform.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/webrtc/api/rtp_transceiver_interface.h"
@@ -40,7 +42,8 @@ class RTCInsertableStreams;
 
 webrtc::RtpEncodingParameters ToRtpEncodingParameters(
     ExecutionContext* context,
-    const RTCRtpEncodingParameters*);
+    const RTCRtpEncodingParameters*,
+    const String& kind);
 RTCRtpHeaderExtensionParameters* ToRtpHeaderExtensionParameters(
     const webrtc::RtpExtension& headers);
 RTCRtpCodecParameters* ToRtpCodecParameters(
@@ -112,6 +115,11 @@ class RTCRtpSender final : public ScriptWrappable,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   void SetAudioUnderlyingSink(
       RTCEncodedAudioUnderlyingSink* new_underlying_sink);
+  void SetVideoUnderlyingSource(
+      RTCEncodedVideoUnderlyingSource* new_underlying_source,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  void SetVideoUnderlyingSink(
+      RTCEncodedVideoUnderlyingSink* new_underlying_sink);
 
   Member<RTCPeerConnection> pc_;
   std::unique_ptr<RTCRtpSenderPlatform> sender_;
@@ -140,10 +148,18 @@ class RTCRtpSender final : public ScriptWrappable,
   scoped_refptr<blink::RTCEncodedAudioStreamTransformer::Broker>
       encoded_audio_transformer_;
 
-  // Insertable Streams video support.
-  Member<RTCEncodedVideoUnderlyingSource> video_from_encoder_underlying_source_;
-  Member<RTCEncodedVideoUnderlyingSink> video_to_packetizer_underlying_sink_;
+  // Insertable Streams video support
+  base::Lock video_underlying_source_lock_;
+  CrossThreadPersistent<RTCEncodedVideoUnderlyingSource>
+      video_from_encoder_underlying_source_
+          GUARDED_BY(video_underlying_source_lock_);
+  base::Lock video_underlying_sink_lock_;
+  CrossThreadPersistent<RTCEncodedVideoUnderlyingSink>
+      video_to_packetizer_underlying_sink_
+          GUARDED_BY(video_underlying_sink_lock_);
   Member<RTCInsertableStreams> encoded_video_streams_;
+  scoped_refptr<blink::RTCEncodedVideoStreamTransformer::Broker>
+      encoded_video_transformer_;
 
   THREAD_CHECKER(thread_checker_);
 };

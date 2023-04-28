@@ -27,7 +27,6 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
@@ -42,6 +41,7 @@
 #include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder_factory.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
@@ -390,6 +390,9 @@ class MediaCapabilitiesTestContext {
   }
 
  private:
+  base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
+      base::kFeaturePlatformAacDecoderInGpu, true};
+
   V8TestingScope v8_scope_;
   ScopedTestingPlatformSupport<MockPlatform> mock_platform_;
   std::unique_ptr<MockPerfHistoryService> perf_history_service_;
@@ -634,19 +637,6 @@ MediaCapabilitiesInfo* EncodingInfo(
       context->GetExceptionState());
 }
 }  // namespace
-
-class MediaCapabilitiesTestsPlatformCodecs
-    : public testing::TestWithParam<bool> {
- private:
-  base::ScopedTestFeatureOverride enable_platform_sw_codec_mac_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCMac, GetParam()};
-  base::ScopedTestFeatureOverride enable_platform_sw_codec_win_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin, GetParam()};
-};
-
-INSTANTIATE_TEST_CASE_P(,
-                        MediaCapabilitiesTestsPlatformCodecs,
-                        testing::Bool());
 
 TEST(MediaCapabilitiesTests, BasicAudio) {
   MediaCapabilitiesTestContext context;
@@ -1248,7 +1238,7 @@ TEST(MediaCapabilitiesTests, WebrtcDecodingBasicVideo) {
   EXPECT_FALSE(info->powerEfficient());
 }
 
-TEST_P(MediaCapabilitiesTestsPlatformCodecs, WebrtcDecodingUnsupportedVideo) {
+TEST(MediaCapabilitiesTests, WebrtcDecodingUnsupportedVideo) {
   MediaCapabilitiesTestContext context;
   EXPECT_CALL(context.GetMockPlatform(), GetGpuFactories())
       .Times(testing::AtMost(1));
@@ -1353,7 +1343,7 @@ TEST(MediaCapabilitiesTests, WebrtcEncodingBasicVideo) {
   EXPECT_FALSE(info->powerEfficient());
 }
 
-TEST_P(MediaCapabilitiesTestsPlatformCodecs, WebrtcEncodingUnsupportedVideo) {
+TEST(MediaCapabilitiesTests, WebrtcEncodingUnsupportedVideo) {
   MediaCapabilitiesTestContext context;
   EXPECT_CALL(context.GetMockPlatform(), GetGpuFactories())
       .Times(testing::AtMost(1));
@@ -1479,17 +1469,15 @@ TEST(MediaCapabilitiesTests, WebrtcEncodePowerEfficientIsSmooth) {
   // Set up a custom decoding info handler with a GPU factory that returns
   // supported and powerEfficient.
   MediaCapabilitiesTestContext context;
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-  media::MockGpuVideoAcceleratorFactories mock_external_software_factories(
-      nullptr);
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
   media::MockGpuVideoAcceleratorFactories mock_gpu_factories(nullptr);
+
+  auto video_encoder_factory =
+      std::make_unique<RTCVideoEncoderFactory>(&mock_gpu_factories);
+  // Ensure all the profiles in our mock GPU factory are allowed.
+  video_encoder_factory->clear_disabled_profiles_for_testing();
+
   WebrtcEncodingInfoHandler encoding_info_handler(
-      blink::CreateWebrtcVideoEncoderFactory(
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-          &mock_external_software_factories,
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-          &mock_gpu_factories, base::DoNothing()),
+      std::move(video_encoder_factory),
       blink::CreateWebrtcAudioEncoderFactory());
   context.GetMediaCapabilities()->set_webrtc_encoding_info_handler_for_test(
       &encoding_info_handler);
@@ -1524,17 +1512,15 @@ TEST(MediaCapabilitiesTests, WebrtcEncodeOverridePowerEfficientIsSmooth) {
   // Set up a custom decoding info handler with a GPU factory that returns
   // supported and powerEfficient.
   MediaCapabilitiesTestContext context;
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-  media::MockGpuVideoAcceleratorFactories mock_external_software_factories(
-      nullptr);
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
   media::MockGpuVideoAcceleratorFactories mock_gpu_factories(nullptr);
+
+  auto video_encoder_factory =
+      std::make_unique<RTCVideoEncoderFactory>(&mock_gpu_factories);
+  // Ensure all the profiles in our mock GPU factory are allowed.
+  video_encoder_factory->clear_disabled_profiles_for_testing();
+
   WebrtcEncodingInfoHandler encoding_info_handler(
-      blink::CreateWebrtcVideoEncoderFactory(
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-          &mock_external_software_factories,
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-          &mock_gpu_factories, base::DoNothing()),
+      std::move(video_encoder_factory),
       blink::CreateWebrtcAudioEncoderFactory());
   context.GetMediaCapabilities()->set_webrtc_encoding_info_handler_for_test(
       &encoding_info_handler);

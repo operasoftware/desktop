@@ -11,7 +11,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/test/task_environment.h"
-#include "base/threading/sequenced_task_runner_handle.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "media/base/encoder_status.h"
 #include "media/base/svc_scalability_mode.h"
@@ -92,10 +92,11 @@ class TestEncoder final : public media::VideoEncoder {
   // media::VideoDecoder:
   void Initialize(media::VideoCodecProfile profile,
                   const Options& options,
+                  EncoderInfoCB info_cb,
                   OutputCB output_cb,
                   EncoderStatusCB done_cb) override {
     ASSERT_FALSE(is_initialized());
-    task_runner_ = base::SequencedTaskRunnerHandle::Get();
+    task_runner_ = base::SequencedTaskRunner::GetCurrentDefault();
 
     profile_ = profile;
     options_ = options;

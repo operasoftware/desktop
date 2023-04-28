@@ -11,9 +11,9 @@
 #include <string>
 
 #include "base/types/expected.h"
+#include "cc/paint/gpu_shader_source.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
-#include "third_party/skia/include/core/SkString.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -21,7 +21,7 @@ using ShaderUniforms = uint32_t;
 
 class PLATFORM_EXPORT GpuShader {
  public:
-  GpuShader();
+  GpuShader(cc::GpuShaderSource source, uint32_t uniforms);
   GpuShader(const GpuShader&) = delete;
   GpuShader& operator=(const GpuShader&) = delete;
   ~GpuShader();
@@ -29,12 +29,12 @@ class PLATFORM_EXPORT GpuShader {
   static base::expected<std::unique_ptr<GpuShader>, String> MakeFromSource(
       String source);
 
-  const std::string& source() const { return shader_source_; }
+  const cc::GpuShaderSource& source() const { return shader_source_; }
   bool NeedsCompositingLayer() const;
   bool NeedsMouseInput() const;
 
  private:
-  std::string shader_source_;
+  cc::GpuShaderSource shader_source_;
   uint32_t uniforms_ = 0;
 };
 

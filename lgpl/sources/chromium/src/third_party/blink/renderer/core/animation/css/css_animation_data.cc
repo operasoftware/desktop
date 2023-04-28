@@ -15,6 +15,9 @@ CSSAnimationData::CSSAnimationData() {
   direction_list_.push_back(InitialDirection());
   fill_mode_list_.push_back(InitialFillMode());
   play_state_list_.push_back(InitialPlayState());
+  range_start_list_.push_back(InitialRangeStart());
+  range_end_list_.push_back(InitialRangeEnd());
+  composition_list_.push_back(InitialComposition());
 }
 
 CSSAnimationData::CSSAnimationData(const CSSAnimationData& other) = default;
@@ -43,7 +46,6 @@ bool CSSAnimationData::AnimationsMatchForStyleRecalc(
 Timing CSSAnimationData::ConvertToTiming(size_t index) const {
   DCHECK_LT(index, name_list_.size());
   Timing timing = CSSTimingData::ConvertToTiming(index);
-
   timing.iteration_count = GetRepeated(iteration_count_list_, index);
   timing.direction = GetRepeated(direction_list_, index);
   timing.fill_mode = GetRepeated(fill_mode_list_, index);

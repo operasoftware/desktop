@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_WORKER_NON_MAIN_THREAD_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_WORKER_NON_MAIN_THREAD_IMPL_H_
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequence_manager/sequence_manager.h"
@@ -39,8 +39,6 @@ class PLATFORM_EXPORT NonMainThreadImpl : public NonMainThread {
   // Thread implementation.
   void Init() override;
   ThreadScheduler* Scheduler() override;
-  scoped_refptr<base::SingleThreadTaskRunner> GetDeprecatedTaskRunner()
-      const override;
 
   // NonMainThread implementation.
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() const override;

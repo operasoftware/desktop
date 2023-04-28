@@ -99,8 +99,6 @@ blink_modules_sources("media_controls") {
     "media_controls_text_track_manager.h",
   ]
 
-  jumbo_excluded_sources = [ "elements/media_control_cast_button_element.cc" ]
-
   deps = [
     ":media_controls_resources",
     "//services/service_manager/public/cpp",

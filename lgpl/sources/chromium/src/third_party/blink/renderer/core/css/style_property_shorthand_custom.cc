@@ -19,6 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 
 namespace blink {
@@ -42,8 +43,9 @@ unsigned indexOfShorthandForLonghand(
     CSSPropertyID shorthand_id,
     const Vector<StylePropertyShorthand, 4>& shorthands) {
   for (unsigned i = 0; i < shorthands.size(); ++i) {
-    if (shorthands.at(i).id() == shorthand_id)
+    if (shorthands.at(i).id() == shorthand_id) {
       return i;
+    }
   }
   NOTREACHED();
   return 0;

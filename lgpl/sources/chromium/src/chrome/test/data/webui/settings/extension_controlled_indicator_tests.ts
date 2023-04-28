@@ -6,9 +6,9 @@
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {OpenWindowProxyImpl, ExtensionControlBrowserProxyImpl, ExtensionControlledIndicatorElement} from 'chrome://settings/settings.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {TestOpenWindowProxy} from 'chrome://webui-test/test_open_window_proxy.js';
 
 import {TestExtensionControlBrowserProxy} from './test_extension_control_browser_proxy.js';
-import {TestOpenWindowProxy} from './test_open_window_proxy.js';
 
 // clang-format on
 
@@ -19,8 +19,7 @@ suite('extension controlled indicator', function() {
   let openWindowProxy: TestOpenWindowProxy;
 
   setup(function() {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     browserProxy = new TestExtensionControlBrowserProxy();
     ExtensionControlBrowserProxyImpl.setInstance(browserProxy);
     openWindowProxy = new TestOpenWindowProxy();
@@ -56,7 +55,7 @@ suite('extension controlled indicator', function() {
     const button = indicator.shadowRoot!.querySelector<HTMLElement>('#manage');
     assertTrue(!!button);
     button!.click();
-    const url = await openWindowProxy.whenCalled('openURL');
+    const url = await openWindowProxy.whenCalled('openUrl');
     assertEquals(url, `chrome://extensions/?id=${indicator.extensionId}`);
   });
 

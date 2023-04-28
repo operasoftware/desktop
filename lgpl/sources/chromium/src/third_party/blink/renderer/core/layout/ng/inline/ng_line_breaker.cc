@@ -9,6 +9,8 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/layout_ng_text_combine.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_bidi_paragraph.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_break_token.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_item_segment.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_line_info.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_ruby_utils.h"
@@ -33,6 +35,114 @@
 namespace blink {
 
 namespace {
+
+// Returns smallest negative left and right bearing in `box_fragment`.
+// This function is used for calculating side bearing.
+NGLineBoxStrut ComputeNegativeSideBearings(
+    const NGPhysicalBoxFragment& box_fragment) {
+  const auto get_shape_result =
+      [](const NGInlineCursor cursor) -> const ShapeResultView* {
+    if (!cursor)
+      return nullptr;
+    const NGFragmentItem& item = *cursor.CurrentItem();
+    if (item.Type() != NGFragmentItem::kText &&
+        item.Type() != NGFragmentItem::kGeneratedText)
+      return nullptr;
+    if (item.IsFlowControl())
+      return nullptr;
+    return item.TextShapeResult();
+  };
+
+  NGLineBoxStrut side_bearing;
+
+  for (NGInlineCursor cursor(box_fragment); cursor; cursor.MoveToNextLine()) {
+    // Take left/right bearing from the first/last child in the line if it has
+    // `ShapeResult`. The first/last child can be non text item, e.g. image.
+    // Note: Items in the line are in visual order. So, first=left, last=right.
+    //
+    // Example: If we have three text item "[", "T", "]", we should take left
+    // baring from "[" and right bearing from "]". The text ink bounds of "T"
+    // is not involved with side bearing calculation.
+    DCHECK(cursor.Current().IsLineBox());
+
+    // `gfx::RectF` returned from `ShapeResult::ComputeInkBounds()` is in
+    // text origin coordinate aka baseline. Y-coordinate of points above
+    // baseline are negative.
+    //
+    //  Text Ink Bounds:
+    //   * left bearing = text_ink_bounds.X()
+    //   * right bearing = width - text_ink_bounds.InlineEndOffset()
+    //
+    //          <--> left bearing (positive)
+    //          ...+---------+
+    //          ...|*********|..<
+    //          ...|....*....|..<
+    //          ...|....*....|<-> right bearing (positive)
+    //          ...|....*....|..<
+    //          ...|....*....|..<
+    //          >..+----*----+..< baseline
+    //          ^text origin
+    //          <---------------> width/advance
+    //
+    //            left bearing (negative)
+    //          <-->          <--> right bearing (negative)
+    //          +----------------+
+    //          |... *****..*****|
+    //          |......*.....*<..|
+    //          |.....*.....*.<..|
+    //          |....*******..<..|
+    //          |...*.....*...<..|
+    //          |..*.....*....<..|
+    //          +****..*****..<..+
+    //             ^ text origin
+    //             <----------> width/advance
+    //
+    // When `NGFragmentItem` has `ShapeTesult`, its `rect` is
+    //    * `rect.offset.left = X`
+    //    * `rect.size.width  = shape_result.SnappedWidth() // advance
+    // where `X` is the original item offset.
+    // For the initial letter text, its `rect` is[1]
+    //    * `rect.offset.left = X - text_ink_bounds.X()`
+    //    * `rect.size.width  = text_ink_bounds.Width()`
+    // [1] https://drafts.csswg.org/css-inline/#initial-letter-box-size
+    // Sizeing the Initial Letter Box
+    NGInlineCursor child_at_left_edge = cursor;
+    child_at_left_edge.MoveToFirstChild();
+    if (auto* shape_result = get_shape_result(child_at_left_edge)) {
+      const LayoutUnit left_bearing =
+          LogicalRect::EnclosingRect(shape_result->ComputeInkBounds())
+              .offset.inline_offset;
+      side_bearing.inline_start =
+          std::min(side_bearing.inline_start, left_bearing);
+    }
+
+    NGInlineCursor child_at_right_edge = cursor;
+    child_at_right_edge.MoveToLastChild();
+    if (auto* shape_result = get_shape_result(child_at_right_edge)) {
+      const LayoutUnit width = shape_result->SnappedWidth();
+      const LogicalRect text_ink_bounds =
+          LogicalRect::EnclosingRect(shape_result->ComputeInkBounds());
+      const LayoutUnit right_bearing =
+          width - text_ink_bounds.InlineEndOffset();
+      side_bearing.inline_end =
+          std::min(side_bearing.inline_end, right_bearing);
+    }
+  }
+
+  return side_bearing;
+}
+
+// This rule comes from the spec[1].
+// Note: We don't apply inline kerning for vertical writing mode with text
+// orientation other than `sideways` because characters are laid out vertically.
+// [1] https://drafts.csswg.org/css-inline/#initial-letter-inline-position
+bool ShouldApplyInlineKerning(const NGPhysicalBoxFragment& box_fragment) {
+  if (!box_fragment.Borders().IsZero() || !box_fragment.Padding().IsZero())
+    return false;
+  const ComputedStyle& style = box_fragment.Style();
+  return style.IsHorizontalWritingMode() ||
+         style.GetTextOrientation() == ETextOrientation::kSideways;
+}
 
 // CSS-defined white space characters, excluding the newline character.
 // In most cases, the line breaker consider break opportunities are before
@@ -63,6 +173,7 @@ inline bool IsAllBreakableSpaces(const String& string,
 inline bool IsTrailableItemType(NGInlineItem::NGInlineItemType type) {
   return type != NGInlineItem::kAtomicInline &&
          type != NGInlineItem::kOutOfFlowPositioned &&
+         type != NGInlineItem::kInitialLetterBox &&
          type != NGInlineItem::kListMarker;
 }
 
@@ -94,7 +205,7 @@ bool NeedsAccurateEndPosition(const NGInlineItem& line_end_item) {
   DCHECK(line_end_item.Style());
   const ComputedStyle& line_end_style = *line_end_item.Style();
   return line_end_style.HasBoxDecorationBackground() ||
-         !line_end_style.AppliedTextDecorations().empty();
+         line_end_style.HasAppliedTextDecorations();
 }
 
 inline bool NeedsAccurateEndPosition(const NGLineInfo& line_info,
@@ -198,7 +309,17 @@ inline bool NGLineBreaker::ShouldAutoWrap(const ComputedStyle& style) const {
   // Combine text should not cause line break.
   if (UNLIKELY(is_text_combine_))
     return false;
-  return style.AutoWrap();
+  // TODO(crbug.com/1276900): Once we implement multiple line initial letter,
+  // we should allow auto wrap. Below example causes multiple lines text in
+  // initial letter box.
+  //   <style>
+  //    p::.first-letter { line-break: anywhere; }
+  //    p { width: 0px; }
+  //  </style>
+  //  <p>(A) punctuation characters can be part of ::first-letter.</p>
+  if (UNLIKELY(is_initial_letter_box_))
+    return false;
+  return style.ShouldWrapLine();
 }
 
 LayoutUnit NGLineBreaker::ComputeAvailableWidth() const {
@@ -225,6 +346,7 @@ NGLineBreaker::NGLineBreaker(NGInlineNode node,
     : line_opportunity_(line_opportunity),
       node_(node),
       mode_(mode),
+      is_initial_letter_box_(node.IsInitialLetterBox()),
       is_svg_text_(node.IsSvgText()),
       is_text_combine_(node.IsTextCombine()),
       is_first_formatted_line_((!break_token || (!break_token->ItemIndex() &&
@@ -653,6 +775,10 @@ void NGLineBreaker::BreakLine(NGLineInfo* line_info) {
       HandleAtomicInline(item, line_info);
       continue;
     }
+    if (UNLIKELY(item.Type() == NGInlineItem::kInitialLetterBox)) {
+      HandleInitialLetter(item, line_info);
+      continue;
+    }
     if (item.Type() == NGInlineItem::kOutOfFlowPositioned) {
       HandleOutOfFlowPositioned(item, line_info);
     } else if (item.Length()) {
@@ -693,7 +819,8 @@ void NGLineBreaker::ComputeLineLocation(NGLineInfo* line_info) const {
 // Note: We treat text combine as text content instead of atomic inline box[1].
 // [1] https://drafts.csswg.org/css-writing-modes-3/#text-combine-layout
 bool NGLineBreaker::CanBreakAfterAtomicInline(const NGInlineItem& item) const {
-  DCHECK_EQ(item.Type(), NGInlineItem::kAtomicInline);
+  DCHECK(item.Type() == NGInlineItem::kAtomicInline ||
+         item.Type() == NGInlineItem::kInitialLetterBox);
   if (!auto_wrap_ || item.EndOffset() == Text().length())
     return false;
   // We can not break before sticky images quirk was applied.
@@ -934,7 +1061,7 @@ void NGLineBreaker::HandleText(const NGInlineItem& item,
     // Hanging trailing spaces may resolve the overflow.
     if (item_result->has_only_trailing_spaces) {
       state_ = LineBreakState::kTrailing;
-      if (item_result->item->Style()->WhiteSpace() == EWhiteSpace::kPreWrap &&
+      if (!item_result->item->Style()->CollapseWhiteSpace() &&
           IsBreakableSpace(Text()[item_result->EndOffset() - 1])) {
         unsigned end_index = base::checked_cast<unsigned>(
             item_result - line_info->Results().begin());
@@ -998,7 +1125,6 @@ void NGLineBreaker::HandleText(const NGInlineItem& item,
 // NGInlineItems to NGInlineItemResults.
 void NGLineBreaker::SplitTextIntoSegments(const NGInlineItem& item,
                                           NGLineInfo* line_info) {
-  DCHECK(RuntimeEnabledFeatures::SVGTextNGEnabled());
   DCHECK(is_svg_text_);
   DCHECK_EQ(offset_, item.StartOffset());
 
@@ -1238,7 +1364,7 @@ bool NGLineBreaker::BreakTextAtPreviousBreakOpportunity(
   DCHECK(item_result->may_break_inside);
   const NGInlineItem& item = *item_result->item;
   DCHECK_EQ(item.Type(), NGInlineItem::kText);
-  DCHECK(item.Style() && item.Style()->AutoWrap());
+  DCHECK(item.Style() && item.Style()->ShouldWrapLine());
   DCHECK(!is_text_combine_);
 
   // TODO(jfernandez): Should we use the non-hangable-run-end instead ?
@@ -1318,7 +1444,7 @@ bool NGLineBreaker::HandleTextForFastMinContent(NGInlineItemResult* item_result,
         break_iterator_.NextBreakOpportunity(end_offset, item.EndOffset());
 
     unsigned non_hangable_run_end = end_offset;
-    if (item.Style()->WhiteSpace() != EWhiteSpace::kBreakSpaces) {
+    if (item.Style()->ShouldWrapLineTrailingSpaces()) {
       while (non_hangable_run_end > start_offset &&
              IsBreakableSpace(text[non_hangable_run_end - 1])) {
         --non_hangable_run_end;
@@ -1430,7 +1556,7 @@ scoped_refptr<ShapeResult> NGLineBreaker::ShapeText(const NGInlineItem& item,
   scoped_refptr<ShapeResult> shape_result;
   if (!items_data_.segments) {
     RunSegmenter::RunSegmenterRange segment_range =
-        item.CreateRunSegmenterRange();
+        NGInlineItemSegment::UnpackSegmentData(start, end, item.SegmentData());
     shape_result = shaper_.Shape(&item.Style()->GetFont(), item.Direction(),
                                  start, end, segment_range);
   } else {
@@ -1539,7 +1665,7 @@ void NGLineBreaker::HandleTrailingSpaces(const NGInlineItem& item,
     NGInlineItemResults* item_results = line_info->MutableResults();
     DCHECK(!item_results->empty());
     item_results->back().can_break_after = true;
-  } else if (style.WhiteSpace() != EWhiteSpace::kBreakSpaces) {
+  } else if (style.ShouldWrapLineTrailingSpaces()) {
     // Find the end of the run of space characters in this item.
     // Other white space characters (e.g., tab) are not included in this item.
     DCHECK(style.BreakOnlyAfterWhiteSpace() ||
@@ -1910,7 +2036,8 @@ void NGLineBreaker::HandleBidiControlItem(const NGInlineItem& item,
 
 void NGLineBreaker::HandleAtomicInline(const NGInlineItem& item,
                                        NGLineInfo* line_info) {
-  DCHECK_EQ(item.Type(), NGInlineItem::kAtomicInline);
+  DCHECK(item.Type() == NGInlineItem::kAtomicInline ||
+         item.Type() == NGInlineItem::kInitialLetterBox);
   DCHECK(item.Style());
   const ComputedStyle& style = *item.Style();
 
@@ -1954,23 +2081,52 @@ void NGLineBreaker::HandleAtomicInline(const NGInlineItem& item,
   if (UNLIKELY(HasHyphen()))
     position_ -= RemoveHyphen(line_info->MutableResults());
 
+  const bool is_initial_letter_box =
+      item.Type() == NGInlineItem::kInitialLetterBox;
   // When we're just computing min/max content sizes, we can skip the full
   // layout and just compute those sizes. On the other hand, for regular
   // layout we need to do the full layout and get the layout result.
   // Doing a full layout for min/max content can also have undesirable
   // side effects when that falls back to legacy layout.
-  if (mode_ == NGLineBreakerMode::kContent) {
+  if (mode_ == NGLineBreakerMode::kContent || UNLIKELY(is_initial_letter_box)) {
+    // If our baseline-source is non-auto use the easier to reason about
+    // "default" algorithm type.
+    NGBaselineAlgorithmType baseline_algorithm_type =
+        style.BaselineSource() == EBaselineSource::kAuto
+            ? NGBaselineAlgorithmType::kInlineBlock
+            : NGBaselineAlgorithmType::kDefault;
+
     // https://drafts.csswg.org/css-pseudo-4/#first-text-line
     // > The first line of a table-cell or inline-block cannot be the first
     // > formatted line of an ancestor element.
     item_result->layout_result =
         NGBlockNode(To<LayoutBox>(item.GetLayoutObject()))
             .LayoutAtomicInline(constraint_space_, node_.Style(),
-                                /* use_first_line_style */ false);
+                                /* use_first_line_style */ false,
+                                baseline_algorithm_type);
+
+    const auto& physical_box_fragment = To<NGPhysicalBoxFragment>(
+        item_result->layout_result->PhysicalFragment());
     item_result->inline_size =
         NGFragment(constraint_space_.GetWritingDirection(),
-                   item_result->layout_result->PhysicalFragment())
+                   physical_box_fragment)
             .InlineSize();
+
+    if (UNLIKELY(is_initial_letter_box) &&
+        ShouldApplyInlineKerning(physical_box_fragment)) {
+      // Apply "Inline Kerning" to the initial letter box[1].
+      // [1] https://drafts.csswg.org/css-inline/#initial-letter-inline-position
+      const NGLineBoxStrut side_bearing =
+          ComputeNegativeSideBearings(physical_box_fragment);
+      if (IsLtr(base_direction_)) {
+        item_result->margins.inline_start += side_bearing.inline_start;
+        inline_margins += side_bearing.inline_start;
+      } else {
+        item_result->margins.inline_end += side_bearing.inline_end;
+        inline_margins += side_bearing.inline_end;
+      }
+    }
+
     item_result->inline_size += inline_margins;
   } else {
     DCHECK(mode_ == NGLineBreakerMode::kMaxContent ||
@@ -2245,6 +2401,13 @@ void NGLineBreaker::HandleFloat(const NGInlineItem& item,
   DCHECK_GE(AvailableWidth(), LayoutUnit());
 }
 
+void NGLineBreaker::HandleInitialLetter(const NGInlineItem& item,
+                                        NGLineInfo* line_info) {
+  // TODO(crbug.com/1276900): We should check behavior when line breaking
+  // after initial letter box.
+  HandleAtomicInline(item, line_info);
+}
+
 void NGLineBreaker::HandleOutOfFlowPositioned(const NGInlineItem& item,
                                               NGLineInfo* line_info) {
   DCHECK_EQ(item.Type(), NGInlineItem::kOutOfFlowPositioned);
@@ -2375,11 +2538,26 @@ void NGLineBreaker::HandleCloseTag(const NGInlineItem& item,
       item_result->can_break_after = last->can_break_after;
       return;
     }
-    if (was_auto_wrap || last->can_break_after) {
-      item_result->can_break_after =
-          last->can_break_after ||
-          IsBreakableSpace(Text()[item_result->EndOffset()]);
+    if (last->can_break_after) {
+      // A break opportunity before a close tag always propagates to after the
+      // close tag.
+      item_result->can_break_after = true;
       last->can_break_after = false;
+      return;
+    }
+    if (was_auto_wrap) {
+      // We can break before a breakable space if we either:
+      //   a) allow breaking before a white space, or
+      //   b) the break point is preceded by another breakable space.
+      // TODO(abotella): What if the following breakable space is after an
+      // open tag which has a different white-space value?
+      bool preceded_by_breakable_space =
+          item_result->EndOffset() > 0 &&
+          IsBreakableSpace(Text()[item_result->EndOffset() - 1]);
+      item_result->can_break_after =
+          IsBreakableSpace(Text()[item_result->EndOffset()]) &&
+          (!current_style_->BreakOnlyAfterWhiteSpace() ||
+           preceded_by_breakable_space);
       return;
     }
     if (auto_wrap_ && !IsBreakableSpace(Text()[item_result->EndOffset() - 1]))
@@ -2563,9 +2741,7 @@ void NGLineBreaker::RewindOverflow(unsigned new_end, NGLineInfo* line_info) {
       if (item_result.shape_result ||  // kNoResultIfOverflow if 'break-word'
           (break_anywhere_if_overflow_ && !override_break_anywhere_)) {
         DCHECK(item.Style());
-        const EWhiteSpace white_space = item.Style()->WhiteSpace();
-        if (ComputedStyle::AutoWrap(white_space) &&
-            white_space != EWhiteSpace::kBreakSpaces &&
+        if (item.Style()->ShouldWrapLineTrailingSpaces() &&
             IsBreakableSpace(text[item_result.StartOffset()])) {
           // If all characters are trailable spaces, check the next item.
           if (item_result.shape_result &&
@@ -2590,10 +2766,9 @@ void NGLineBreaker::RewindOverflow(unsigned new_end, NGLineInfo* line_info) {
       // controls are trailable.
       DCHECK_NE(text[item_result.StartOffset()], kNewlineCharacter);
       DCHECK(item.Style());
-      const EWhiteSpace white_space = item.Style()->WhiteSpace();
-      if (ComputedStyle::AutoWrap(white_space) &&
-          white_space != EWhiteSpace::kBreakSpaces)
+      if (item.Style()->ShouldWrapLineTrailingSpaces()) {
         continue;
+      }
     } else if (item.Type() == NGInlineItem::kOpenTag) {
       // Open tags are ambiguous. This open tag is not trailable:
       //   <span>text
@@ -2827,10 +3002,11 @@ void NGLineBreaker::SetCurrentStyle(const ComputedStyle& style) {
     break_iterator_.SetBreakType(line_break_type);
 
     enable_soft_hyphen_ = style.GetHyphens() != Hyphens::kNone;
-    hyphenation_ = style.GetHyphenation();
+    hyphenation_ = style.GetHyphenationWithLimits();
 
-    if (style.WhiteSpace() == EWhiteSpace::kBreakSpaces)
+    if (style.ShouldWrapLineBreakingSpaces()) {
       break_iterator_.SetBreakSpace(BreakSpaceType::kAfterEverySpace);
+    }
 
     break_iterator_.SetLocale(style.LocaleForLineBreakIterator());
   }

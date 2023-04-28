@@ -603,17 +603,19 @@ void HTMLMediaElement::DidMoveToNewDocument(Document& old_document) {
   // TODO(liberato): Consider checking that the new document's opener is the old
   // document: GetDocument().GetFrame()->Opener() == old_document.GetFrame().
   ignore_preload_none_ = false;
-  auto new_origin = GetDocument().TopFrameOrigin();
-  auto old_origin = old_document.TopFrameOrigin();
 
   // Experimental: Try to avoid destroying the media player when transferring a
   // media element to a new document. This is a work in progress, and may cause
   // security and/or stability issues.
-  const bool reuse_player =
-      RuntimeEnabledFeatures::DocumentPictureInPictureAPIEnabled() &&
-      new_origin && old_origin &&
-      old_origin->IsSameOriginWith(new_origin.get());
-  if (!reuse_player) {
+  // Normally, moving a player between documents requires destroying the
+  // media player because web media player cannot outlive the render frame that
+  // holds the element which creates the player. However, when transferring a
+  // media player to a same-origin picture-in-picture window opened by this
+  // document, it is safe to reuse because a picture-in-picture window is
+  // guaranteed not to outlive its opener document because
+  // DocumentPictureInPictureController watches the destruction and navigation
+  // of the opener's WebContents.
+  if (!ShouldReusePlayer(old_document, GetDocument())) {
     // Don't worry about notifications from any previous document if we're not
     // re-using the player.
     if (opener_context_observer_)
@@ -649,6 +651,42 @@ void HTMLMediaElement::DidMoveToNewDocument(Document& old_document) {
   HTMLElement::DidMoveToNewDocument(old_document);
 }
 
+bool HTMLMediaElement::ShouldReusePlayer(Document& old_document,
+                                         Document& new_document) const {
+  // Don't reuse player if the Document Picture-in-Picture API is disabled for
+  // both documents.
+  if (!RuntimeEnabledFeatures::DocumentPictureInPictureAPIEnabled(
+          old_document.domWindow()->GetExecutionContext()) &&
+      !RuntimeEnabledFeatures::DocumentPictureInPictureAPIEnabled(
+          new_document.domWindow()->GetExecutionContext())) {
+    return false;
+  }
+
+  if (!old_document.GetFrame() || !new_document.GetFrame()) {
+    return false;
+  }
+
+  auto* new_origin = new_document.GetFrame()
+                         ->LocalFrameRoot()
+                         .GetSecurityContext()
+                         ->GetSecurityOrigin();
+  auto* old_origin = old_document.GetFrame()
+                         ->LocalFrameRoot()
+                         .GetSecurityContext()
+                         ->GetSecurityOrigin();
+
+  if (!old_origin || !new_origin || !old_origin->IsSameOriginWith(new_origin)) {
+    return false;
+  }
+
+  // Reuse player if the two documents have opener-pip relationship (for either
+  // direction).
+  return (new_document.domWindow()->IsPictureInPictureWindow() &&
+          new_document.GetFrame()->Opener() == old_document.GetFrame()) ||
+         (old_document.domWindow()->IsPictureInPictureWindow() &&
+          old_document.GetFrame()->Opener() == new_document.GetFrame());
+}
+
 void HTMLMediaElement::AttachToNewFrame() {
   // The opener has closed, so definitely nothing else should use this.
   opener_document_ = nullptr;
@@ -664,6 +702,8 @@ void HTMLMediaElement::AttachToNewFrame() {
 }
 
 void HTMLMediaElement::ResetMojoState() {
+  if (media_player_host_remote_)
+    media_player_host_remote_->Value().reset();
   media_player_host_remote_ = MakeGarbageCollected<DisallowNewWrapper<
       HeapMojoAssociatedRemote<media::mojom::blink::MediaPlayerHost>>>(
       GetExecutionContext());
@@ -771,7 +811,7 @@ void HTMLMediaElement::FinishParsingChildren() {
     ScheduleTextTrackResourceLoad();
 }
 
-bool HTMLMediaElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
+bool HTMLMediaElement::LayoutObjectIsNeeded(const DisplayStyle& style) const {
   return ShouldShowControls() && HTMLElement::LayoutObjectIsNeeded(style);
 }
 
@@ -2518,7 +2558,7 @@ void HTMLMediaElement::SetOfficialPlaybackPosition(double position) const {
   // needed, the update is applied in the next call to
   // officialPlaybackPosition().
   official_playback_position_needs_update_ = false;
-  GetDocument().GetAgent()->event_loop()->EnqueueMicrotask(
+  GetDocument().GetAgent().event_loop()->EnqueueMicrotask(
       WTF::BindOnce(&HTMLMediaElement::RequireOfficialPlaybackPositionUpdate,
                     WrapWeakPersistent(this)));
 }
@@ -4740,7 +4780,8 @@ void HTMLMediaElement::DidMediaMetadataChange(
     bool has_video,
     media::AudioCodec audio_codec,
     media::VideoCodec video_codec,
-    media::MediaContentType media_content_type) {
+    media::MediaContentType media_content_type,
+    bool is_encrypted_media) {
   for (auto& observer : media_player_observer_remote_set_->Value()) {
     observer->OnMediaMetadataChanged(has_audio, has_video, media_content_type);
   }
@@ -4751,6 +4792,7 @@ void HTMLMediaElement::DidMediaMetadataChange(
   }
   video_codec_ = video_codec;
   audio_codec_ = audio_codec;
+  is_encrypted_media_ = is_encrypted_media;
   OnRemotePlaybackMetadataChange();
 }
 
@@ -4916,7 +4958,8 @@ void HTMLMediaElement::OnRemotePlaybackMetadataChange() {
         media_session::mojom::blink::RemotePlaybackMetadata::New(
             WTF::String(media::GetCodecName(video_codec_)),
             WTF::String(media::GetCodecName(audio_codec_)),
-            is_remote_playback_disabled_));
+            is_remote_playback_disabled_, is_remote_rendering_,
+            WTF::String(remote_device_friendly_name_), is_encrypted_media_));
   }
 }
 

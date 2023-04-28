@@ -79,9 +79,11 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
+#include "third_party/blink/renderer/platform/scheduler/common/features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/virtual_time_controller.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
@@ -184,6 +186,7 @@ scheduler::WorkerScheduler* WorkerGlobalScope::GetScheduler() {
 
 void WorkerGlobalScope::Dispose() {
   DCHECK(IsContextThread());
+  loading_virtual_time_pauser_ = WebScopedVirtualTimePauser();
   closing_ = true;
   WorkerOrWorkletGlobalScope::Dispose();
 }
@@ -405,6 +408,16 @@ void WorkerGlobalScope::AddInspectorIssue(AuditsIssue issue) {
                                                              std::move(issue));
 }
 
+void WorkerGlobalScope::WillBeginLoading() {
+  loading_virtual_time_pauser_ =
+      GetScheduler()
+          ->GetVirtualTimeController()
+          ->CreateWebScopedVirtualTimePauser(
+              "WorkerStart",
+              WebScopedVirtualTimePauser::VirtualTaskDuration::kInstant);
+  loading_virtual_time_pauser_.PauseVirtualTime();
+}
+
 CoreProbeSink* WorkerGlobalScope::GetProbeSink() {
   if (IsClosing())
     return nullptr;
@@ -489,6 +502,7 @@ void WorkerGlobalScope::RunWorkerScript() {
     debugger->ExternalAsyncTaskStarted(*stack_id_);
 
   ReportingProxy().WillEvaluateScript();
+  loading_virtual_time_pauser_.UnpauseVirtualTime();
 
   // Step 24. If script is a classic script, then run the classic script script.
   // Otherwise, it is a module script; run the module script script. [spec text]
@@ -552,14 +566,20 @@ void WorkerGlobalScope::ReceiveMessage(BlinkTransferableMessage message) {
       WorkerThreadDebugger::From(GetThread()->GetIsolate());
   if (debugger)
     debugger->ExternalAsyncTaskStarted(message.sender_stack_trace_id);
-  UserActivation* user_activation = nullptr;
-  if (message.user_activation) {
-    user_activation = MakeGarbageCollected<UserActivation>(
-        message.user_activation->has_been_active,
-        message.user_activation->was_active);
+
+  if (message.message->CanDeserializeIn(this)) {
+    UserActivation* user_activation = nullptr;
+    if (message.user_activation) {
+      user_activation = MakeGarbageCollected<UserActivation>(
+          message.user_activation->has_been_active,
+          message.user_activation->was_active);
+    }
+    DispatchEvent(*MessageEvent::Create(ports, std::move(message.message),
+                                        user_activation));
+  } else {
+    DispatchEvent(*MessageEvent::CreateError());
   }
-  DispatchEvent(*MessageEvent::Create(ports, std::move(message.message),
-                                      user_activation));
+
   if (debugger)
     debugger->ExternalAsyncTaskFinished(message.sender_stack_trace_id);
 }
@@ -578,7 +598,12 @@ WorkerGlobalScope::WorkerGlobalScope(
               thread->GetIsolate(),
               (creation_params->agent_cluster_id.is_empty()
                    ? base::UnguessableToken::Create()
-                   : creation_params->agent_cluster_id)),
+                   : creation_params->agent_cluster_id),
+              base::FeatureList::IsEnabled(
+                  scheduler::kMicrotaskQueuePerWorkerAgent)
+                  ? v8::MicrotaskQueue::New(thread->GetIsolate(),
+                                            v8::MicrotasksPolicy::kScoped)
+                  : nullptr),
           creation_params->global_scope_name,
           creation_params->parent_devtools_token,
           creation_params->v8_cache_options,
@@ -741,7 +766,7 @@ CodeCacheHost* WorkerGlobalScope::GetCodeCacheHost() {
     // don't rely on code caching so it's safe to return nullptr here.
     if (!GetBrowserInterfaceBroker().is_bound())
       return nullptr;
-    mojo::Remote<mojom::CodeCacheHost> remote;
+    mojo::Remote<mojom::blink::CodeCacheHost> remote;
     GetBrowserInterfaceBroker().GetInterface(
         remote.BindNewPipeAndPassReceiver());
     code_cache_host_ = std::make_unique<CodeCacheHost>(std::move(remote));

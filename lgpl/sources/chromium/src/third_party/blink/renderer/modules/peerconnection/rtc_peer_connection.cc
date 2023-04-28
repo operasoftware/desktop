@@ -40,6 +40,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
@@ -84,7 +85,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/modules/crypto/crypto_result_impl.h"
 #include "third_party/blink/renderer/modules/mediastream/media_constraints_impl.h"
-#include "third_party/blink/renderer/modules/mediastream/media_error_state.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_event.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track_impl.h"
@@ -239,12 +239,36 @@ RTCIceCandidatePlatform* ConvertToRTCIceCandidatePlatform(
       candidate->usernameFragment());
 }
 
-webrtc::PeerConnectionInterface::IceTransportsType
-jumbo_fixed_IceTransportPolicyFromString(const String& policy) {
+webrtc::PeerConnectionInterface::IceTransportsType IceTransportPolicyFromString(
+    const String& policy) {
   if (policy == "relay")
     return webrtc::PeerConnectionInterface::kRelay;
   DCHECK_EQ(policy, "all");
   return webrtc::PeerConnectionInterface::kAll;
+}
+
+bool IsValidStunURL(const KURL& url) {
+  if (!url.ProtocolIs("stun") && !url.ProtocolIs("stuns")) {
+    return false;
+  }
+  if (!url.Query().empty()) {
+    return false;
+  }
+  return true;
+}
+
+bool IsValidTurnURL(const KURL& url) {
+  if (!url.ProtocolIs("turn") && !url.ProtocolIs("turns")) {
+    return false;
+  }
+  if (!url.Query().empty()) {
+    Vector<String> query_parts;
+    url.Query().Split("=", query_parts);
+    if (query_parts.size() < 2 || query_parts[0] != "transport") {
+      return false;
+    }
+  }
+  return true;
 }
 
 webrtc::PeerConnectionInterface::RTCConfiguration ParseConfiguration(
@@ -257,12 +281,12 @@ webrtc::PeerConnectionInterface::RTCConfiguration ParseConfiguration(
 
   if (configuration->hasIceTransportPolicy()) {
     UseCounter::Count(context, WebFeature::kRTCConfigurationIceTransportPolicy);
-    web_configuration.type = jumbo_fixed_IceTransportPolicyFromString(
-        configuration->iceTransportPolicy());
+    web_configuration.type =
+        IceTransportPolicyFromString(configuration->iceTransportPolicy());
   } else if (configuration->hasIceTransports()) {
     UseCounter::Count(context, WebFeature::kRTCConfigurationIceTransports);
-    web_configuration.type = jumbo_fixed_IceTransportPolicyFromString(
-        configuration->iceTransports());
+    web_configuration.type =
+        IceTransportPolicyFromString(configuration->iceTransports());
   }
 
   if (configuration->bundlePolicy() == "max-compat") {
@@ -287,6 +311,7 @@ webrtc::PeerConnectionInterface::RTCConfiguration ParseConfiguration(
     WebVector<webrtc::PeerConnectionInterface::IceServer> ice_servers;
     for (const RTCIceServer* ice_server : configuration->iceServers()) {
       Vector<String> url_strings;
+      std::vector<std::string> converted_urls;
       if (ice_server->hasUrls()) {
         UseCounter::Count(context, WebFeature::kRTCIceServerURLs);
         switch (ice_server->urls()->GetContentType()) {
@@ -313,16 +338,14 @@ webrtc::PeerConnectionInterface::RTCConfiguration ParseConfiguration(
               "'" + url_string + "' is not a valid URL.");
           return {};
         }
-        if (!(url.ProtocolIs("turn") || url.ProtocolIs("turns") ||
-              url.ProtocolIs("stun"))) {
+        bool is_valid_turn = IsValidTurnURL(url);
+        if (!is_valid_turn && !IsValidStunURL(url)) {
           exception_state->ThrowDOMException(
               DOMExceptionCode::kSyntaxError,
-              "'" + url.Protocol() +
-                  "' is not one of the supported URL schemes "
-                  "'stun', 'turn' or 'turns'.");
+              "'" + url_string + "' is not a valid stun or turn URL.");
           return {};
         }
-        if ((url.ProtocolIs("turn") || url.ProtocolIs("turns")) &&
+        if (is_valid_turn &&
             (!ice_server->hasUsername() || !ice_server->hasCredential())) {
           exception_state->ThrowDOMException(
               DOMExceptionCode::kInvalidAccessError,
@@ -331,18 +354,18 @@ webrtc::PeerConnectionInterface::RTCConfiguration ParseConfiguration(
               "\"turn\" or \"turns\".");
         }
 
-        auto converted_ice_server =
-            webrtc::PeerConnectionInterface::IceServer();
-        converted_ice_server.urls.push_back(String(url).Utf8());
-        if (ice_server->hasUsername()) {
-          converted_ice_server.username = ice_server->username().Utf8();
-        }
-        if (ice_server->hasCredential()) {
-          converted_ice_server.password = ice_server->credential().Utf8();
-        }
-
-        ice_servers.emplace_back(std::move(converted_ice_server));
+        converted_urls.push_back(String(url).Utf8());
       }
+
+      auto converted_ice_server = webrtc::PeerConnectionInterface::IceServer();
+      converted_ice_server.urls = std::move(converted_urls);
+      if (ice_server->hasUsername()) {
+        converted_ice_server.username = ice_server->username().Utf8();
+      }
+      if (ice_server->hasCredential()) {
+        converted_ice_server.password = ice_server->credential().Utf8();
+      }
+      ice_servers.emplace_back(std::move(converted_ice_server));
     }
     web_configuration.servers = ice_servers.ReleaseVector();
   }
@@ -643,10 +666,17 @@ RTCPeerConnection::~RTCPeerConnection() {
 }
 
 void RTCPeerConnection::Dispose() {
-  // Promptly clears the handler's pointer to |this|
-  // so that content/ doesn't access it in a lazy sweeping phase.
+  // Promptly clears the handler so that content doesn't access it in a lazy
+  // sweeping phase. Other references to the handler use a weak pointer,
+  // preventing access.
   if (peer_handler_) {
-    peer_handler_->CloseAndUnregister();
+    peer_handler_.reset();
+  }
+  // Memory owned by RTCPeerConnection must not be touched after Dispose().
+  // Shut down the cache to cancel any in-flight tasks that may otherwise have
+  // used the cache.
+  if (rtp_contributing_source_cache_.has_value()) {
+    rtp_contributing_source_cache_.value().Shutdown();
   }
 }
 
@@ -1228,12 +1258,6 @@ void RTCPeerConnection::setConfiguration(
   if (exception_state.HadException())
     return;
 
-  MediaErrorState media_error_state;
-  if (media_error_state.HadException()) {
-    media_error_state.RaiseException(exception_state);
-    return;
-  }
-
   if (peer_handler_->encoded_insertable_streams() !=
       rtc_configuration->encodedInsertableStreams()) {
     exception_state.ThrowDOMException(
@@ -1243,18 +1267,21 @@ void RTCPeerConnection::setConfiguration(
   }
 
   webrtc::RTCErrorType error = peer_handler_->SetConfiguration(configuration);
-  if (error != webrtc::RTCErrorType::NONE) {
-    // All errors besides InvalidModification should have been detected above.
-    if (error == webrtc::RTCErrorType::INVALID_MODIFICATION) {
-      exception_state.ThrowDOMException(
-          DOMExceptionCode::kInvalidModificationError,
-          "Attempted to modify the PeerConnection's "
-          "configuration in an unsupported way.");
-    } else {
-      exception_state.ThrowDOMException(
-          DOMExceptionCode::kOperationError,
-          "Could not update the PeerConnection with the given configuration.");
-    }
+  if (error == webrtc::RTCErrorType::NONE) {
+    return;
+  } else if (error == webrtc::RTCErrorType::INVALID_MODIFICATION) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidModificationError,
+        "Attempted to modify the PeerConnection's configuration in an "
+        "unsupported way.");
+  } else if (error == webrtc::RTCErrorType::SYNTAX_ERROR) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kSyntaxError,
+        "The given configuration has a syntax error.");
+  } else {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kOperationError,
+        "Could not update the PeerConnection with the given configuration.");
   }
 }
 
@@ -1408,7 +1435,6 @@ ScriptPromise RTCPeerConnection::addIceCandidate(
   RTCIceCandidatePlatform* platform_candidate =
       ConvertToRTCIceCandidatePlatform(ExecutionContext::From(script_state),
                                        candidate);
-
 
   if (IsIceCandidateMissingSdpMidAndMLineIndex(candidate)) {
     exception_state.ThrowTypeError(
@@ -1686,9 +1712,12 @@ ScriptPromise RTCPeerConnection::PromiseBasedGetStats(
       // while leaving the associated promise pending as specified.
       resolver->Detach();
     } else {
+      bool is_track_stats_deprecation_trial_enabled =
+          RuntimeEnabledFeatures::RTCLegacyTrackStatsEnabled(context);
       peer_handler_->GetStats(WTF::BindOnce(WebRTCStatsReportCallbackResolver,
                                             WrapPersistent(resolver)),
-                              GetExposedGroupIds(script_state));
+                              GetExposedGroupIds(script_state),
+                              is_track_stats_deprecation_trial_enabled);
     }
     return promise;
   }
@@ -1749,35 +1778,52 @@ RtpContributingSourceCache& RTCPeerConnection::GetRtpContributingSourceCache() {
   return rtp_contributing_source_cache_.value();
 }
 
-RTCRtpTransceiver* RTCPeerConnection::addTransceiver(
-    const V8UnionMediaStreamTrackOrString* track_or_kind,
+absl::optional<webrtc::RtpTransceiverInit> ValidateRtpTransceiverInit(
+    ExecutionContext* execution_context,
+    ExceptionState& exception_state,
     const RTCRtpTransceiverInit* init,
-    ExceptionState& exception_state) {
-  if (ThrowExceptionIfSignalingStateClosed(signaling_state_, &exception_state))
-    return nullptr;
-  auto webrtc_init = ToRtpTransceiverInit(GetExecutionContext(), init);
+    const String kind) {
+  auto webrtc_init = ToRtpTransceiverInit(execution_context, init, kind);
   // Validate sendEncodings.
   for (auto& encoding : webrtc_init.send_encodings) {
     if (encoding.rid.length() > 16) {
       exception_state.ThrowTypeError("Illegal length of rid");
-      return nullptr;
+      return absl::nullopt;
     }
     // Allowed characters: a-z 0-9 _ and -
     if (encoding.rid.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM"
                                        "NOPQRSTUVWXYZ0123456789-_") !=
         std::string::npos) {
       exception_state.ThrowTypeError("Illegal character in rid");
-      return nullptr;
+      return absl::nullopt;
     }
+  }
+  return webrtc_init;
+}
+
+RTCRtpTransceiver* RTCPeerConnection::addTransceiver(
+    const V8UnionMediaStreamTrackOrString* track_or_kind,
+    const RTCRtpTransceiverInit* init,
+    ExceptionState& exception_state) {
+  if (ThrowExceptionIfSignalingStateClosed(signaling_state_,
+                                           &exception_state)) {
+    return nullptr;
   }
   webrtc::RTCErrorOr<std::unique_ptr<RTCRtpTransceiverPlatform>> result =
       webrtc::RTCError(webrtc::RTCErrorType::UNSUPPORTED_OPERATION);
   switch (track_or_kind->GetContentType()) {
     case V8UnionMediaStreamTrackOrString::ContentType::kMediaStreamTrack: {
       MediaStreamTrack* track = track_or_kind->GetAsMediaStreamTrack();
+
+      auto webrtc_init = ValidateRtpTransceiverInit(
+          GetExecutionContext(), exception_state, init, track->kind());
+      if (!webrtc_init) {
+        return nullptr;
+      }
+
       RegisterTrack(track);
       result = peer_handler_->AddTransceiverWithTrack(track->Component(),
-                                                      std::move(webrtc_init));
+                                                      std::move(*webrtc_init));
       break;
     }
     case V8UnionMediaStreamTrackOrString::ContentType::kString: {
@@ -1795,8 +1841,15 @@ RTCRtpTransceiver* RTCPeerConnection::addTransceiver(
             "MediaStreamTrack kind ('audio' or 'video').");
         return nullptr;
       }
+
+      auto webrtc_init = ValidateRtpTransceiverInit(
+          GetExecutionContext(), exception_state, init, kind);
+      if (!webrtc_init) {
+        return nullptr;
+      }
+
       result = peer_handler_->AddTransceiverWithKind(std::move(kind),
-                                                     std::move(webrtc_init));
+                                                     std::move(*webrtc_init));
       break;
     }
   }
@@ -1847,7 +1900,8 @@ RTCRtpSender* RTCPeerConnection::addTrack(MediaStreamTrack* track,
   RTCRtpSender* sender = transceiver->sender();
   // Newly created senders have no streams set, we have to set it ourselves.
   sender->set_streams(streams);
-  DCHECK_EQ(stream_ids.size(), streams.size());
+  // The native sender may have filtered out duplicates.
+  DCHECK_LE(stream_ids.size(), streams.size());
   return sender;
 }
 

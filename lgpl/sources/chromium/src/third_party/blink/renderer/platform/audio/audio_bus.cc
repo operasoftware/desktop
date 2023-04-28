@@ -37,7 +37,6 @@
 #include "base/ranges/algorithm.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_audio_bus.h"
-#include "third_party/blink/renderer/platform/audio/audio_file_reader.h"
 #include "third_party/blink/renderer/platform/audio/denormal_disabler.h"
 #include "third_party/blink/renderer/platform/audio/sinc_resampler.h"
 #include "third_party/blink/renderer/platform/audio/vector_math.h"
@@ -707,16 +706,23 @@ void AudioBus::ClearSilentFlag() {
   }
 }
 
-scoped_refptr<AudioBus> DecodeAudioFileData(const char* data, size_t size) {
+scoped_refptr<AudioBus> DecodeAudioFileData(
+    const char* data,
+    size_t size,
+    media::AudioDecoder* external_decoder = nullptr,
+    base::SequencedTaskRunner* external_decoder_task_runner = nullptr) {
   WebAudioBus web_audio_bus;
-  if (Platform::Current()->DecodeAudioFileData(&web_audio_bus, data, size)) {
+  if (Platform::Current()->DecodeAudioFileData(&web_audio_bus, data, size,
+                                               external_decoder,
+                                               external_decoder_task_runner)) {
     return web_audio_bus.Release();
   }
   return nullptr;
 }
 
-scoped_refptr<AudioBus> AudioBus::GetDataResource(int resource_id,
-                                                  float sample_rate) {
+scoped_refptr<AudioBus> AudioBus::GetDataResource(
+    int resource_id,
+    float sample_rate) {
   const WebData& resource = Platform::Current()->GetDataResource(resource_id);
   if (resource.IsEmpty()) {
     return nullptr;
@@ -728,6 +734,8 @@ scoped_refptr<AudioBus> AudioBus::GetDataResource(int resource_id,
   // to take WebData and use segmented access.
   SharedBuffer::DeprecatedFlatData flat_data(
       resource.operator scoped_refptr<SharedBuffer>());
+  // Not using an external decoder. `resource` is a FLAC file, which is handled
+  // by the built-in decoder.
   scoped_refptr<AudioBus> audio_bus =
       DecodeAudioFileData(flat_data.Data(), flat_data.size());
 
@@ -744,12 +752,16 @@ scoped_refptr<AudioBus> AudioBus::GetDataResource(int resource_id,
                                                 sample_rate);
 }
 
-scoped_refptr<AudioBus> CreateBusFromInMemoryAudioFile(const void* data,
-                                                       size_t data_size,
-                                                       bool mix_to_mono,
-                                                       float sample_rate) {
+scoped_refptr<AudioBus> AudioBus::CreateBusFromInMemoryAudioFile(
+    const void* data,
+    size_t data_size,
+    bool mix_to_mono,
+    float sample_rate,
+    media::AudioDecoder* external_decoder,
+    base::SequencedTaskRunner* external_decoder_task_runner) {
   scoped_refptr<AudioBus> audio_bus =
-      DecodeAudioFileData(static_cast<const char*>(data), data_size);
+      DecodeAudioFileData(static_cast<const char*>(data), data_size,
+                          external_decoder, external_decoder_task_runner);
   if (!audio_bus.get()) {
     return nullptr;
   }

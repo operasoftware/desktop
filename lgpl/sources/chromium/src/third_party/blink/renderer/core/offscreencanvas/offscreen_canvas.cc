@@ -9,6 +9,7 @@
 
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metrics.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
@@ -285,7 +286,7 @@ ScriptPromise OffscreenCanvas::CreateImageBitmap(
       IsPaintable()
           ? MakeGarbageCollected<ImageBitmap>(this, crop_rect, options)
           : nullptr,
-      exception_state);
+      options, exception_state);
 }
 
 bool OffscreenCanvas::IsOpaque() const {
@@ -385,6 +386,7 @@ CanvasResourceDispatcher* OffscreenCanvas::GetOrCreateResourceDispatcher() {
   if (!frame_dispatcher_) {
     scoped_refptr<base::SingleThreadTaskRunner>
         agent_group_scheduler_compositor_task_runner;
+    scoped_refptr<base::SingleThreadTaskRunner> dispatcher_task_runner;
     if (auto* top_execution_context = GetTopExecutionContext()) {
       agent_group_scheduler_compositor_task_runner =
           top_execution_context->GetAgentGroupSchedulerCompositorTaskRunner();
@@ -393,14 +395,18 @@ CanvasResourceDispatcher* OffscreenCanvas::GetOrCreateResourceDispatcher() {
       // SharedWorkers, but for windows and other workers it should be non-null.
       DCHECK(top_execution_context->IsSharedWorkerGlobalScope() ||
              agent_group_scheduler_compositor_task_runner);
+
+      dispatcher_task_runner =
+          top_execution_context->GetTaskRunner(TaskType::kInternalDefault);
     }
 
     // The frame dispatcher connects the current thread of OffscreenCanvas
     // (either main or worker) to the browser process and remains unchanged
     // throughout the lifetime of this OffscreenCanvas.
     frame_dispatcher_ = std::make_unique<CanvasResourceDispatcher>(
-        this, std::move(agent_group_scheduler_compositor_task_runner),
-        client_id_, sink_id_, placeholder_canvas_id_, size_);
+        this, std::move(dispatcher_task_runner),
+        std::move(agent_group_scheduler_compositor_task_runner), client_id_,
+        sink_id_, placeholder_canvas_id_, size_);
 
     if (HasPlaceholderCanvas())
       frame_dispatcher_->SetPlaceholderCanvasDispatcher(placeholder_canvas_id_);
@@ -419,7 +425,8 @@ CanvasResourceProvider* OffscreenCanvas::GetOrCreateResourceProvider() {
       (IsWebGL() || IsWebGPU() ||
        (IsRenderingContext2D() &&
         RuntimeEnabledFeatures::Accelerated2dCanvasEnabled() &&
-        !context_->CreationAttributes().will_read_frequently));
+        !(context_->CreationAttributes().will_read_frequently ==
+          CanvasContextCreationAttributesCore::WillReadFrequently::kTrue)));
   const bool composited_mode =
       IsWebGPU() ||
       (IsWebGL() && RuntimeEnabledFeatures::WebGLImageChromiumEnabled()) ||

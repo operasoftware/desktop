@@ -23,17 +23,18 @@
 #include "third_party/blink/renderer/core/paint/inline_text_box_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_auto_dark_mode.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
-#include "third_party/blink/renderer/core/paint/paint_timing.h"
-#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/selection_bounds_recorder.h"
 #include "third_party/blink/renderer/core/paint/svg_object_painter.h"
 #include "third_party/blink/renderer/core/paint/text_painter_base.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/style/applied_text_decoration.h"
 #include "third_party/blink/renderer/core/style/shadow_list.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/platform/fonts/text_run_paint_info.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace blink {
 
@@ -195,7 +196,7 @@ void SVGInlineTextBoxPainter::PaintTextFragments(
     // Spec: All text decorations except line-through should be drawn before the
     // text is filled and stroked; thus, the text is rendered on top of these
     // decorations.
-    const Vector<AppliedTextDecoration>& decorations =
+    const Vector<AppliedTextDecoration, 1>& decorations =
         style.AppliedTextDecorations();
     for (const AppliedTextDecoration& decoration : decorations) {
       if (EnumHasFlags(decoration.Lines(), TextDecorationLine::kUnderline))
@@ -336,10 +337,11 @@ static inline float ThicknessForDecoration(TextDecorationLine,
 void SVGInlineTextBoxPainter::PaintDecoration(const PaintInfo& paint_info,
                                               TextDecorationLine decoration,
                                               const SVGTextFragment& fragment) {
-  if (svg_inline_text_box_.GetLineLayoutItem()
-          .StyleRef()
-          .TextDecorationsInEffect() == TextDecorationLine::kNone)
+  if (!svg_inline_text_box_.GetLineLayoutItem()
+           .StyleRef()
+           .HasAppliedTextDecorations()) {
     return;
+  }
 
   if (fragment.width <= 0)
     return;
@@ -387,8 +389,7 @@ void SVGInlineTextBoxPainter::PaintDecoration(const PaintInfo& paint_info,
         if (decoration_style.HasFill()) {
           cc::PaintFlags fill_flags;
           if (!SVGObjectPainter(*decoration_layout_object)
-                   .PreparePaint(paint_info.context,
-                                 paint_info.IsRenderingClipPathAsMaskImage(),
+                   .PreparePaint(paint_info.IsRenderingClipPathAsMaskImage(),
                                  decoration_style, kApplyToFillMode,
                                  fill_flags)) {
             break;
@@ -402,8 +403,7 @@ void SVGInlineTextBoxPainter::PaintDecoration(const PaintInfo& paint_info,
         if (decoration_style.HasVisibleStroke()) {
           cc::PaintFlags stroke_flags;
           if (!SVGObjectPainter(*decoration_layout_object)
-                   .PreparePaint(paint_info.context,
-                                 paint_info.IsRenderingClipPathAsMaskImage(),
+                   .PreparePaint(paint_info.IsRenderingClipPathAsMaskImage(),
                                  decoration_style, kApplyToStrokeMode,
                                  stroke_flags)) {
             break;
@@ -457,8 +457,7 @@ bool SVGInlineTextBoxPainter::SetupTextPaint(
   }
 
   if (!SVGObjectPainter(ParentInlineLayoutObject())
-           .PreparePaint(paint_info.context,
-                         paint_info.IsRenderingClipPathAsMaskImage(), style,
+           .PreparePaint(paint_info.IsRenderingClipPathAsMaskImage(), style,
                          resource_mode, flags,
                          base::OptionalToPtr(paint_server_transform))) {
     return false;

@@ -8,7 +8,7 @@ import 'chrome://personalization/strings.m.js';
 import 'chrome://webui-test/mojo_webui_test_support.js';
 
 import {GooglePhotosAlbum, Paths, PersonalizationBreadcrumb, PersonalizationRouter, TopicSource} from 'chrome://personalization/js/personalization_app.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {assertDeepEquals, assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 
@@ -173,9 +173,14 @@ suite('PersonalizationBreadcrumbTest', function() {
     // integration feature flag is enabled.
     loadTimeData.overrideValues({'googlePhotosLabel': 'Google Photos'});
 
-    const googlePhotosAlbum = new GooglePhotosAlbum();
-    googlePhotosAlbum.id = '9bd1d7a3-f995-4445-be47-53c5b58ce1cb';
-    googlePhotosAlbum.title = 'Album 0';
+    const googlePhotosAlbum: GooglePhotosAlbum = {
+      id: '9bd1d7a3-f995-4445-be47-53c5b58ce1cb',
+      title: 'Album 0',
+      photoCount: 0,
+      isShared: false,
+      preview: {url: ''},
+      timestamp: {internalValue: BigInt(0)},
+    };
 
     personalizationStore.data.wallpaper.googlePhotos.albums =
         [googlePhotosAlbum];

@@ -46,8 +46,8 @@ ImageData* ImageData::ValidateAndCreate(
     ValidateAndCreateParams params,
     ExceptionState& exception_state) {
   gfx::Size size;
-  if (params.require_canvas_color_management_v2 &&
-      !RuntimeEnabledFeatures::CanvasColorManagementV2Enabled()) {
+  if (params.require_canvas_floating_point &&
+      !RuntimeEnabledFeatures::CanvasFloatingPointEnabled()) {
     exception_state.ThrowTypeError("Overload resolution failed.");
     return nullptr;
   }
@@ -298,7 +298,7 @@ ScriptPromise ImageData::CreateImageBitmap(ScriptState* script_state,
   }
   return ImageBitmapSource::FulfillImageBitmap(
       script_state, MakeGarbageCollected<ImageBitmap>(this, crop_rect, options),
-      exception_state);
+      options, exception_state);
 }
 
 PredefinedColorSpace ImageData::GetPredefinedColorSpace() const {
@@ -315,14 +315,6 @@ String ImageData::colorSpace() const {
 
 String ImageData::storageFormat() const {
   return ImageDataStorageFormatName(storage_format_);
-}
-
-ImageDataSettings* ImageData::getSettings() const {
-  // TODO(https://crbug.com/1198606): Remove this.
-  ImageDataSettings* settings = ImageDataSettings::Create();
-  settings->setColorSpace(colorSpace());
-  settings->setStorageFormat(storageFormat());
-  return settings;
 }
 
 bool ImageData::IsBufferBaseDetached() const {

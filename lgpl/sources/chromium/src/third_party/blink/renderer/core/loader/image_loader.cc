@@ -60,6 +60,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_handle.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/attribution_header_constants.h"
@@ -227,7 +228,8 @@ void ImageLoader::DispatchDecodeRequestsIfComplete() {
     frame->GetChromeClient().RequestDecode(
         frame, image->PaintImageForCurrentFrame(),
         WTF::BindOnce(&ImageLoader::DecodeRequestFinished,
-                      WrapCrossThreadPersistent(this), request->request_id()));
+                      MakeUnwrappingCrossThreadHandle(this),
+                      request->request_id()));
     request->NotifyDecodeDispatched();
     ++it;
   }
@@ -291,13 +293,6 @@ bool ImageLoader::ShouldUpdateOnInsertedInto(
   // If we're being inserted into a disconnected tree, we don't need to update.
   if (!insertion_point.isConnected())
     return false;
-
-  // If the base element URL changed, it means that we might be in the process
-  // of fetching a wrong image. We should update to ensure we fetch the correct
-  // image. This can happen when inserting content into an iframe which has a
-  // base element. See crbug.com/897545 for more details.
-  if (element_->GetDocument().ValidBaseElementURL() != last_base_element_url_)
-    return true;
 
   // If we already have image content, then we don't need an update.
   if (image_content_)
@@ -422,7 +417,7 @@ inline void ImageLoader::EnqueueImageLoadingMicroTask(
     network::mojom::ReferrerPolicy referrer_policy) {
   auto task = std::make_unique<Task>(this, update_behavior, referrer_policy);
   pending_task_ = task->GetWeakPtr();
-  element_->GetDocument().GetAgent()->event_loop()->EnqueueMicrotask(
+  element_->GetDocument().GetAgent().event_loop()->EnqueueMicrotask(
       WTF::BindOnce(&Task::Run, std::move(task)));
   delay_until_do_update_from_element_ =
       std::make_unique<IncrementLoadEventDelayCount>(element_->GetDocument());
@@ -641,8 +636,6 @@ void ImageLoader::UpdateFromElement(
 
   AtomicString image_source_url = element_->ImageSourceURL();
   suppress_error_events_ = (update_behavior == kUpdateSizeChanged);
-  last_base_element_url_ =
-      element_->GetDocument().ValidBaseElementURL().GetString();
   last_referrer_policy_ = referrer_policy;
 
   if (update_behavior == kUpdateIgnorePreviousError)
@@ -674,7 +667,8 @@ void ImageLoader::UpdateFromElement(
     delay_until_do_update_from_element_ = nullptr;
   }
 
-  if (ShouldLoadImmediately(ImageSourceToKURL(image_source_url))) {
+  if (ShouldLoadImmediately(ImageSourceToKURL(image_source_url)) &&
+      update_behavior != kUpdateFromMicrotask) {
     DoUpdateFromElement(element_->GetExecutionContext()->GetCurrentWorld(),
                         update_behavior, referrer_policy, UpdateType::kSync,
                         force_blocking);
@@ -847,7 +841,7 @@ void ImageLoader::ImageNotifyFinished(ImageResourceContent* content) {
                         GetElement()->GetDocument())));
 }
 
-LayoutImageResource* ImageLoader::GetLayoutImageResource() {
+LayoutImageResource* ImageLoader::GetLayoutImageResource() const {
   LayoutObject* layout_object = element_->GetLayoutObject();
 
   if (!layout_object)
@@ -881,6 +875,16 @@ void ImageLoader::UpdateLayoutObject() {
   if (image_content_ != cached_image_content &&
       (image_complete_ || !cached_image_content))
     image_resource->SetImageResource(image_content_.Get());
+}
+
+ResourcePriority ImageLoader::ComputeResourcePriority() const {
+  LayoutImageResource* image_resource = GetLayoutImageResource();
+  if (!image_resource)
+    return ResourcePriority();
+
+  ResourcePriority priority = image_resource->ComputeResourcePriority();
+  priority.source = ResourcePriority::Source::kImageLoader;
+  return priority;
 }
 
 bool ImageLoader::HasPendingEvent() const {
@@ -950,7 +954,8 @@ ScriptPromise ImageLoader::Decode(ScriptState* script_state,
 
 void ImageLoader::LoadDeferredImage(
     network::mojom::ReferrerPolicy referrer_policy,
-    bool force_blocking) {
+    bool force_blocking,
+    bool update_from_microtask) {
   if (lazy_image_load_state_ != LazyImageLoadState::kDeferred)
     return;
   DCHECK(!image_complete_);
@@ -958,7 +963,9 @@ void ImageLoader::LoadDeferredImage(
 
   // If the image has been fully deferred (no placeholder fetch), report it as
   // fully loaded now.
-  UpdateFromElement(kUpdateNormal, referrer_policy, force_blocking);
+  UpdateFromElement(
+      update_from_microtask ? kUpdateFromMicrotask : kUpdateNormal,
+      referrer_policy, force_blocking);
 }
 
 void ImageLoader::ElementDidMoveToNewDocument() {

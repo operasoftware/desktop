@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/modules/peerconnection/mock_data_channel_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_dependency_factory.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_rtc_peer_connection_handler_platform.h"
+#include "third_party/blink/renderer/platform/allow_discouraged_type.h"
 #include "third_party/blink/renderer/platform/peerconnection/webrtc_util.h"
 #include "third_party/webrtc/api/rtp_receiver_interface.h"
 #include "third_party/webrtc/rtc_base/ref_counted_object.h"
@@ -83,7 +84,10 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
   ~MockStreamCollection() override {}
 
  private:
-  typedef std::vector<rtc::scoped_refptr<MediaStreamInterface>> StreamVector;
+  typedef std::vector<rtc::scoped_refptr<MediaStreamInterface>> StreamVector
+      ALLOW_DISCOURAGED_TYPE(
+          "Avoids conversion when implementing "
+          "webrtc::StreamCollectionInterface");
   StreamVector streams_;
 };
 
@@ -303,11 +307,6 @@ webrtc::RtpTransceiverDirection FakeRtpTransceiver::direction() const {
   return direction_;
 }
 
-void FakeRtpTransceiver::SetDirection(
-    webrtc::RtpTransceiverDirection new_direction) {
-  NOTIMPLEMENTED();
-}
-
 absl::optional<webrtc::RtpTransceiverDirection>
 FakeRtpTransceiver::current_direction() const {
   return current_direction_;
@@ -454,8 +453,8 @@ MockPeerConnectionImpl::GetTransceivers() const {
   return transceivers;
 }
 
-rtc::scoped_refptr<webrtc::DataChannelInterface>
-MockPeerConnectionImpl::CreateDataChannel(
+webrtc::RTCErrorOr<rtc::scoped_refptr<webrtc::DataChannelInterface>>
+MockPeerConnectionImpl::CreateDataChannelOrError(
     const std::string& label,
     const webrtc::DataChannelInit* config) {
   return rtc::scoped_refptr<webrtc::DataChannelInterface>(
@@ -582,12 +581,6 @@ void MockPeerConnectionImpl::AddIceCandidate(
   callback(result
                ? webrtc::RTCError::OK()
                : webrtc::RTCError(webrtc::RTCErrorType::UNSUPPORTED_OPERATION));
-}
-
-webrtc::RTCError MockPeerConnectionImpl::SetBitrate(
-    const webrtc::BitrateSettings& bitrate) {
-  NOTIMPLEMENTED();
-  return webrtc::RTCError::OK();
 }
 
 }  // namespace blink

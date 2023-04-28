@@ -22,12 +22,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "avassert.h"
 #include "avstring.h"
 #include "common.h"
 #include "pixfmt.h"
 #include "pixdesc.h"
-#include "internal.h"
 #include "intreadwrite.h"
 
 void av_read_image_line2(void *dst,
@@ -48,19 +46,35 @@ void av_read_image_line2(void *dst,
     uint32_t *dst32 = dst;
 
     if (flags & AV_PIX_FMT_FLAG_BITSTREAM) {
-        int skip = x * step + comp.offset;
-        const uint8_t *p = data[plane] + y * linesize[plane] + (skip >> 3);
-        int shift = 8 - depth - (skip & 7);
+        if (depth == 10) {
+            // Assume all channels are packed into a 32bit value
+            const uint8_t *byte_p = data[plane] + y * linesize[plane];
+            const uint32_t *p = (uint32_t *)byte_p;
 
-        while (w--) {
-            int val = (*p >> shift) & mask;
-            if (read_pal_component)
-                val = data[1][4*val + c];
-            shift -= step;
-            p -= shift >> 3;
-            shift &= 7;
-            if (dst_element_size == 4) *dst32++ = val;
-            else                       *dst16++ = val;
+            while (w--) {
+                int val = AV_RB32(p);
+                val = (val >> comp.offset) & mask;
+                if (read_pal_component)
+                    val = data[1][4*val + c];
+                if (dst_element_size == 4) *dst32++ = val;
+                else                       *dst16++ = val;
+                p++;
+            }
+        } else {
+            int skip = x * step + comp.offset;
+            const uint8_t *p = data[plane] + y * linesize[plane] + (skip >> 3);
+            int shift = 8 - depth - (skip & 7);
+
+            while (w--) {
+                int val = (*p >> shift) & mask;
+                if (read_pal_component)
+                    val = data[1][4*val + c];
+                shift -= step;
+                p -= shift >> 3;
+                shift &= 7;
+                if (dst_element_size == 4) *dst32++ = val;
+                else                       *dst16++ = val;
+            }
         }
     } else {
         const uint8_t *p = data[plane] + y * linesize[plane] +
@@ -111,15 +125,29 @@ void av_write_image_line2(const void *src,
     const uint16_t *src16 = src;
 
     if (flags & AV_PIX_FMT_FLAG_BITSTREAM) {
-        int skip = x * step + comp.offset;
-        uint8_t *p = data[plane] + y * linesize[plane] + (skip >> 3);
-        int shift = 8 - depth - (skip & 7);
+        if (depth == 10) {
+            // Assume all channels are packed into a 32bit value
+            const uint8_t *byte_p = data[plane] + y * linesize[plane];
+            uint32_t *p = (uint32_t *)byte_p;
+            int offset = comp.offset;
+            uint32_t mask  = ((1ULL << depth) - 1) << offset;
 
-        while (w--) {
-            *p |= (src_element_size == 4 ? *src32++ : *src16++) << shift;
-            shift -= step;
-            p -= shift >> 3;
-            shift &= 7;
+            while (w--) {
+                uint16_t val = src_element_size == 4 ? *src32++ : *src16++;
+                AV_WB32(p, (AV_RB32(p) & ~mask) | (val << offset));
+                p++;
+            }
+        } else {
+            int skip = x * step + comp.offset;
+            uint8_t *p = data[plane] + y * linesize[plane] + (skip >> 3);
+            int shift = 8 - depth - (skip & 7);
+
+            while (w--) {
+                *p |= (src_element_size == 4 ? *src32++ : *src16++) << shift;
+                shift -= step;
+                p -= shift >> 3;
+                shift &= 7;
+            }
         }
     } else {
         int shift = comp.shift;
@@ -2636,6 +2664,59 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_BE,
     },
+    [AV_PIX_FMT_RGBF32BE] = {
+        .name = "rgbf32be",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 12, 0, 0, 32 },       /* R */
+            { 0, 12, 4, 0, 32 },       /* G */
+            { 0, 12, 8, 0, 32 },       /* B */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB |
+                 AV_PIX_FMT_FLAG_FLOAT,
+    },
+    [AV_PIX_FMT_RGBF32LE] = {
+        .name = "rgbf32le",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 12, 0, 0, 32 },       /* R */
+            { 0, 12, 4, 0, 32 },       /* G */
+            { 0, 12, 8, 0, 32 },       /* B */
+        },
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_FLOAT,
+    },
+    [AV_PIX_FMT_RGBAF32BE] = {
+        .name = "rgbaf32be",
+        .nb_components = 4,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 16,  0, 0, 32 },      /* R */
+            { 0, 16,  4, 0, 32 },      /* G */
+            { 0, 16,  8, 0, 32 },      /* B */
+            { 0, 16, 12, 0, 32 },      /* A */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_RGB |
+                 AV_PIX_FMT_FLAG_FLOAT | AV_PIX_FMT_FLAG_ALPHA,
+    },
+    [AV_PIX_FMT_RGBAF32LE] = {
+        .name = "rgbaf32le",
+        .nb_components = 4,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 16,  0, 0, 32 },      /* R */
+            { 0, 16,  4, 0, 32 },      /* G */
+            { 0, 16,  8, 0, 32 },      /* B */
+            { 0, 16, 12, 0, 32 },      /* A */
+        },
+        .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_FLOAT |
+                 AV_PIX_FMT_FLAG_ALPHA,
+    },
 };
 
 static const char * const color_range_names[] = {
@@ -2858,47 +2939,6 @@ int av_pix_fmt_count_planes(enum AVPixelFormat pix_fmt)
         ret += planes[i];
     return ret;
 }
-
-void ff_check_pixfmt_descriptors(void){
-    int i, j;
-
-    for (i=0; i<FF_ARRAY_ELEMS(av_pix_fmt_descriptors); i++) {
-        const AVPixFmtDescriptor *d = &av_pix_fmt_descriptors[i];
-        uint8_t fill[4][8+6+3] = {{0}};
-        uint8_t *data[4] = {fill[0], fill[1], fill[2], fill[3]};
-        int linesize[4] = {0,0,0,0};
-        uint16_t tmp[2];
-
-        if (!d->name && !d->nb_components && !d->log2_chroma_w && !d->log2_chroma_h && !d->flags)
-            continue;
-        av_log(NULL, AV_LOG_INFO, "Checking: %s\n", d->name);
-        av_assert0(d->log2_chroma_w <= 3);
-        av_assert0(d->log2_chroma_h <= 3);
-        av_assert0(d->nb_components <= 4);
-        av_assert0(d->name && d->name[0]);
-        av_assert2(av_get_pix_fmt(d->name) == i);
-
-        for (j=0; j<FF_ARRAY_ELEMS(d->comp); j++) {
-            const AVComponentDescriptor *c = &d->comp[j];
-            if(j>=d->nb_components) {
-                av_assert0(!c->plane && !c->step && !c->offset && !c->shift && !c->depth);
-                continue;
-            }
-            if (d->flags & AV_PIX_FMT_FLAG_BITSTREAM) {
-                av_assert0(c->step >= c->depth);
-            } else {
-                av_assert0(8*c->step >= c->depth);
-            }
-            if (d->flags & AV_PIX_FMT_FLAG_BAYER)
-                continue;
-            av_read_image_line(tmp, (void*)data, linesize, d, 0, 0, j, 2, 0);
-            av_assert0(tmp[0] == 0 && tmp[1] == 0);
-            tmp[0] = tmp[1] = (1ULL << c->depth) - 1;
-            av_write_image_line(tmp, data, linesize, d, 0, 0, j, 2);
-        }
-    }
-}
-
 
 enum AVPixelFormat av_pix_fmt_swap_endianness(enum AVPixelFormat pix_fmt)
 {
@@ -3261,4 +3301,27 @@ int av_chroma_location_from_name(const char *name)
     }
 
     return AVERROR(EINVAL);
+}
+
+int av_chroma_location_enum_to_pos(int *xpos, int *ypos, enum AVChromaLocation pos)
+{
+    if (pos <= AVCHROMA_LOC_UNSPECIFIED || pos >= AVCHROMA_LOC_NB)
+        return AVERROR(EINVAL);
+    pos--;
+
+    *xpos = (pos&1) * 128;
+    *ypos = ((pos>>1)^(pos<4)) * 128;
+
+    return 0;
+}
+
+enum AVChromaLocation av_chroma_location_pos_to_enum(int xpos, int ypos)
+{
+    int pos, xout, yout;
+
+    for (pos = AVCHROMA_LOC_UNSPECIFIED + 1; pos < AVCHROMA_LOC_NB; pos++) {
+        if (av_chroma_location_enum_to_pos(&xout, &yout, pos) == 0 && xout == xpos && yout == ypos)
+            return pos;
+    }
+    return AVCHROMA_LOC_UNSPECIFIED;
 }

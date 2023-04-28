@@ -29,15 +29,13 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/single_request_url_loader_factory.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
-#include "third_party/blink/public/platform/web_back_forward_cache_loader_helper.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/public/platform/web_url_loader.h"
-#include "third_party/blink/public/platform/web_url_loader_client.h"
-#include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/public/platform/web_url_request_extra_data.h"
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
@@ -79,79 +77,20 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader.h"
+#include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader_client.h"
+#include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader_factory.h"
 #include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/main_thread_scheduler.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 
 namespace blink {
 
 namespace {
-
-using TaskRunnerHandle = scheduler::WebResourceLoadingTaskRunnerHandle;
-
-class FailingLoader final : public WebURLLoader {
- public:
-  explicit FailingLoader(
-      std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle)
-      : freezable_task_runner_handle_(std::move(freezable_task_runner_handle)) {
-  }
-  ~FailingLoader() override = default;
-
-  // WebURLLoader implementation:
-  void LoadSynchronously(
-      std::unique_ptr<network::ResourceRequest> request,
-      scoped_refptr<WebURLRequestExtraData> url_request_extra_data,
-      bool pass_response_pipe_to_client,
-      bool no_mime_sniffing,
-      base::TimeDelta timeout_interval,
-      WebURLLoaderClient*,
-      WebURLResponse&,
-      absl::optional<WebURLError>& error,
-      WebData&,
-      int64_t& encoded_data_length,
-      int64_t& encoded_body_length,
-      WebBlobInfo& downloaded_blob,
-      std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
-          resource_load_info_notifier_wrapper) override {
-    NOTREACHED();
-  }
-  void LoadAsynchronously(
-      std::unique_ptr<network::ResourceRequest> request,
-      scoped_refptr<WebURLRequestExtraData> url_request_extra_data,
-      bool no_mime_sniffing,
-      std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
-          resource_load_info_notifier_wrapper,
-      WebURLLoaderClient* client) override {
-    NOTREACHED();
-  }
-  void Freeze(LoaderFreezeMode) override {}
-  void DidChangePriority(WebURLRequest::Priority, int) override {}
-  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerForBodyLoader()
-      override {
-    return freezable_task_runner_handle_->GetTaskRunner();
-  }
-
- private:
-  const std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle_;
-};
-
-class FailingLoaderFactory final : public WebURLLoaderFactory {
- public:
-  // WebURLLoaderFactory implementation:
-  std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const WebURLRequest&,
-      std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle,
-      std::unique_ptr<TaskRunnerHandle> unfreezable_task_runner_handle,
-      CrossVariantMojoRemote<blink::mojom::KeepAliveHandleInterfaceBase>
-          keep_alive_handle,
-      WebBackForwardCacheLoaderHelper back_forward_cache_loader_helper)
-      override {
-    return std::make_unique<FailingLoader>(
-        std::move(freezable_task_runner_handle));
-  }
-};
 
 bool HasSmilAnimations(const Document& document) {
   const SVGDocumentExtensions* extensions = document.SvgExtensions();
@@ -172,10 +111,17 @@ class SVGImage::SVGImageLocalFrameClient : public EmptyLocalFrameClient {
   void ClearImage() { image_ = nullptr; }
 
  private:
-  std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override {
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory()
+      override {
     // SVG Images have unique security rules that prevent all subresource
     // requests except for data urls.
-    return std::make_unique<FailingLoaderFactory>();
+    return base::MakeRefCounted<network::SingleRequestURLLoaderFactory>(
+        WTF::BindOnce(
+            [](const network::ResourceRequest& resource_request,
+               mojo::PendingReceiver<network::mojom::URLLoader> receiver,
+               mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
+              NOTREACHED();
+            }));
   }
 
   void DispatchDidHandleOnloadEvents() override {
@@ -192,7 +138,6 @@ class SVGImage::SVGImageLocalFrameClient : public EmptyLocalFrameClient {
 
 SVGImage::SVGImage(ImageObserver* observer, bool is_multipart)
     : Image(observer, is_multipart),
-      paint_controller_(std::make_unique<PaintController>()),
       // TODO(chikamune): use an existing AgentGroupScheduler
       // SVG will be shared via MemoryCache (which is renderer process
       // global cache) across multiple AgentSchedulingGroups. That's
@@ -320,6 +265,21 @@ bool SVGImage::GetIntrinsicSizingInfo(
   if (!layout_root)
     return false;
   layout_root->UnscaledIntrinsicSizingInfo(intrinsic_sizing_info);
+
+  if (!intrinsic_sizing_info.has_width || !intrinsic_sizing_info.has_height) {
+    // We're not using an intrinsic aspect ratio to resolve a missing
+    // intrinsic width or height when preserveAspectRatio is none.
+    // (Ref: crbug.com/584172)
+    SVGSVGElement* svg = RootElement();
+    if (svg->preserveAspectRatio()->CurrentValue()->Align() ==
+        SVGPreserveAspectRatio::kSvgPreserveaspectratioNone) {
+      // Clear all the fields so that the concrete object size will equal the
+      // default object size.
+      intrinsic_sizing_info = IntrinsicSizingInfo();
+      intrinsic_sizing_info.has_width = false;
+      intrinsic_sizing_info.has_height = false;
+    }
+  }
   return true;
 }
 
@@ -332,14 +292,6 @@ gfx::SizeF SVGImage::ConcreteObjectSize(
   // https://www.w3.org/TR/css3-images/#default-sizing
   if (intrinsic_sizing_info.has_width && intrinsic_sizing_info.has_height)
     return intrinsic_sizing_info.size;
-
-  // We're not using an intrinsic aspect ratio to resolve a missing
-  // intrinsic width or height when preserveAspectRatio is none.
-  // (Ref: crbug.com/584172)
-  SVGSVGElement* svg = RootElement();
-  if (svg->preserveAspectRatio()->CurrentValue()->Align() ==
-      SVGPreserveAspectRatio::kSvgPreserveaspectratioNone)
-    return default_object_size;
 
   if (intrinsic_sizing_info.has_width) {
     if (intrinsic_sizing_info.aspect_ratio.IsEmpty()) {
@@ -481,8 +433,7 @@ void SVGImage::PopulatePaintRecordForCurrentFrameForContainer(
   const gfx::SizeF size =
       gfx::ScaleSize(draw_info.ContainerSize(), draw_info.Zoom());
   const gfx::Rect dest_rect(gfx::ToRoundedSize(size));
-  cc::PaintCanvas* canvas =
-      recorder.beginRecording(gfx::RectToSkRect(dest_rect));
+  cc::PaintCanvas* canvas = recorder.beginRecording();
   DrawForContainer(draw_info, canvas, cc::PaintFlags(), gfx::RectF(dest_rect),
                    gfx::RectF(size));
   builder.set_paint_record(recorder.finishRecordingAsPicture(), dest_rect,
@@ -499,14 +450,17 @@ bool SVGImage::ApplyShaderInternal(const DrawInfo& draw_info,
                                    const SkMatrix& local_matrix) {
   if (draw_info.ContainerSize().IsEmpty())
     return false;
-  sk_sp<PaintRecord> record = PaintRecordForCurrentFrame(draw_info);
+  // TODO(pdr): Pass a tighter cull rect based on the src rect to optimize out
+  // parts of the paint record that are not visible (see: crbug.com/1401086).
+  absl::optional<PaintRecord> record =
+      PaintRecordForCurrentFrame(draw_info, nullptr);
   if (!record)
     return false;
 
   const SkRect bounds =
       SkRect::MakeSize(gfx::SizeFToSkSize(draw_info.ContainerSize()));
   flags.setShader(PaintShader::MakePaintRecord(
-      std::move(record), bounds, SkTileMode::kClamp, SkTileMode::kClamp,
+      std::move(*record), bounds, SkTileMode::kClamp, SkTileMode::kClamp,
       &local_matrix));
 
   // Animation is normally refreshed in Draw() impls, which we don't reach when
@@ -546,10 +500,12 @@ void SVGImage::Draw(cc::PaintCanvas* canvas,
   DrawInternal(draw_info, canvas, flags, dst_rect, src_rect);
 }
 
-sk_sp<PaintRecord> SVGImage::PaintRecordForCurrentFrame(
-    const DrawInfo& draw_info) {
-  if (!page_)
-    return nullptr;
+absl::optional<PaintRecord> SVGImage::PaintRecordForCurrentFrame(
+    const DrawInfo& draw_info,
+    const gfx::Rect* cull_rect) {
+  if (!page_) {
+    return absl::nullopt;
+  }
   // Temporarily disable the image observer to prevent ChangeInRect() calls due
   // re-laying out the image.
   ImageObserverDisabler disable_image_observer(this);
@@ -575,7 +531,8 @@ sk_sp<PaintRecord> SVGImage::PaintRecordForCurrentFrame(
   page_->GetSettings().SetForceDarkModeEnabled(draw_info.IsDarkModeEnabled());
 
   view->UpdateAllLifecyclePhases(DocumentUpdateReason::kSVGImage);
-  return view->GetPaintRecord();
+
+  return view->GetPaintRecord(cull_rect);
 }
 
 static bool DrawNeedsLayer(const cc::PaintFlags& flags) {
@@ -595,7 +552,9 @@ void SVGImage::DrawInternal(const DrawInfo& draw_info,
                             const cc::PaintFlags& flags,
                             const gfx::RectF& dst_rect,
                             const gfx::RectF& unzoomed_src_rect) {
-  sk_sp<PaintRecord> record = PaintRecordForCurrentFrame(draw_info);
+  gfx::Rect cull_rect(gfx::ToEnclosingRect(unzoomed_src_rect));
+  absl::optional<PaintRecord> record =
+      PaintRecordForCurrentFrame(draw_info, &cull_rect);
   if (!record)
     return;
 
@@ -603,16 +562,16 @@ void SVGImage::DrawInternal(const DrawInfo& draw_info,
     PaintCanvasAutoRestore ar(canvas, false);
     if (DrawNeedsLayer(flags)) {
       SkRect layer_rect = gfx::RectFToSkRect(dst_rect);
-      canvas->saveLayer(&layer_rect, &flags);
+      canvas->saveLayer(layer_rect, flags);
     }
     // We can only draw the entire frame, clipped to the rect we want. So
     // compute where the top left of the image would be if we were drawing
     // without clipping, and translate accordingly.
     canvas->save();
     canvas->clipRect(gfx::RectToSkRect(gfx::ToEnclosingRect(dst_rect)));
-    canvas->concat(SkMatrix::RectToRect(gfx::RectFToSkRect(unzoomed_src_rect),
-                                        gfx::RectFToSkRect(dst_rect)));
-    canvas->drawPicture(std::move(record));
+    canvas->concat(SkM44::RectToRect(gfx::RectFToSkRect(unzoomed_src_rect),
+                                     gfx::RectFToSkRect(dst_rect)));
+    canvas->drawPicture(std::move(*record));
     canvas->restore();
   }
 
@@ -868,7 +827,8 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
         nullptr);
     frame->SetView(MakeGarbageCollected<LocalFrameView>(*frame));
     frame->Init(/*opener=*/nullptr, DocumentToken(),
-                /*policy_container=*/nullptr, StorageKey());
+                /*policy_container=*/nullptr, StorageKey(),
+                /*document_ukm_source_id=*/ukm::kInvalidSourceId);
   }
 
   // SVG Images will always synthesize a viewBox, if it's not available, and
@@ -922,6 +882,11 @@ bool SVGImage::IsSizeAvailable() {
 
 String SVGImage::FilenameExtension() const {
   return "svg";
+}
+
+const AtomicString& SVGImage::MimeType() const {
+  DEFINE_STATIC_LOCAL(const AtomicString, svg_mime_type, ("image/svg+xml"));
+  return svg_mime_type;
 }
 
 }  // namespace blink

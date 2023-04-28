@@ -404,9 +404,11 @@ class HTMLMediaElementTest : public testing::TestWithParam<MediaTestParam> {
                                   bool has_video,
                                   media::AudioCodec audio_codec,
                                   media::VideoCodec video_codec,
-                                  media::MediaContentType media_content_type) {
+                                  media::MediaContentType media_content_type,
+                                  bool is_encrypted_media) {
     media_->DidMediaMetadataChange(has_audio, has_video, audio_codec,
-                                   video_codec, media_content_type);
+                                   video_codec, media_content_type,
+                                   is_encrypted_media);
     media_player_observer().WaitUntilReceivedMessage();
     // wait for OnRemotePlaybackMetadataChange() to be called.
     if (audio_codec != media::AudioCodec::kUnknown ||
@@ -460,7 +462,8 @@ class HTMLMediaElementTest : public testing::TestWithParam<MediaTestParam> {
 
   // Create a dummy page holder with the given security origin.
   std::unique_ptr<DummyPageHolder> CreatePageWithSecurityOrigin(
-      const char* origin) {
+      const char* origin,
+      bool is_picture_in_picture) {
     // Make another document with the same security origin.
 
     auto dummy_page_holder = std::make_unique<DummyPageHolder>(
@@ -470,6 +473,8 @@ class HTMLMediaElementTest : public testing::TestWithParam<MediaTestParam> {
     Document& document = dummy_page_holder->GetDocument();
     document.domWindow()->GetSecurityContext().SetSecurityOriginForTesting(
         SecurityOrigin::CreateFromString(origin));
+    document.domWindow()->set_is_picture_in_picture_window_for_testing(
+        is_picture_in_picture);
 
     return dummy_page_holder;
   }
@@ -487,19 +492,39 @@ class HTMLMediaElementTest : public testing::TestWithParam<MediaTestParam> {
   // expect that `should_destroy` matches whether the player is destroyed.  If
   // the player should not be destroyed, then we also move it back to the
   // original document and verify that it works in both directions.
-  void MoveElementAndTestPlayerDestruction(const char* old_origin,
-                                           const char* new_origin,
-                                           bool should_destroy) {
+  void MoveElementAndTestPlayerDestruction(
+      const char* old_origin,
+      const char* new_origin,
+      bool should_destroy,
+      bool is_new_document_picture_in_picture,
+      bool is_old_document_picture_in_picture,
+      bool is_new_document_opener,
+      bool is_old_document_opener) {
+    // The two documents cannot both be opener.
+    EXPECT_FALSE(is_new_document_opener && is_old_document_opener);
+
     SetSecurityOrigin(old_origin);
     WaitForPlayer();
     // Player should not be destroyed yet.
     EXPECT_FALSE(WasPlayerDestroyed());
 
     auto& original_document = Media()->GetDocument();
+    if (is_old_document_picture_in_picture) {
+      original_document.domWindow()
+          ->set_is_picture_in_picture_window_for_testing(
+              is_old_document_picture_in_picture);
+    }
 
     // Make another document with the correct security origin.
-    auto new_dummy_page_holder = CreatePageWithSecurityOrigin(new_origin);
+    auto new_dummy_page_holder = CreatePageWithSecurityOrigin(
+        new_origin, is_new_document_picture_in_picture);
     Document& new_document = new_dummy_page_holder->GetDocument();
+
+    if (is_old_document_opener) {
+      new_document.GetFrame()->SetOpener(original_document.GetFrame());
+    } else if (is_new_document_opener) {
+      original_document.GetFrame()->SetOpener(new_document.GetFrame());
+    }
 
     // Move the element.
     new_document.adoptNode(Media(), ASSERT_NO_EXCEPTION);
@@ -1173,13 +1198,14 @@ TEST_P(HTMLMediaElementTest, SendMediaMetadataChangedToObserver) {
 
   bool has_audio = false;
   bool has_video = true;
+  bool is_encrypted_media = false;
   media::AudioCodec audio_codec = media::AudioCodec::kUnknown;
   media::VideoCodec video_codec = media::VideoCodec::kUnknown;
   media::MediaContentType media_content_type =
       media::MediaContentType::Transient;
 
   NotifyMediaMetadataChanged(has_audio, has_video, audio_codec, video_codec,
-                             media_content_type);
+                             media_content_type, is_encrypted_media);
   EXPECT_TRUE(ReceivedMessageMediaMetadataChanged(has_audio, has_video,
                                                   media_content_type));
   // Change values and test again.
@@ -1187,7 +1213,7 @@ TEST_P(HTMLMediaElementTest, SendMediaMetadataChangedToObserver) {
   has_video = false;
   media_content_type = media::MediaContentType::OneShot;
   NotifyMediaMetadataChanged(has_audio, has_video, audio_codec, video_codec,
-                             media_content_type);
+                             media_content_type, is_encrypted_media);
   EXPECT_TRUE(ReceivedMessageMediaMetadataChanged(has_audio, has_video,
                                                   media_content_type));
 
@@ -1195,11 +1221,12 @@ TEST_P(HTMLMediaElementTest, SendMediaMetadataChangedToObserver) {
   audio_codec = media::AudioCodec::kAAC;
   video_codec = media::VideoCodec::kH264;
   NotifyMediaMetadataChanged(has_audio, has_video, audio_codec, video_codec,
-                             media_content_type);
+                             media_content_type, is_encrypted_media);
   EXPECT_TRUE(ReceivedRemotePlaybackMetadataChange(
       media_session::mojom::blink::RemotePlaybackMetadata::New(
           WTF::String(media::GetCodecName(video_codec)),
-          WTF::String(media::GetCodecName(audio_codec)), false)));
+          WTF::String(media::GetCodecName(audio_codec)), false, false,
+          WTF::String(), is_encrypted_media)));
 }
 
 TEST_P(HTMLMediaElementTest, SendMediaSizeChangeToObserver) {
@@ -1215,14 +1242,18 @@ TEST_P(HTMLMediaElementTest, SendRemotePlaybackMetadataChangeToObserver) {
   media::VideoCodec video_codec = media::VideoCodec::kH264;
   media::AudioCodec audio_codec = media::AudioCodec::kAAC;
   bool is_remote_playback_disabled = true;
+  bool is_remote_playback_started = false;
+  bool is_encrypted_media = false;
   NotifyMediaMetadataChanged(true, true, audio_codec, video_codec,
-                             media::MediaContentType::Transient);
+                             media::MediaContentType::Transient,
+                             is_encrypted_media);
   NotifyRemotePlaybackDisabled(is_remote_playback_disabled);
   EXPECT_TRUE(ReceivedRemotePlaybackMetadataChange(
       media_session::mojom::blink::RemotePlaybackMetadata::New(
           WTF::String(media::GetCodecName(video_codec)),
           WTF::String(media::GetCodecName(audio_codec)),
-          is_remote_playback_disabled)));
+          is_remote_playback_disabled, is_remote_playback_started,
+          WTF::String(), is_encrypted_media)));
 }
 
 TEST_P(HTMLMediaElementTest, SendUseAudioServiceChangedToObserver) {
@@ -1306,8 +1337,13 @@ TEST_P(HTMLMediaElementTest,
   // Ensure that the WebMediaPlayer is destroyed when moving to a same-origin
   // document, if `kDocumentPictureInPictureAPI` is not enabled.
   ScopedDocumentPictureInPictureAPIForTest scoped_feature(false);
-  MoveElementAndTestPlayerDestruction("https://a.com", "https://a.com",
-                                      /*should_destroy=*/true);
+  MoveElementAndTestPlayerDestruction(
+      "https://a.com", "https://a.com",
+      /*should_destroy=*/true,
+      /*is_new_document_picture_in_picture=*/false,
+      /*is_old_document_picture_in_picture=*/false,
+      /*is_new_document_opener=*/false,
+      /*is_old_document_opener=*/false);
 }
 
 TEST_P(
@@ -1316,8 +1352,13 @@ TEST_P(
   // Ensure that the WebMediaPlayer is destroyed when moving to a new origin
   // document, if `kDocumentPictureInPictureAPI` is not enabled.
   ScopedDocumentPictureInPictureAPIForTest scoped_feature(false);
-  MoveElementAndTestPlayerDestruction("https://a.com", "https://b.com",
-                                      /*should_destroy=*/true);
+  MoveElementAndTestPlayerDestruction(
+      "https://a.com", "https://b.com",
+      /*should_destroy=*/true,
+      /*is_new_document_picture_in_picture=*/false,
+      /*is_old_document_picture_in_picture=*/false,
+      /*is_new_document_opener=*/false,
+      /*is_old_document_opener=*/false);
 }
 
 TEST_P(
@@ -1325,10 +1366,62 @@ TEST_P(
     DoNotDestroyMediaPlayerWhenSwitchingSameOriginDocumentsIfReuseIsEnabled) {
   // Ensure that the WebMediaPlayer is re-used when moving to a same-origin
   // document, if `kDocumentPictureInPictureAPI` is enabled.
-  ScopedPictureInPictureAPIForTest scoped_dependency(true);
   ScopedDocumentPictureInPictureAPIForTest scoped_feature(true);
-  MoveElementAndTestPlayerDestruction("https://a.com", "https://a.com",
-                                      /*should_destroy=*/false);
+  MoveElementAndTestPlayerDestruction(
+      "https://a.com", "https://a.com",
+      /*should_destroy=*/false,
+      /*is_new_document_picture_in_picture=*/true,
+      /*is_old_document_picture_in_picture=*/false,
+      /*is_new_document_opener=*/false,
+      /*is_old_document_opener=*/true);
+}
+
+TEST_P(
+    HTMLMediaElementTest,
+    DestroyMediaPlayerWhenSwitchingSameOriginDocumentsIfNewDocumentIsNotInPictureInPicture) {
+  // Ensure that the WebMediaPlayer is destroyed when moving to a same-origin
+  // document when the new frame is in picture in picture window, if
+  // 'kDocumentPictureInPictureAPI' is enabled.
+  ScopedDocumentPictureInPictureAPIForTest scoped_feature(true);
+  MoveElementAndTestPlayerDestruction(
+      "https//a.com", "https://a.com",
+      /*should_destroy=*/true,
+      /*is_new_document_picture_in_picture=*/false,
+      /*is_old_document_picture_in_picture=*/false,
+      /*is_new_document_opener=*/false,
+      /*is_old_document_opener=*/false);
+}
+
+TEST_P(
+    HTMLMediaElementTest,
+    DoNotDestroyMediaPlayerWhenSwitchingSameOriginDocumentsIfOldDocumentIsInPictureInPicture) {
+  // Ensure that the WebMediaPlayer is not destroyed when moving to a
+  // same-origin document when the old document is in picture-in-picture window,
+  // if 'kDocumentPictureInPictureAPI' is enabled.
+  ScopedDocumentPictureInPictureAPIForTest scoped_feature(true);
+  MoveElementAndTestPlayerDestruction(
+      "https://a.com", "https://a.com",
+      /*should_destroy=*/false,
+      /*is_new_document_picture_in_picture=*/false,
+      /*is_old_document_picture_in_picture=*/true,
+      /*is_new_document_opener=*/true,
+      /*is_old_document_opener=*/false);
+}
+
+TEST_P(
+    HTMLMediaElementTest,
+    DestroyMediaPlayerWhenSwitchingSameOriginDocumentsIfNotOpenerPipRelation) {
+  // Ensure that the WebMediaPlayer is destroyed when moving to a
+  // same-origin document when the new document is in picture-in-picture window
+  // but not opened from old document.
+  ScopedDocumentPictureInPictureAPIForTest scoped_feature(true);
+  MoveElementAndTestPlayerDestruction(
+      "https://a.com", "https://a.com",
+      /*should_destroy=*/true,
+      /*is_new_document_picture_in_picture=*/true,
+      /*is_old_document_picture_in_picture=*/false,
+      /*is_new_document_opener=*/false,
+      /*is_old_document_opener=*/false);
 }
 
 TEST_P(
@@ -1337,22 +1430,28 @@ TEST_P(
   // Ensure that the WebMediaPlayer is destroyed when moving to a new origin
   // document, if `kDocumentPictureInPictureAPI` is enabled. Re-use should only
   // occur if it's a same-origin document.
-  ScopedPictureInPictureAPIForTest scoped_dependency(true);
   ScopedDocumentPictureInPictureAPIForTest scoped_feature(true);
-  MoveElementAndTestPlayerDestruction("https://a.com", "https://b.com",
-                                      /*should_destroy=*/true);
+  MoveElementAndTestPlayerDestruction(
+      "https://a.com", "https://b.com",
+      /*should_destroy=*/true,
+      /*is_new_document_picture_in_picture=*/true,
+      /*is_old_document_picture_in_picture=*/false,
+      /*is_new_document_opener=*/false,
+      /*is_old_document_opener=*/true);
 }
 
 TEST_P(HTMLMediaElementTest,
        DestroyMediaPlayerWhenUnloadingOpenerIfReuseIsEnabled) {
   // Ensure that the WebMediaPlayer is re-used, that navigating the opener away
   // causes the player to be destroyed.
-  ScopedPictureInPictureAPIForTest scoped_dependency(true);
   ScopedDocumentPictureInPictureAPIForTest scoped_feature(true);
   const char* origin = "https://a.com";
   SetSecurityOrigin(origin);
   WaitForPlayer();
-  auto new_dummy_page_holder = CreatePageWithSecurityOrigin(origin);
+  auto new_dummy_page_holder =
+      CreatePageWithSecurityOrigin(origin, /*is_picture_in_picture=*/true);
+  new_dummy_page_holder->GetDocument().GetFrame()->SetOpener(
+      Media()->GetDocument().GetFrame());
   new_dummy_page_holder->GetDocument().adoptNode(Media(), ASSERT_NO_EXCEPTION);
 
   EXPECT_FALSE(WasPlayerDestroyed());
@@ -1362,14 +1461,15 @@ TEST_P(HTMLMediaElementTest,
 
 TEST_P(HTMLMediaElementTest,
        CreateMediaPlayerAfterMovingElementUsesOpenerFrameIfReuseIsEnabled) {
-  ScopedPictureInPictureAPIForTest scoped_dependency(true);
   ScopedDocumentPictureInPictureAPIForTest scoped_feature(true);
   // Move the element before creating the player.
   const char* origin = "https://a.com";
   SetSecurityOrigin(origin);
-  auto new_dummy_page_holder = CreatePageWithSecurityOrigin(origin);
+  auto new_dummy_page_holder =
+      CreatePageWithSecurityOrigin(origin, /*is_picture_in_picture=*/true);
   Document& new_document = new_dummy_page_holder->GetDocument();
   LocalFrame* old_frame = Media()->GetDocument().GetFrame();
+  new_document.GetFrame()->SetOpener(old_frame);
   EXPECT_EQ(old_frame, Media()->LocalFrameForPlayer());
   new_document.adoptNode(Media(), ASSERT_NO_EXCEPTION);
   // The element should still use the original frame.
@@ -1382,7 +1482,8 @@ TEST_P(HTMLMediaElementTest,
   // Move the element before creating the player.
   const char* origin = "https://a.com";
   SetSecurityOrigin(origin);
-  auto new_dummy_page_holder = CreatePageWithSecurityOrigin(origin);
+  auto new_dummy_page_holder =
+      CreatePageWithSecurityOrigin(origin, /*is_picture_in_picture=*/false);
   Document& new_document = new_dummy_page_holder->GetDocument();
   LocalFrame* old_frame = Media()->GetDocument().GetFrame();
   EXPECT_EQ(old_frame, Media()->LocalFrameForPlayer());

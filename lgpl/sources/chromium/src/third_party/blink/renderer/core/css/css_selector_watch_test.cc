@@ -83,12 +83,9 @@ TEST_F(CSSSelectorWatchTest, RecalcOnDocumentChange) {
   EXPECT_TRUE(RemovedSelectors(watch).Contains(".b"));
 }
 
-class CSSSelectorWatchCQTest : public CSSSelectorWatchTest,
-                               private ScopedCSSContainerQueriesForTest,
-                               private ScopedLayoutNGForTest {
+class CSSSelectorWatchCQTest : public CSSSelectorWatchTest {
  protected:
-  CSSSelectorWatchCQTest()
-      : ScopedCSSContainerQueriesForTest(true), ScopedLayoutNGForTest(true) {}
+  CSSSelectorWatchCQTest() = default;
 };
 
 TEST_F(CSSSelectorWatchCQTest, ContainerQueryDisplayNone) {

@@ -1,0 +1,76 @@
+{
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtbUwQkwG9topGvq06LJHcea4C/RHP7NBTeKndZIjkHShmqvQHy1H+Sm9ZGjkDvCYxrx9zY2iuxz2Tg0SG6kItPWtUihF+lFaRIWY+DlMcWkKQsOJ0enj/RQvMxTLgWWQRVadPV/GADyqZakGxDtLpOpweSLDFNhH01lE/xPm5irD6VF52pa/y542foKEXln3a0BGL3E7cF3TKEp4V/el7WioVtjE9wJ8M5dXq5PvwKpcM0XjsB0dcZ7GaP++G2pvORPz7MQURSEDuXS+03YjCtGAg1p6KW+hneq+0A7B7KUQFEaS3nczZo4u3xv8twu1eahMuH7zKOpgi4qoyWK0xQIDAQAB",
+  "name": "Shodan",
+  "description": "Shodan",
+  "version": "0.1.63",
+  "author": "Opera Norway AS",
+  "developer": {
+    "name": "Blueboard International AG, an Opera Group Company",
+    "url": "https://opera.com"
+  },
+  "homepage_url": "https://opera.com",
+  "manifest_version": 2,
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "all_frames": true,
+      "js": ["adapter_chatgpt_panel.js"],
+      "matches": ["https://chat.openai.com/*"],
+      "run_at": "document_end"
+    },
+    {
+      "all_frames": true,
+      "js": ["adapter_chatgpt_monitor_all.js"],
+      "matches": ["https://chat.openai.com/*"],
+      "run_at": "document_end"
+    },
+    {
+      "all_frames": true,
+      "js": ["adapter_chatsonic_panel.js"],
+      "matches": ["https://app.writesonic.com/*", "https://writesonic.com/chat"],
+      "run_at": "document_end"
+    },
+    {
+      "all_frames": true,
+      "js": ["adapter_chatsonic_monitor_all.js"],
+      "matches": ["https://writesonic.com/*", "https://app.writesonic.com/*"],
+      "run_at": "document_end"
+    }
+  ],
+  "permissions": [
+    "<all_urls>",
+    "activeTab",
+    "browserSidebarPrivate",
+    "shodanPrivate",
+    "statsPrivate",
+    "storage",
+    "tabs"
+  ],
+  "page_action": {
+    "default_icon": {
+      "16": "icons/512/icon_512_black.png",
+      "32": "icons/512/icon_512_black.png"
+    },
+    "default_title": "Whereami?",
+    "default_popup": "popup.html",
+    "theme_icons": [
+      {
+        "light": "icons/512/icon_512_black.png",
+        "dark": "icons/512/icon_512_white.png",
+        "size": 16
+      },
+      {
+        "light": "icons/512/icon_512_black.png",
+        "dark": "icons/512/icon_512_white.png",
+        "size": 32
+      }
+    ]
+  },
+  "icons": {
+    "32": "icons/512/icon_512_black.png",
+    "128": "icons/512/icon_512_black.png"
+  }
+}

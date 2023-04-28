@@ -46,13 +46,13 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/paint_phase.h"
-#include "third_party/blink/renderer/core/paint/paint_timing.h"
-#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/rounded_border_geometry.h"
 #include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
 #include "third_party/blink/renderer/core/paint/scoped_svg_paint_state.h"
 #include "third_party/blink/renderer/core/paint/scrollable_area_painter.h"
 #include "third_party/blink/renderer/core/paint/theme_painter.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/url_metadata_utils.h"
 #include "third_party/blink/renderer/core/paint/view_painter.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
@@ -510,8 +510,7 @@ void NGBoxFragmentPainter::PaintInternal(const PaintInfo& paint_info) {
       // make it easier to merge scrolling background and scrolling contents
       // into the same layer. The function checks if it's appropriate to paint
       // overflow controls now.
-      if (RuntimeEnabledFeatures::ScrollUpdateOptimizationsEnabled())
-        painted_overflow_controls = PaintOverflowControls(info, paint_offset);
+      painted_overflow_controls = PaintOverflowControls(info, paint_offset);
 
       info.SetIsPaintingBackgroundInContentsSpace(true);
       PaintObject(info, paint_offset);
@@ -754,9 +753,6 @@ void NGBoxFragmentPainter::PaintLineBoxes(const PaintInfo& paint_info,
   DCHECK(layout_object);
   DCHECK(layout_object->IsLayoutBlock());
   DCHECK(box_fragment_.IsInlineFormattingContext());
-
-  if (layout_object->IsShapingDeferred())
-    return;
 
   // When the layout-tree gets into a bad state, we can end up trying to paint
   // a fragment with inline children, without a paint fragment. See:
@@ -1325,6 +1321,15 @@ void NGBoxFragmentPainter::PaintColumnRules(
   const Color& rule_color =
       LayoutObject::ResolveColor(style, GetCSSPropertyColumnRuleColor());
   LayoutUnit rule_thickness(style.ColumnRuleWidth());
+
+  // Count all the spanners
+  int span_count = 0;
+  for (const NGLink& child : box_fragment_.Children()) {
+    if (!child->IsColumnBox()) {
+      span_count++;
+    }
+  }
+
   PhysicalRect previous_column;
   bool past_first_column_in_row = false;
   AutoDarkMode auto_dark_mode(
@@ -1335,6 +1340,9 @@ void NGBoxFragmentPainter::PaintColumnRules(
       // more there.
       past_first_column_in_row = false;
       previous_column = PhysicalRect();
+
+      span_count--;
+      CHECK_GE(span_count, 0);
       continue;
     }
 
@@ -1358,7 +1366,27 @@ void NGBoxFragmentPainter::PaintColumnRules(
         center = (current_column.X() + previous_column.Right()) / 2;
         box_side = BoxSide::kRight;
       }
-      LayoutUnit rule_length = previous_column.Height();
+
+      // Paint column rules as tall as the entire multicol container, but only
+      // when we're past all spanners.
+      LayoutUnit rule_length;
+      if (!span_count) {
+        const LayoutUnit column_box_bottom = box_fragment_.Size().height -
+                                             box_fragment_.Borders().bottom -
+                                             box_fragment_.Padding().bottom -
+                                             box_fragment_.OwnerLayoutBox()
+                                                 ->ComputeLogicalScrollbars()
+                                                 .block_end;
+        rule_length = column_box_bottom - previous_column.offset.top;
+        // For the case when the border or the padding is included in the
+        // multicol container.
+        // TODO(layout-dev): Get rid of this clamping, and fix any underlying
+        // issues
+        rule_length = std::max(rule_length, previous_column.Height());
+      } else {
+        rule_length = previous_column.Height();
+      }
+
       DCHECK_GE(rule_length, current_column.Height());
       rule.offset.top = previous_column.offset.top;
       rule.size.height = rule_length;
@@ -1376,18 +1404,40 @@ void NGBoxFragmentPainter::PaintColumnRules(
         center = (current_column.Y() + previous_column.Bottom()) / 2;
         box_side = BoxSide::kBottom;
       }
-      LayoutUnit rule_length = previous_column.Width();
+
+      LayoutUnit rule_length;
+      LayoutUnit rule_left = previous_column.offset.left;
+      if (!span_count) {
+        if (style.GetWritingMode() == WritingMode::kVerticalLr) {
+          const LayoutUnit column_box_right = box_fragment_.Size().width -
+                                              box_fragment_.Borders().right -
+                                              box_fragment_.Padding().right -
+                                              box_fragment_.OwnerLayoutBox()
+                                                  ->ComputeLogicalScrollbars()
+                                                  .block_end;
+          rule_length = column_box_right - previous_column.offset.left;
+        } else {
+          // Vertical-rl writing-mode
+          const LayoutUnit column_box_left = box_fragment_.ContentOffset().left;
+          rule_length = previous_column.Width() +
+                        (previous_column.offset.left - column_box_left);
+          rule_left = column_box_left;
+        }
+
+        // TODO(layout-dev): Get rid of this clamping, and fix any underlying
+        // issues
+        rule_length = std::max(rule_length, previous_column.Width());
+        rule_left = std::min(rule_left, previous_column.offset.left);
+      } else {
+        rule_length = previous_column.Width();
+      }
+
       DCHECK_GE(rule_length, current_column.Width());
-      rule.offset.left = previous_column.offset.left;
+      rule.offset.left = rule_left;
       rule.size.width = rule_length;
       rule.offset.top = center - rule_thickness / 2;
       rule.size.height = rule_thickness;
     }
-
-    // TODO(crbug.com/792435): The spec actually kind of says that the rules
-    // should be as tall as the entire multicol container, not just as tall as
-    // the column fragments (this difference matters when block-size is
-    // specified and columns are balanced).
 
     rule.Move(paint_offset);
     gfx::Rect snapped_rule = ToPixelSnappedRect(rule);
@@ -1699,7 +1749,6 @@ void NGBoxFragmentPainter::PaintBoxItem(
   }
 
   // Block-in-inline
-  DCHECK(RuntimeEnabledFeatures::LayoutNGBlockInInlineEnabled());
   DCHECK(!child_fragment.GetLayoutObject()->IsInline());
   PaintInfo paint_info_for_descendants = paint_info.ForDescendants();
   paint_info_for_descendants.SetIsInFragmentTraversal();
@@ -1744,9 +1793,7 @@ bool NGBoxFragmentPainter::ShouldPaint(
   // rectangle.
   if (box_fragment_.IsPaginatedRoot())
     return true;
-  const auto& box = *To<LayoutBox>(box_fragment_.GetLayoutObject());
-  return paint_state.LocalRectIntersectsCullRect(
-      box.PhysicalVisualOverflowRect());
+  return paint_state.LocalRectIntersectsCullRect(box_fragment_.InkOverflow());
 }
 
 void NGBoxFragmentPainter::PaintTextClipMask(const PaintInfo& paint_info,

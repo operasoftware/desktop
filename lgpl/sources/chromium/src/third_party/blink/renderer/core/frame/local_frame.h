@@ -39,8 +39,11 @@
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/device/public/mojom/device_posture_provider.mojom-blink-forward.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
 #include "third_party/blink/public/common/frame/frame_ad_evidence.h"
+#include "third_party/blink/public/common/frame/frame_owner_element_type.h"
+#include "third_party/blink/public/common/frame/history_user_activation_state.h"
 #include "third_party/blink/public/common/frame/transient_allow_fullscreen.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/back_forward_cache_not_restored_reasons.mojom-blink.h"
@@ -69,6 +72,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/weak_identifier_map.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
+#include "third_party/blink/renderer/core/editing/iterators/text_iterator_behavior.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/frame_types.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -99,6 +103,10 @@ class Range;
 class Size;
 class SizeF;
 }  // namespace gfx
+
+namespace network {
+class SharedURLLoaderFactory;
+}  // namespace network
 
 namespace blink {
 
@@ -137,6 +145,7 @@ class NodeTraversal;
 class PerformanceMonitor;
 class PluginData;
 class PolicyContainer;
+class ScrollSnapshotClient;
 #if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
 class ScriptTracker;
 #endif
@@ -151,7 +160,7 @@ class WebContentSettingsClient;
 class WebInputEventAttribution;
 class WebPluginContainerImpl;
 class WebPrescientNetworking;
-class WebURLLoaderFactory;
+class URLLoader;
 struct BlinkTransferableMessage;
 struct WebScriptSource;
 
@@ -205,6 +214,8 @@ class CORE_EXPORT LocalFrame final
   //   corresponding RenderFrameHost.
   // - |storage_key| is the key used to partition access to storage API like DOM
   //   storage, IndexedDB, BroadcastChannel, etc...
+  // - |document_ukm_source_id| is the ukm source id for the new document. If
+  //   you pass ukm::kInvalidSourceId, a new ukm source id will be generated.
   //
   // Note: Usually, the initial empty document inherits its |policy_container|
   // and |storage_key| from the parent or the opener. The inheritance operation
@@ -214,7 +225,8 @@ class CORE_EXPORT LocalFrame final
   void Init(Frame* opener,
             const DocumentToken& document_token,
             std::unique_ptr<PolicyContainer> policy_container,
-            const StorageKey& storage_key);
+            const StorageKey& storage_key,
+            ukm::SourceId document_ukm_source_id);
   void SetView(LocalFrameView*);
   void CreateView(const gfx::Size&, const Color&);
 
@@ -285,6 +297,10 @@ class CORE_EXPORT LocalFrame final
   BoxShadowPaintImageGenerator* GetBoxShadowPaintImageGenerator();
   ClipPathPaintImageGenerator* GetClipPathPaintImageGenerator();
 
+  void AddResourceTimingEntryFromNonNavigatedFrame(
+      mojom::blink::ResourceTimingInfoPtr timing,
+      blink::FrameOwnerElementType initiator_type);
+
   // A local root is the root of a connected subtree that contains only
   // LocalFrames. The local root is responsible for coordinating input, layout,
   // et cetera for that subtree of frames.
@@ -321,6 +337,11 @@ class CORE_EXPORT LocalFrame final
       LocalFrame*,
       UserActivationUpdateSource update_source =
           UserActivationUpdateSource::kRenderer);
+
+  bool IsHistoryUserActivationActive() const {
+    return history_user_activation_state_.IsActive();
+  }
+  void ConsumeHistoryUserActivation();
 
   // Registers an observer that will be notified if a VK occludes
   // the content when it raises/dismisses. The observer is a HeapHashSet
@@ -404,6 +425,7 @@ class CORE_EXPORT LocalFrame final
   device::mojom::blink::DevicePostureType GetDevicePosture();
 
   String SelectedText() const;
+  String SelectedText(const TextIteratorBehavior& behavior) const;
   String SelectedTextForClipboard() const;
   void TextSelectionChanged(const WTF::String& selection_text,
                             uint32_t offset,
@@ -436,6 +458,8 @@ class CORE_EXPORT LocalFrame final
   // framebusting defenses, in order to give the option of restarting the
   // navigation at a later time.
   bool CanNavigate(const Frame&, const KURL& destination_url = KURL());
+
+  void WillPotentiallyStartOutermostMainFrameNavigation(const KURL& url) const;
 
   // Whether a navigation should replace the current history entry or not.
   // Note this isn't exhaustive; there are other cases where a navigation does a
@@ -492,8 +516,11 @@ class CORE_EXPORT LocalFrame final
   // Returns the enabled state of lazyloading of images.
   LazyLoadImageSetting GetLazyLoadImageSetting() const;
 
-  // The returned value is a off-heap raw-ptr and should not be stored.
-  WebURLLoaderFactory* GetURLLoaderFactory();
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory();
+
+  // For some tests, we use this method to create a URLLoader instead of using
+  // GetURLLoaderFactory().
+  std::unique_ptr<URLLoader> CreateURLLoaderForTesting();
 
   bool IsInert() const { return is_inert_; }
 
@@ -537,13 +564,6 @@ class CORE_EXPORT LocalFrame final
   // use in internal-implementation LocalFrames that aren't in the frame tree.
   void ForceSynchronousDocumentInstall(const AtomicString& mime_type,
                                        scoped_refptr<const SharedBuffer> data);
-
-  bool should_send_resource_timing_info_to_parent() const {
-    return should_send_resource_timing_info_to_parent_;
-  }
-  void SetShouldSendResourceTimingInfoToParent(bool value) {
-    should_send_resource_timing_info_to_parent_ = value;
-  }
 
   // Called when certain event listeners are added for the first time/last time,
   // making it possible/not possible to terminate the frame suddenly.
@@ -622,8 +642,6 @@ class CORE_EXPORT LocalFrame final
       mojom::blink::BackForwardCacheNotRestoredReasonsPtr);
   const mojom::blink::BackForwardCacheNotRestoredReasonsPtr&
   GetNotRestoredReasons();
-  // Returns if the saved NotRestoredReasons has any blocking reasons.
-  bool HasBlockingReasons();
 
   const AtomicString& GetReducedAcceptLanguage() const {
     return reduced_accept_language_;
@@ -816,6 +834,42 @@ class CORE_EXPORT LocalFrame final
 
   absl::optional<SkColor> GetFrameOverlayColorForTesting() const;
 
+  // Returns a PendingRemote resolved via this frame's BrowserInterfaceBroker
+  // for use when creating the PublicUrlManager instance in threaded worklets.
+  // See `WorkletGlobalScope::TakeBlobUrlStorePendingRemote()` for more info.
+  mojo::PendingRemote<mojom::blink::BlobURLStore>
+  GetBlobUrlStorePendingRemote();
+
+  void AddScrollSnapshotClient(ScrollSnapshotClient&);
+
+  // Take a snapshot for relevant scrollers at the beginning of a frame update.
+  // https://drafts.csswg.org/scroll-animations-1/#avoiding-cycles
+  void UpdateScrollSnapshots();
+
+  // All newly created ScrollSnapshotClients are considered "unvalidated". This
+  // means that the internal state of the client is considered tentative, and
+  // computing the actual state may require an additional style/layout pass.
+  //
+  // The lifecycle update will call this function after style and layout has
+  // completed. The function will then go though all unvalidated clients,
+  // and compare the current state snapshot to a fresh state snapshot. If they
+  // are equal, then the tentative state turned out to be correct, and no
+  // further action is needed. Otherwise, all effects targets associated with
+  // the client are marked for recalc, which causes the style/layout phase to
+  // run again.
+  //
+  // Returns true if all client states are correct, otherwise returns false.
+  //
+  // https://github.com/w3c/csswg-drafts/issues/5261
+  bool ValidateScrollSnapshotClients();
+
+  const HeapHashSet<WeakMember<ScrollSnapshotClient>>&
+  GetUnvalidatedScrollSnapshotClientsForTesting() {
+    return unvalidated_scroll_snapshot_clients_;
+  }
+
+  void ScheduleNextServiceForScrollSnapshotClients();
+
  private:
   friend class FrameNavigationDisabler;
   // LocalFrameMojoHandler is a part of LocalFrame.
@@ -835,6 +889,14 @@ class CORE_EXPORT LocalFrame final
   // already LocalFrame.
   bool IsLocalFrame() const override { return true; }
   bool IsRemoteFrame() const override { return false; }
+
+  void ActivateHistoryUserActivationState() override {
+    history_user_activation_state_.Activate();
+  }
+
+  void ClearHistoryUserActivationState() override {
+    history_user_activation_state_.Clear();
+  }
 
   void EnableNavigation() { --navigation_disable_count_; }
   void DisableNavigation() { ++navigation_disable_count_; }
@@ -856,7 +918,12 @@ class CORE_EXPORT LocalFrame final
   ukm::UkmRecorder* GetUkmRecorder() override;
   ukm::SourceId GetUkmSourceId() override;
   void UpdateTaskTime(base::TimeDelta time) override;
-  void UpdateBackForwardCacheDisablingFeatures(uint64_t features_mask) override;
+  void UpdateBackForwardCacheDisablingFeatures(
+      uint64_t features_mask,
+      const BFCacheBlockingFeatureAndLocations&
+          non_sticky_features_and_js_locations,
+      const BFCacheBlockingFeatureAndLocations&
+          sticky_features_and_js_locations) override;
   const base::UnguessableToken& GetAgentClusterId() const override;
 
   // Activates the user activation states of this frame and all its ancestors.
@@ -876,6 +943,9 @@ class CORE_EXPORT LocalFrame final
   void DidResume();
   void SetContextPaused(bool);
 
+  // Helper for NavigationShouldReplaceCurrentHistoryEntry
+  bool ShouldReplaceForSameUrlNavigation(const FrameLoadRequest&);
+
   HitTestResult HitTestResultForVisualViewportPos(
       const gfx::Point& pos_in_viewport);
 
@@ -889,10 +959,6 @@ class CORE_EXPORT LocalFrame final
                                     String& clip_text,
                                     String& clip_html,
                                     gfx::Rect& clip_rect);
-
-  // Helper function for |HasBlockingReasons()|.
-  bool HasBlockingReasonsHelper(
-      const mojom::blink::BackForwardCacheNotRestoredReasonsPtr&);
 
 #if !BUILDFLAG(IS_ANDROID)
   void SetTitlebarAreaDocumentStyleEnvironmentVariables() const;
@@ -930,7 +996,6 @@ class CORE_EXPORT LocalFrame final
   // FrameLoaderStateMachine if a real load has committed. Unfortunately, the
   // internal state tracked there is incorrect today. See
   // https://crbug.com/778318.
-  unsigned should_send_resource_timing_info_to_parent_ : 1;
   unsigned in_view_source_mode_ : 1;
 
   bool spat_nav_finding_focus_candidate_enabled_;
@@ -968,15 +1033,14 @@ class CORE_EXPORT LocalFrame final
   // because WebContentCaptureClient might already stop the capture.
   Member<ContentCaptureManager> content_capture_manager_;
 
+  HistoryUserActivationState history_user_activation_state_;
+
   InterfaceRegistry* const interface_registry_;
 
   mojom::blink::ViewportIntersectionState intersection_state_;
 
   // Only set for outermost main frame.
   mojom::blink::BackForwardCacheNotRestoredReasonsPtr not_restored_reasons_;
-
-  // Per-frame URLLoader factory.
-  std::unique_ptr<WebURLLoaderFactory> url_loader_factory_;
 
   ClientHintsPreferences client_hints_preferences_;
 
@@ -1022,6 +1086,13 @@ class CORE_EXPORT LocalFrame final
   // binding to it or via a context menu with a selection being opened in a
   // frame.
   Member<TextFragmentHandler> text_fragment_handler_;
+
+  // ScrollSnapshotClients owned by elements in this frame. The clients must
+  // be registered at the actual elements as the references here are weak.
+  HeapHashSet<WeakMember<ScrollSnapshotClient>> scroll_snapshot_clients_;
+
+  HeapHashSet<WeakMember<ScrollSnapshotClient>>
+      unvalidated_scroll_snapshot_clients_;
 
   // Manages a transient affordance for this frame to enter fullscreen.
   TransientAllowFullscreen transient_allow_fullscreen_;

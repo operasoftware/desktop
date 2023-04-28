@@ -41,6 +41,7 @@ import sys
 import tempfile
 from collections import defaultdict
 from copy import deepcopy
+from datetime import datetime
 
 import six
 from six.moves import zip_longest
@@ -154,8 +155,10 @@ class Port(object):
         ('mac11-arm64', 'arm64'),
         ('mac12', 'x86_64'),
         ('mac12-arm64', 'arm64'),
+        ('mac13', 'x86_64'),
+        ('mac13-arm64', 'arm64'),
         ('win10.20h2', 'x86'),
-        ('win11', 'x64'),
+        ('win11', 'x86_64'),
         ('trusty', 'x86_64'),
         ('fuchsia', 'x86_64'),
     )
@@ -163,7 +166,7 @@ class Port(object):
     CONFIGURATION_SPECIFIER_MACROS = {
         'mac': [
             'mac10.13', 'mac10.14', 'mac10.15', 'mac11', 'mac11-arm64',
-            'mac12', 'mac12-arm64'
+            'mac12', 'mac12-arm64', 'mac13', 'mac13-arm64'
         ],
         'win': ['win10.20h2', 'win11'],
         'linux': ['trusty'],
@@ -202,7 +205,10 @@ class Port(object):
     WEBDRIVER_SUBTEST_PYTEST_SEPARATOR = '::'
 
     # The following two constants must match. When adding a new WPT root, also
-    # remember to add an alias rule to //third_party/wpt_tools/wpt.config.json.
+    # remember to update configurations in:
+    #     //third_party/blink/web_tests/external/wpt/config.json
+    #     //third_party/blink/web_tests/wptrunner.blink.ini
+    #
     # WPT_DIRS maps WPT roots on the file system to URL prefixes on wptserve.
     # The order matters: '/' MUST be the last URL prefix.
     WPT_DIRS = collections.OrderedDict([
@@ -292,6 +298,9 @@ class Port(object):
         return 'Port{name=%s, version=%s, architecture=%s, test_configuration=%s}' % (
             self._name, self._version, self._architecture,
             self._test_configuration)
+
+    def version(self):
+        return self._version
 
     def get_platform_tags(self):
         """Returns system condition tags that are used to find active expectations
@@ -1001,6 +1010,12 @@ class Port(object):
         """Find all real tests in paths, using results saved in dict."""
         files = []
         for path in paths:
+            # Some WPT files can expand to multiple tests, and the file itself
+            # is not a test so it is not in tests_by_dir. Do special handling
+            # when we found a WPT file in virtual bases.
+            if self.is_wpt_file(path):
+                files.extend(self._wpt_test_urls_matching_paths([path]))
+                continue
             if self._has_supported_extension_for_all(path):
                 # only append the file when it is in tests_by_dir
                 dirname = self._filesystem.dirname(path) + '/'
@@ -1104,6 +1119,13 @@ class Port(object):
             WPTManifest.ensure_manifest(self, path)
         return WPTManifest(self.host, manifest_path)
 
+    def is_wpt_file(self, path):
+        """Returns whether a path is a WPT test file."""
+
+        if self.WPT_REGEX.match(path):
+            return self._filesystem.isfile(self.abspath_for_test(path))
+        return False
+
     def is_wpt_crash_test(self, test_name):
         """Returns whether a WPT test is a crashtest.
 
@@ -1171,8 +1193,8 @@ class Port(object):
         """Returns the WPT-style fuzzy metadata for the given test.
 
         The metadata is a pair of lists, (maxDifference, totalPixels), where
-        each list is a [min, max] range, inclusive. If the test has no fuzzy metadata,
-        returns (None, None).
+        each list is a [min, max] range, inclusive, adjusted by the device
+        scale factor. If the test has no fuzzy metadata, returns (None, None).
 
         See https://web-platform-tests.org/writing-tests/reftests.html#fuzzy-matching
         """
@@ -1182,8 +1204,10 @@ class Port(object):
             # This is an actual WPT test, so we can get the metadata from the manifest.
             wpt_path = match.group(1)
             path_in_wpt = match.group(2)
-            return self.wpt_manifest(wpt_path).extract_fuzzy_metadata(
-                path_in_wpt)
+            return self._adjust_fuzzy_metadata_by_dsf(
+                test_name,
+                self.wpt_manifest(wpt_path).extract_fuzzy_metadata(
+                    path_in_wpt))
 
         # This is not a WPT test, so we will parse the metadata ourselves.
         if not self.test_isfile(test_name):
@@ -1206,9 +1230,26 @@ class Port(object):
         if not tot_pix_min:
             tot_pix_min = tot_pix_max
 
-        return ([int(max_diff_min),
-                 int(max_diff_max)], [int(tot_pix_min),
-                                      int(tot_pix_max)])
+        return self._adjust_fuzzy_metadata_by_dsf(
+            test_name,
+            ([int(max_diff_min), int(max_diff_max)
+              ], [int(tot_pix_min), int(tot_pix_max)]))
+
+    def _adjust_fuzzy_metadata_by_dsf(self, test_name, metadata):
+        if metadata == (None, None):
+            return metadata
+
+        ([max_diff_min, max_diff_max], [tot_pix_min, tot_pix_max]) = metadata
+        for flag in reversed(self._specified_additional_driver_flags() +
+                             self.args_for_test(test_name)):
+            if "--force-device-scale-factor=" in flag:
+                _, scale_factor = flag.split("=")
+                dsf = float(scale_factor)
+                tot_pix_min = int(tot_pix_min * dsf * dsf)
+                tot_pix_max = int(tot_pix_max * dsf * dsf)
+                break
+
+        return ([max_diff_min, max_diff_max], [tot_pix_min, tot_pix_max])
 
     def get_file_path_for_wpt_test(self, test_name):
         """Returns the real file path for the given WPT test.
@@ -1256,10 +1297,12 @@ class Port(object):
         return [tryint(chunk) for chunk in re.split(r'(\d+)', string_to_split)]
 
     def read_test(self, test_name, encoding="utf8"):
-        """Returns the contents of the given test according to the given encoding.
+        """Returns the contents of the given Non WPT test according to the given encoding.
         If no corresponding file can be found, returns None instead.
         Warning: some tests are in utf8-incompatible encodings.
         """
+        assert not self.WPT_REGEX.match(
+            test_name), "read_test only works with legacy layout test"
         path = self.abspath_for_test(test_name)
         if self._filesystem.isfile(path):
             return self._filesystem.read_binary_file(path).decode(encoding)
@@ -1358,7 +1401,8 @@ class Port(object):
         """
         return (self.skipped_due_to_smoke_tests(test)
                 or self.skipped_in_never_fix_tests(test)
-                or self.virtual_test_skipped_due_to_platform_config(test))
+                or self.virtual_test_skipped_due_to_platform_config(test)
+                or self.skipped_due_to_exclusive_virtual_tests(test))
 
     @memoized
     def _tests_from_file(self, filename):
@@ -1410,6 +1454,16 @@ class Port(object):
         return self._filesystem.join(self.web_tests_dir(), 'SmokeTests',
                                      'Default.txt')
 
+    @memoized
+    def _never_fix_test_expectations(self):
+        # Note: The parsing logic here (reading the file, constructing a
+        # parser, etc.) is very similar to blinkpy/w3c/test_copier.py.
+        path = self.path_to_never_fix_tests_file()
+        contents = self._filesystem.read_text_file(path)
+        test_expectations = TestExpectations(tags=self.get_platform_tags())
+        test_expectations.parse_tagged_list(contents)
+        return test_expectations
+
     def skipped_in_never_fix_tests(self, test):
         """Checks if the test is marked as Skip in NeverFixTests for this port.
 
@@ -1420,12 +1474,7 @@ class Port(object):
         Note: this will not work with skipped directories. See also the same
         issue with update_all_test_expectations_files in test_importer.py.
         """
-        # Note: The parsing logic here (reading the file, constructing a
-        # parser, etc.) is very similar to blinkpy/w3c/test_copier.py.
-        path = self.path_to_never_fix_tests_file()
-        contents = self._filesystem.read_text_file(path)
-        test_expectations = TestExpectations(tags=self.get_platform_tags())
-        test_expectations.parse_tagged_list(contents)
+        test_expectations = self._never_fix_test_expectations()
         return ResultType.Skip in test_expectations.expectations_for(
             test).results
 
@@ -1441,6 +1490,42 @@ class Port(object):
         suite = self._lookup_virtual_suite(test)
         if suite is not None:
             return self.operating_system() not in suite.platforms
+        return False
+
+    @memoized
+    def skipped_due_to_exclusive_virtual_tests(self, test):
+        """Checks if the test should be skipped due to the exclusive_tests rule
+        of any virtual suite.
+
+        If the test is not a virtual test, it will be skipped if it's in the
+        exclusive_tests list of any virtual suite. If the test is a virtual
+        test, it will be skipped if the base test is in the exclusive_tests list
+        of any virtual suite, and the base test is not in the test's own virtual
+        suite's exclusive_tests list.
+        """
+        base_test = self.lookup_virtual_test_base(test)
+        if base_test:
+            # For a virtual test, if the base test is in exclusive_tests of the
+            # test's own virtual suite, then we should not skip the test.
+            virtual_suite = self._lookup_virtual_suite(test)
+            for entry in virtual_suite.exclusive_tests:
+                normalized_entry = self.normalize_test_name(entry)
+                if base_test.startswith(normalized_entry):
+                    return False
+                if normalized_entry.startswith(base_test):
+                    # This means base_test is a directory containing exclusive
+                    # tests, so should not skip the directory.
+                    return False
+        else:
+            base_test = self.normalize_test_name(test)
+
+        # For a non-virtual test or a virtual test not listed in exclusive_tests
+        # of the test's own virtual suite, we should skip the test if the base
+        # test is in exclusive_tests of any virtual suite.
+        for suite in self.virtual_test_suites():
+            for entry in suite.exclusive_tests:
+                if base_test.startswith(self.normalize_test_name(entry)):
+                    return True
         return False
 
     def name(self):
@@ -2184,7 +2269,16 @@ class Port(object):
                     self._filesystem.read_text_file(
                         path_to_virtual_test_suites))
                 self._virtual_test_suites = []
+                current_time = datetime.now()
                 for json_config in test_suite_json:
+                    # Strings are treated as comments.
+                    if isinstance(json_config, str):
+                        continue
+                    expires = json_config.get("expires")
+                    if (expires.lower() != 'never' and datetime.strptime(
+                            expires, '%b %d, %Y') <= current_time):
+                        # do not load expired virtual suites
+                        continue
                     vts = VirtualTestSuite(**json_config)
                     if any(vts.full_prefix == s.full_prefix
                            for s in self._virtual_test_suites):
@@ -2228,6 +2322,10 @@ class Port(object):
             for base in suite.bases:
                 if real_path.startswith(base) or base.startswith(real_path):
                     bases.add(base)
+                if (self.is_wpt_file(base) and base.endswith('.js')
+                        and real_path in self._wpt_test_urls_matching_paths(
+                            [base])):
+                    bases.add(base)
 
         return list(bases)
 
@@ -2259,6 +2357,11 @@ class Port(object):
     def _virtual_tests_matching_paths(self, paths):
         tests = []
         normalized_paths = [self.normalize_test_name(p) for p in paths]
+        # Remove the 'js' suffix so that the startswith test can pass
+        modified_paths = [
+            p[:-2] if self.is_wpt_test(p) and p.endswith('.js') else p
+            for p in normalized_paths
+        ]
         for suite in self.virtual_test_suites():
             virtual_paths = [
                 p for p in normalized_paths if p.startswith(suite.full_prefix)
@@ -2267,7 +2370,7 @@ class Port(object):
                 continue
             for test in self._virtual_tests_for_suite_with_paths(
                     suite, virtual_paths):
-                if any(test.startswith(p) for p in normalized_paths):
+                if any(test.startswith(p) for p in modified_paths):
                     tests.append(test)
 
         if any(self._path_has_wildcard(path) for path in paths):
@@ -2383,6 +2486,12 @@ class Port(object):
             test_name[len(suite.full_prefix):])
         for base in suite.bases:
             normalized_base = self.normalize_test_name(base)
+            # Wpt js file can expand to multiple tests. Remove the "js"
+            # suffix so that the startswith test can pass. This could
+            # be inaccurate but is computationally cheap.
+            if (self.is_wpt_test(normalized_base)
+                    and normalized_base.endswith(".js")):
+                normalized_base = normalized_base[:-2]
             if normalized_base.startswith(maybe_base) or maybe_base.startswith(
                     normalized_base):
                 return maybe_base
@@ -2514,16 +2623,30 @@ class Port(object):
 
 
 class VirtualTestSuite(object):
-    def __init__(self, prefix=None, platforms=None, bases=None, args=None):
+    def __init__(self,
+                 prefix=None,
+                 platforms=None,
+                 bases=None,
+                 exclusive_tests=None,
+                 args=None,
+                 expires=None):
         assert VALID_FILE_NAME_REGEX.match(prefix), \
             "Virtual test suite prefix '{}' contains invalid characters".format(prefix)
         assert isinstance(platforms, list)
         assert isinstance(bases, list)
         assert args
         assert isinstance(args, list)
+
+        if exclusive_tests == "ALL":
+            exclusive_tests = bases
+        elif exclusive_tests is None:
+            exclusive_tests = []
+        assert isinstance(exclusive_tests, list)
+
         self.full_prefix = 'virtual/' + prefix + '/'
         self.platforms = [x.lower() for x in platforms]
         self.bases = bases
+        self.exclusive_tests = exclusive_tests
         self.args = args
 
     def __repr__(self):

@@ -85,7 +85,7 @@ typedef struct FFV1Context {
     int chroma_h_shift, chroma_v_shift;
     int transparency;
     int flags;
-    int picture_number;
+    int64_t picture_number;
     int key_frame;
     ThreadFrame picture, last_picture;
     struct FFV1Context *fsrc;
@@ -181,17 +181,5 @@ static inline void update_vlc_state(VlcState *const state, const int v)
     state->drift = drift;
     state->count = count;
 }
-
-#define TYPE int16_t
-#define RENAME(name) name
-#include "ffv1_template.c"
-#undef TYPE
-#undef RENAME
-
-#define TYPE int32_t
-#define RENAME(name) name ## 32
-#include "ffv1_template.c"
-#undef TYPE
-#undef RENAME
 
 #endif /* AVCODEC_FFV1_H */

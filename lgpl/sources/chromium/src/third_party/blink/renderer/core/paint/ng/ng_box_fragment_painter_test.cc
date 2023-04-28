@@ -20,28 +20,27 @@ namespace blink {
 
 namespace {
 
-void ExtractLinks(const cc::PaintOpBuffer* buffer, std::vector<GURL>* links) {
-  for (cc::PaintOpBuffer::Iterator it(buffer); it; ++it) {
-    if (it->GetType() == cc::PaintOpType::Annotate) {
-      const auto& annotate_op = static_cast<const cc::AnnotateOp&>(*it);
+void ExtractLinks(const PaintRecord& record, std::vector<GURL>* links) {
+  for (const cc::PaintOp& op : record) {
+    if (op.GetType() == cc::PaintOpType::Annotate) {
+      const auto& annotate_op = static_cast<const cc::AnnotateOp&>(op);
       links->push_back(GURL(
           std::string(reinterpret_cast<const char*>(annotate_op.data->data()),
                       annotate_op.data->size())));
-    } else if (it->GetType() == cc::PaintOpType::DrawRecord) {
-      const auto& record_op = static_cast<const cc::DrawRecordOp&>(*it);
-      ExtractLinks(record_op.record.get(), links);
+    } else if (op.GetType() == cc::PaintOpType::DrawRecord) {
+      const auto& record_op = static_cast<const cc::DrawRecordOp&>(op);
+      ExtractLinks(record_op.record, links);
     }
   }
 }
 
 }  // namespace
 
-class NGBoxFragmentPainterTest : public PaintControllerPaintTest,
-                                 private ScopedLayoutNGForTest {
+class NGBoxFragmentPainterTest : public PaintControllerPaintTest {
  public:
-  NGBoxFragmentPainterTest(LocalFrameClient* local_frame_client = nullptr)
-      : PaintControllerPaintTest(local_frame_client),
-        ScopedLayoutNGForTest(true) {}
+  explicit NGBoxFragmentPainterTest(
+      LocalFrameClient* local_frame_client = nullptr)
+      : PaintControllerPaintTest(local_frame_client) {}
 };
 
 INSTANTIATE_PAINT_TEST_SUITE_P(NGBoxFragmentPainterTest);
@@ -126,7 +125,7 @@ TEST_P(NGBoxFragmentPainterTest, AddUrlRects) {
 
   auto record = builder->EndRecording();
   std::vector<GURL> links;
-  ExtractLinks(record.get(), &links);
+  ExtractLinks(record, &links);
   ASSERT_EQ(links.size(), 2U);
   EXPECT_EQ(links[0].spec(), "https://www.chromium.org/");
   EXPECT_EQ(links[1].spec(), "https://www.wikipedia.org/");
@@ -208,7 +207,6 @@ TEST_P(NGBoxFragmentPainterTest, ClippedText) {
 }
 
 TEST_P(NGBoxFragmentPainterTest, NodeAtPointWithSvgInline) {
-  ScopedSVGTextNGForTest enable_svg_text_ng(true);
   SetBodyInnerHTML(R"HTML(
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="900"
      viewBox="0 0 100 100" id="svg">

@@ -41,6 +41,7 @@
 #include "media/base/audio_processing.h"
 #include "media/base/speech_recognition_client.h"
 #include "media/mojo/mojom/audio_processing.mojom-shared.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
@@ -73,7 +74,6 @@
 #include "third_party/blink/public/platform/web_set_sink_id_callbacks.h"
 #include "third_party/blink/public/platform/web_source_location.h"
 #include "third_party/blink/public/platform/web_url_error.h"
-#include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/public/web/web_ax_object.h"
@@ -101,6 +101,10 @@ namespace gfx {
 class Rect;
 }  // namespace gfx
 
+namespace network {
+class SharedURLLoaderFactory;
+}  // namespace network
+
 namespace blink {
 namespace mojom {
 enum class TreeScopeType;
@@ -127,6 +131,7 @@ class WebServiceWorkerProvider;
 class WebSocketHandshakeThrottle;
 class WebString;
 class WebURL;
+class URLLoader;
 class WebURLRequest;
 class WebURLResponse;
 class WebView;
@@ -168,7 +173,7 @@ class BLINK_EXPORT WebLocalFrameClient {
       WebMediaPlayerEncryptedMediaClient*,
       WebContentDecryptionModule*,
       const WebString& sink_id,
-      const cc::LayerTreeSettings& settings,
+      const cc::LayerTreeSettings* settings,
       scoped_refptr<base::TaskRunner> compositor_worker_task_runner) {
     return nullptr;
   }
@@ -239,6 +244,10 @@ class BLINK_EXPORT WebLocalFrameClient {
   //
   // `complete_creation` takes the newly-created `WebLocalFrame` and the
   // `DocumentToken` to use for its initial empty document as arguments.
+  //
+  // `document_ukm_source_id` is the UKM source id to be used for the new
+  // document in the frame. If `ukm::kInvalidSourceId` is passed, a new UKM
+  // source id will be generated.
   using FinishChildFrameCreationFn =
       base::FunctionRef<void(WebLocalFrame*, const DocumentToken&)>;
   virtual WebLocalFrame* CreateChildFrame(
@@ -249,6 +258,7 @@ class BLINK_EXPORT WebLocalFrameClient {
       const WebFrameOwnerProperties&,
       FrameOwnerElementType,
       WebPolicyContainerBindParams policy_container_bind_params,
+      ukm::SourceId document_ukm_source_id,
       FinishChildFrameCreationFn complete_creation) {
     return nullptr;
   }
@@ -506,6 +516,12 @@ class BLINK_EXPORT WebLocalFrameClient {
   virtual void OnMainFrameViewportRectangleChanged(
       const gfx::Rect& main_frame_viewport_rect) {}
 
+  // Called when an image ad rectangle changed. An empty `image_ad_rect` is used
+  // to signal the removal of the rectangle. Only invoked on the main frame.
+  virtual void OnMainFrameImageAdRectangleChanged(
+      int element_id,
+      const gfx::Rect& image_ad_rect) {}
+
   // Called when an overlay interstitial pop up ad is detected.
   virtual void OnOverlayPopupAdDetected() {}
 
@@ -555,6 +571,16 @@ class BLINK_EXPORT WebLocalFrameClient {
   // use for segregated histograms.
   virtual void DidObserveLoadingBehavior(LoadingBehaviorFlag) {}
 
+  // A subresource load is observed.
+  // It is called when there is a subresouce load. The reported values via
+  // arguments are cumulative. They are NOT a difference from the previous call.
+  virtual void DidObserveSubresourceLoad(
+      uint32_t number_of_subresources_loaded,
+      uint32_t number_of_subresource_loads_handled_by_service_worker,
+      bool pervasive_payload_requested,
+      int64_t pervasive_bytes_fetched,
+      int64_t total_bytes_fetched) {}
+
   // Blink hits the code path for a certain UseCounterFeature for the first time
   // on this frame. As a performance optimization, features already hit on other
   // frames associated with the same page in the renderer are not currently
@@ -567,13 +593,6 @@ class BLINK_EXPORT WebLocalFrameClient {
   // Reports that visible elements in the frame shifted (bit.ly/lsm-explainer).
   virtual void DidObserveLayoutShift(double score, bool after_input_or_scroll) {
   }
-
-  // Reports the number of LayoutBlock creation, and LayoutObject::UpdateLayout
-  // calls. All values are deltas since the last calls of this function.
-  virtual void DidObserveLayoutNg(uint32_t all_block_count,
-                                  uint32_t ng_block_count,
-                                  uint32_t all_call_count,
-                                  uint32_t ng_call_count) {}
 
   // Script notifications ------------------------------------------------
 
@@ -630,6 +649,9 @@ class BLINK_EXPORT WebLocalFrameClient {
   // to be serialized again.
   virtual void NotifyWebAXObjectMarkedDirty(const WebAXObject&) {}
 
+  // Called when accessibility is ready to serialize.
+  virtual void AXReadyCallback() {}
+
   // Audio Output Devices API --------------------------------------------
 
   // Checks that the given audio sink exists and is authorized. The result is
@@ -650,8 +672,12 @@ class BLINK_EXPORT WebLocalFrameClient {
 
   // Loading --------------------------------------------------------------
 
-  virtual std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory() {
+  virtual scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() {
     NOTREACHED();
+    return nullptr;
+  }
+
+  virtual std::unique_ptr<URLLoader> CreateURLLoaderForTesting() {
     return nullptr;
   }
 

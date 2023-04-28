@@ -35,11 +35,12 @@
 
 #include <memory>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink-forward.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
+#include "third_party/blink/public/mojom/loader/code_cache.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/page_state/page_state.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
@@ -87,7 +88,8 @@ class CORE_EXPORT FrameLoader final {
 
   void Init(const DocumentToken& document_token,
             std::unique_ptr<PolicyContainer> policy_container,
-            const StorageKey& storage_key);
+            const StorageKey& storage_key,
+            ukm::SourceId document_ukm_source_id);
 
   ResourceRequest ResourceRequestForReload(
       WebFrameLoadType,
@@ -170,9 +172,6 @@ class CORE_EXPORT FrameLoader final {
       const FetchClientSettingsObject* fetch_client_settings_object,
       LocalDOMWindow* window_for_logging,
       mojom::RequestContextFrameType) const;
-  void ReportLegacyTLSVersion(const KURL& url,
-                              bool is_subresource,
-                              bool is_ad_resource);
 
   Frame* Opener();
   void SetOpener(LocalFrame*);
@@ -260,14 +259,10 @@ class CORE_EXPORT FrameLoader final {
 
   void WriteIntoTrace(perfetto::TracedValue context) const;
 
-  mojo::PendingRemote<blink::mojom::CodeCacheHost> CreateWorkerCodeCacheHost();
+  mojo::PendingRemote<mojom::blink::CodeCacheHost> CreateWorkerCodeCacheHost();
 
  private:
   bool AllowRequestForThisFrame(const FrameLoadRequest&);
-
-  WebFrameLoadType HandleInitialEmptyDocumentReplacementIfNeeded(
-      const KURL& url,
-      WebFrameLoadType);
 
   bool ShouldPerformFragmentNavigation(bool is_form_submission,
                                        const String& http_method,
@@ -297,8 +292,8 @@ class CORE_EXPORT FrameLoader final {
 
   LocalFrameClient* Client() const;
 
-  String ApplyUserAgentOverrideAndLog(const String& user_agent,
-                                      const KURL& url) const;
+  String ApplyUserAgentOverride(const String& user_agent,
+                                const KURL& url) const;
 
   // This struct holds information about a navigation, which is being
   // initiated by the client through the browser process, until the navigation

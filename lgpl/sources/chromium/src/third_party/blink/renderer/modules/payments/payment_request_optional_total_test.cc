@@ -18,7 +18,7 @@
 namespace blink {
 namespace {
 
-class MockPaymentProvider2 : public payments::mojom::blink::PaymentRequest {
+class MockPaymentProvider : public payments::mojom::blink::PaymentRequest {
  public:
   // mojom::PaymentRequest
   void Init(
@@ -65,10 +65,10 @@ class MockPaymentProvider2 : public payments::mojom::blink::PaymentRequest {
 class PaymentRequestOptionalTotalTest : public testing::Test {
  public:
   void SetUp() override {
-    payment_provider_ = std::make_unique<MockPaymentProvider2>();
+    payment_provider_ = std::make_unique<MockPaymentProvider>();
   }
 
-  std::unique_ptr<MockPaymentProvider2> payment_provider_;
+  std::unique_ptr<MockPaymentProvider> payment_provider_;
   ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
 };
 

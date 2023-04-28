@@ -4,9 +4,19 @@
 
 #include "third_party/blink/renderer/platform/graphics/compositor_filter_operations.h"
 
+#include "include/core/SkRefCnt.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include <utility>
+
+#include "cc/paint/gpu_shader.h"
+#include "cc/paint/gpu_shader_params.h"
+#include "cc/paint/gpu_shader_source.h"
+#include "third_party/blink/renderer/platform/graphics/gpu_shader.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 
@@ -101,12 +111,18 @@ void CompositorFilterOperations::AppendReferenceFilter(
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 void CompositorFilterOperations::AppendGpuShaderFilter(
-    std::string source,
-    const gfx::SizeF& filter_size,
-    float frame_id,
-    bool expects_input) {
+    const GpuShader& shader,
+    std::vector<float> args,
+    const SkSize& content_size,
+    SkScalar frame_id,
+    const SkPoint& mouse_position,
+    const SkColor4f& root_view_color) {
   filter_operations_.Append(cc::FilterOperation::CreateGpuShaderFilter(
-      std::move(source), filter_size, frame_id, expects_input));
+      sk_make_sp<cc::GpuShader>(
+          shader.source().Clone(),
+          cc::GpuShaderParams(std::move(args), content_size, frame_id,
+                              mouse_position, root_view_color)),
+      shader.NeedsMouseInput()));
 }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 

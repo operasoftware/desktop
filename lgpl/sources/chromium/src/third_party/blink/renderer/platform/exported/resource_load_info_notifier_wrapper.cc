@@ -4,9 +4,9 @@
 
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "net/base/ip_endpoint.h"
 #include "net/url_request/redirect_info.h"
@@ -26,7 +26,7 @@ ResourceLoadInfoNotifierWrapper::ResourceLoadInfoNotifierWrapper(
         weak_wrapper_resource_load_info_notifier)
     : ResourceLoadInfoNotifierWrapper(
           std::move(weak_wrapper_resource_load_info_notifier),
-          base::ThreadTaskRunnerHandle::Get()) {}
+          base::SingleThreadTaskRunner::GetCurrentDefault()) {}
 
 ResourceLoadInfoNotifierWrapper::ResourceLoadInfoNotifierWrapper(
     base::WeakPtr<WeakWrapperResourceLoadInfoNotifier>

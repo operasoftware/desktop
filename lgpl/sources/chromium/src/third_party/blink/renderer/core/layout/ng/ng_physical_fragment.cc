@@ -149,8 +149,8 @@ class FragmentTreeDumper {
       }
       if (flags_ & NGPhysicalFragment::DumpSubtree) {
         if (flags_ & NGPhysicalFragment::DumpLegacyDescendants &&
-            layout_object && !layout_object->IsLayoutNGObject()) {
-          DCHECK(box->Children().empty());
+            layout_object && !layout_object->IsLayoutNGObject() &&
+            box->Children().empty()) {
           AppendLegacySubtree(*layout_object, indent);
           return;
         }
@@ -554,6 +554,12 @@ bool NGPhysicalFragment::IsMonolithic() const {
   return false;
 }
 
+bool NGPhysicalFragment::IsImplicitAnchor() const {
+  if (Element* element = DynamicTo<Element>(GetNode()))
+    return element->HasAnchoredPopover();
+  return false;
+}
+
 const FragmentData* NGPhysicalFragment::GetFragmentData() const {
   const LayoutBox* box = DynamicTo<LayoutBox>(GetLayoutObject());
   if (!box) {
@@ -660,7 +666,7 @@ void NGPhysicalFragment::AdjustScrollableOverflowForPropagation(
   const LayoutObject* container_layout_object = container.GetLayoutObject();
   DCHECK(container_layout_object);
   if (layout_object->ShouldUseTransformFromContainer(container_layout_object)) {
-    TransformationMatrix transform;
+    gfx::Transform transform;
     layout_object->GetTransformFromContainer(container_layout_object,
                                              PhysicalOffset(), transform);
     *overflow =
@@ -755,7 +761,7 @@ void NGPhysicalFragment::TraceAfterDispatch(Visitor* visitor) const {
 base::span<const NGLink> NGPhysicalFragment::Children() const {
   if (Type() == kFragmentBox)
     return static_cast<const NGPhysicalBoxFragment*>(this)->Children();
-  return base::make_span(static_cast<NGLink*>(nullptr), 0);
+  return base::make_span(static_cast<NGLink*>(nullptr), 0u);
 }
 
 NGPhysicalFragment::PostLayoutChildLinkList
@@ -847,8 +853,9 @@ void NGPhysicalFragment::AddOutlineRectsForCursor(
       }
       case NGFragmentItem::kGeneratedText:
       case NGFragmentItem::kText: {
-        if (outline_type == NGOutlineType::kDontIncludeBlockVisualOverflow)
+        if (!ShouldIncludeBlockVisualOverflow(outline_type)) {
           break;
+        }
         PhysicalRect rect = item.RectInContainerFragment();
         if (UNLIKELY(text_combine))
           rect = text_combine->AdjustRectForBoundingBox(rect);

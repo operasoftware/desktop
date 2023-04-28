@@ -166,6 +166,7 @@ struct VectorTypeOperations {
 
   static void Initialize(T* begin, T* end) {
     if constexpr (VectorTraits<T>::kCanInitializeWithMemset) {
+      // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
       memset(begin, 0,
              reinterpret_cast<char*>(end) - reinterpret_cast<char*>(begin));
     } else {
@@ -203,6 +204,7 @@ struct VectorTypeOperations {
       }
     } else {
       static_assert(VectorTraits<T>::kCanMoveWithMemcpy);
+      // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
       memcpy(dst, src,
              reinterpret_cast<const char*>(src_end) -
                  reinterpret_cast<const char*>(src));
@@ -250,6 +252,7 @@ struct VectorTypeOperations {
       }
     } else {
       static_assert(VectorTraits<T>::kCanMoveWithMemcpy);
+      // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
       memmove(dst, src,
               reinterpret_cast<const char*>(src_end) -
                   reinterpret_cast<const char*>(src));
@@ -268,6 +271,7 @@ struct VectorTypeOperations {
       constexpr size_t boundary = std::max(alignof(T), sizeof(size_t));
       alignas(boundary) char buf[sizeof(T)];
       for (T *s = src, *d = dst; s < src_end; ++s, ++d) {
+        // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
         memcpy(buf, d, sizeof(T));
         AtomicWriteMemcpy<sizeof(T), alignof(T)>(d, s);
         AtomicWriteMemcpy<sizeof(T), alignof(T)>(s, buf);
@@ -302,6 +306,7 @@ struct VectorTypeOperations {
       }
     } else {
       static_assert(VectorTraits<T>::kCanCopyWithMemcpy);
+      // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
       memcpy(dst, src,
              reinterpret_cast<const char*>(src_end) -
                  reinterpret_cast<const char*>(src));
@@ -2272,6 +2277,30 @@ void Vector<T, inlineCapacity, Allocator>::ReallocateBuffer(
   ANNOTATE_DELETE_BUFFER(begin(), capacity(), size_);
   Base::DeallocateBuffer(begin());
   Base::AcquireBuffer(std::move(temp_buffer));
+}
+
+// Erase/EraseIf are based on C++20's uniform container erasure API:
+// - https://eel.is/c++draft/libraryindex#:erase
+// - https://eel.is/c++draft/libraryindex#:erase_if
+template <typename T,
+          wtf_size_t inline_capacity,
+          typename Allocator,
+          typename U>
+wtf_size_t Erase(Vector<T, inline_capacity, Allocator>& v, const U& value) {
+  auto it = std::remove(v.begin(), v.end(), value);
+  wtf_size_t removed = base::checked_cast<wtf_size_t>(v.end() - it);
+  v.erase(it, v.end());
+  return removed;
+}
+template <typename T,
+          wtf_size_t inline_capacity,
+          typename Allocator,
+          typename Pred>
+wtf_size_t EraseIf(Vector<T, inline_capacity, Allocator>& v, Pred pred) {
+  auto it = std::remove_if(v.begin(), v.end(), pred);
+  wtf_size_t removed = base::checked_cast<wtf_size_t>(v.end() - it);
+  v.erase(it, v.end());
+  return removed;
 }
 
 }  // namespace WTF

@@ -7,7 +7,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/paint/cull_rect_updater.h"
-#include "third_party/blink/renderer/core/paint/old_cull_rect_updater.h"
 #include "third_party/blink/renderer/core/paint/paint_controller_paint_test.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/testing/find_cc_layer.h"
@@ -629,24 +628,15 @@ TEST_P(PaintLayerPainterTest, PaintPhaseFloatUnderInlineLayer) {
       *GetDocument().getElementById("float")->GetLayoutObject();
   PaintLayer& span_layer = *GetPaintLayerByElementId("span");
   ASSERT_TRUE(&span_layer == float_div.EnclosingLayer());
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    ASSERT_TRUE(span_layer.NeedsPaintPhaseFloat());
-  } else {
-    ASSERT_FALSE(span_layer.NeedsPaintPhaseFloat());
-  }
+  ASSERT_TRUE(span_layer.NeedsPaintPhaseFloat());
   auto& self_painting_layer = *GetPaintLayerByElementId("self-painting-layer");
   ASSERT_TRUE(self_painting_layer.IsSelfPaintingLayer());
   auto& non_self_painting_layer =
       *GetPaintLayerByElementId("non-self-painting-layer");
   ASSERT_FALSE(non_self_painting_layer.IsSelfPaintingLayer());
 
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    EXPECT_FALSE(self_painting_layer.NeedsPaintPhaseFloat());
-    EXPECT_TRUE(span_layer.NeedsPaintPhaseFloat());
-  } else {
-    EXPECT_TRUE(self_painting_layer.NeedsPaintPhaseFloat());
-    EXPECT_FALSE(span_layer.NeedsPaintPhaseFloat());
-  }
+  EXPECT_FALSE(self_painting_layer.NeedsPaintPhaseFloat());
+  EXPECT_TRUE(span_layer.NeedsPaintPhaseFloat());
   EXPECT_FALSE(non_self_painting_layer.NeedsPaintPhaseFloat());
   EXPECT_THAT(ContentDisplayItems(),
               Contains(IsSameId(float_div.Id(),
@@ -767,16 +757,12 @@ TEST_P(PaintLayerPainterTest, PaintWithOverriddenCullRect) {
   {
     OverriddenCullRectScope scope(stacking,
                                   CullRect(gfx::Rect(0, 0, 100, 100)));
-    OverriddenOldCullRectScope old_scope(stacking,
-                                         CullRect(gfx::Rect(0, 0, 100, 100)));
     EXPECT_EQ(gfx::Rect(0, 0, 100, 100), GetCullRect(stacking).Rect());
     EXPECT_EQ(gfx::Rect(0, 0, 100, 100), GetCullRect(absolute).Rect());
     PaintController controller(PaintController::kTransient);
     GraphicsContext context(controller);
     PaintLayerPainter(stacking).Paint(context);
   }
-  if (!RuntimeEnabledFeatures::ScrollUpdateOptimizationsEnabled())
-    UpdateAllLifecyclePhasesForTest();
   // Should restore the original status after OverridingCullRectScope.
   EXPECT_EQ(gfx::Rect(0, 0, 800, 600), GetCullRect(stacking).Rect());
   EXPECT_EQ(gfx::Rect(0, 0, 800, 600), GetCullRect(absolute).Rect());

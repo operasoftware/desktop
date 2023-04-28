@@ -25,7 +25,7 @@
 namespace blink {
 namespace {
 
-constexpr size_t kTestCacheLimit2 = 100;
+constexpr size_t kTestCacheLimit = 100;
 
 TEST(StorageNamespaceTest, BasicStorageAreas) {
   const String kKey("key");
@@ -53,7 +53,7 @@ TEST(StorageNamespaceTest, BasicStorageAreas) {
 
   StorageController::DomStorageConnection connection;
   std::ignore = connection.dom_storage_remote.BindNewPipeAndPassReceiver();
-  StorageController controller(std::move(connection), kTestCacheLimit2);
+  StorageController controller(std::move(connection), kTestCacheLimit);
 
   StorageNamespace* localStorage =
       MakeGarbageCollected<StorageNamespace>(&controller);

@@ -53,20 +53,4 @@ enum class IntegrityAlgorithm : uint8_t { kSha256, kSha384, kSha512 };
 
 }  // namespace blink
 
-namespace WTF {
-
-template <>
-struct DefaultHash<blink::IntegrityAlgorithm> {
-  STATIC_ONLY(DefaultHash);
-  typedef IntHash<blink::IntegrityAlgorithm> Hash;
-};
-
-template <>
-struct HashTraits<blink::IntegrityAlgorithm>
-    : UnsignedWithZeroKeyHashTraits<blink::IntegrityAlgorithm> {
-  STATIC_ONLY(HashTraits);
-};
-
-}  // namespace WTF
-
 #endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_INTEGRITY_METADATA_H_

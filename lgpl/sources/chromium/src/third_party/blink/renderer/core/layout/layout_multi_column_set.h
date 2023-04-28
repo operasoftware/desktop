@@ -272,6 +272,11 @@ class CORE_EXPORT LayoutMultiColumnSet final : public LayoutBlockFlow {
 
   void FinishLayoutFromNG();
 
+  // Tell the column set that it shouldn't really exist. This happens when
+  // there's a leftover column set after DOM / style changes, that NG doesn't
+  // care about.
+  void SetIsIgnoredByNG();
+
   LayoutMultiColumnSet(LayoutFlowThread*);
 
  private:
@@ -279,6 +284,7 @@ class CORE_EXPORT LayoutMultiColumnSet final : public LayoutBlockFlow {
 
   void InsertedIntoTree() final;
   void WillBeRemovedFromTree() final;
+  LayoutSize Size() const override;
 
   bool IsSelfCollapsingBlock() const override {
     NOT_DESTROYED();

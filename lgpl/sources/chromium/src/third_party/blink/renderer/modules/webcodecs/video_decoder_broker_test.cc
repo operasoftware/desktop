@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_decoder_broker.h"
 using ::testing::_;
@@ -86,7 +87,7 @@ class FakeMojoMediaClient : public media::MojoMediaClient {
  public:
   // MojoMediaClient implementation.
   std::unique_ptr<media::VideoDecoder> CreateVideoDecoder(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      scoped_refptr<base::SequencedTaskRunner> task_runner,
       media::MediaLog* media_log,
       media::mojom::CommandBufferIdPtr command_buffer_id,
       media::RequestOverlayInfoCB request_overlay_info_cb,
@@ -334,12 +335,8 @@ class VideoDecoderBrokerTest : public testing::Test {
   int GetMaxDecodeRequests() { return decoder_broker_->GetMaxDecodeRequests(); }
 
  protected:
-  // Always disabled, because this is a decoder test that happens to share a
-  // code path with encoder initialization.
-  base::ScopedTestFeatureOverride disable_platform_sw_encoder_web_codecs_{
-      base::kFeaturePlatformSWH264EncoderWebCodecsWin, false};
-  base::ScopedTestFeatureOverride disable_platform_sw_encoder_web_rtc_{
-      base::kFeaturePlatformSWH264EncoderDecoderWebRTCWin, false};
+  base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
+      base::kFeaturePlatformAacDecoderInGpu, true};
 
   media::NullMediaLog null_media_log_;
   std::unique_ptr<VideoDecoderBroker> decoder_broker_;

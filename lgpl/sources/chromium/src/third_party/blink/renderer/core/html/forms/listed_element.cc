@@ -26,6 +26,7 @@
 
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/dom/id_target_observer.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -89,7 +90,9 @@ ListedElement::ListedElement()
       will_validate_initialized_(false),
       will_validate_(true),
       is_valid_(true),
-      validity_is_dirty_(false) {}
+      validity_is_dirty_(false),
+      is_element_disabled_(false),
+      is_readonly_(false) {}
 
 ListedElement::~ListedElement() {
   // We can't call setForm here because it contains virtual calls.
@@ -305,8 +308,7 @@ bool ListedElement::RecalcWillValidate() const {
   }
   return data_list_ancestor_state_ ==
              DataListAncestorState::kNotInsideDataList &&
-         !element.IsDisabledFormControl() &&
-         !element.FastHasAttribute(html_names::kReadonlyAttr);
+         !element.IsDisabledFormControl() && !is_readonly_;
 }
 
 bool ListedElement::WillValidate() const {
@@ -511,9 +513,9 @@ void ListedElement::ShowValidationMessage() {
   Element& element = ValidationAnchor();
   element.scrollIntoViewIfNeeded(false);
   if (element.IsFocusable())
-    element.Focus();
+    element.Focus(FocusParams(/*gate_on_user_activation=*/true));
   else
-    ToHTMLElement().Focus();
+    ToHTMLElement().Focus(FocusParams(/*gate_on_user_activation=*/true));
   UpdateVisibleValidationMessage();
 }
 
@@ -569,14 +571,16 @@ void ListedElement::SetNeedsValidityCheck() {
 }
 
 void ListedElement::DisabledAttributeChanged() {
-  UpdateWillValidateCache();
   HTMLElement& element = ToHTMLElement();
+  is_element_disabled_ = element.FastHasAttribute(html_names::kDisabledAttr);
+  UpdateWillValidateCache();
   element.PseudoStateChanged(CSSSelector::kPseudoDisabled);
   element.PseudoStateChanged(CSSSelector::kPseudoEnabled);
   DisabledStateMightBeChanged();
 }
 
 void ListedElement::ReadonlyAttributeChanged() {
+  is_readonly_ = ToHTMLElement().FastHasAttribute(html_names::kReadonlyAttr);
   UpdateWillValidateCache();
 }
 
@@ -618,7 +622,7 @@ void ListedElement::AncestorDisabledStateWasChanged() {
 }
 
 bool ListedElement::IsActuallyDisabled() const {
-  if (ToHTMLElement().FastHasAttribute(html_names::kDisabledAttr))
+  if (is_element_disabled_)
     return true;
   if (ancestor_disabled_state_ == AncestorDisabledState::kUnknown)
     UpdateAncestorDisabledState();

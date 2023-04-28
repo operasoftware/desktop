@@ -7,6 +7,8 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/synchronization/lock.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 
@@ -75,7 +77,7 @@ class MODULES_EXPORT PushableMediaStreamVideoSource
     media::VideoCaptureFeedback feedback_ GUARDED_BY(lock_);
 
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+    scoped_refptr<base::SequencedTaskRunner> video_task_runner_;
   };
 
   explicit PushableMediaStreamVideoSource(
@@ -101,7 +103,7 @@ class MODULES_EXPORT PushableMediaStreamVideoSource
       VideoCaptureCropVersionCB crop_version_callback) override;
   void StopSourceImpl() override;
   base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() override;
-  void SetCanDiscardAlpha(bool can_discard_alpha) override;
+  void OnSourceCanDiscardAlpha(bool can_discard_alpha) override;
   // This function can be called on any thread.
   media::VideoCaptureFeedbackCB GetFeedbackCallback() const override;
 

@@ -62,8 +62,10 @@ DOMPatchSupport::DOMPatchSupport(DOMEditor* dom_editor, Document& document)
 
 void DOMPatchSupport::PatchDocument(const String& markup) {
   Document* new_document = nullptr;
-  DocumentInit init = DocumentInit::Create().WithExecutionContext(
-      GetDocument().GetExecutionContext());
+  DocumentInit init =
+      DocumentInit::Create()
+          .WithExecutionContext(GetDocument().GetExecutionContext())
+          .WithAgent(GetDocument().GetAgent());
   if (IsA<HTMLDocument>(GetDocument()))
     new_document = MakeGarbageCollected<HTMLDocument>(init);
   else if (GetDocument().IsSVGDocument())
@@ -324,9 +326,7 @@ bool DOMPatchSupport::InnerPatchChildren(
   // 1. First strip everything except for the nodes that retain. Collect pending
   // merges.
   HeapHashMap<Member<Digest>, Member<Digest>> merges;
-  HashSet<wtf_size_t, WTF::IntHash<wtf_size_t>,
-          WTF::UnsignedWithZeroKeyHashTraits<wtf_size_t>>
-      used_new_ordinals;
+  HashSet<wtf_size_t, IntWithZeroKeyHashTraits<wtf_size_t>> used_new_ordinals;
   for (wtf_size_t i = 0; i < old_list.size(); ++i) {
     if (old_map[i].first) {
       if (used_new_ordinals.insert(old_map[i].second).is_new_entry)
@@ -369,9 +369,7 @@ bool DOMPatchSupport::InnerPatchChildren(
   }
 
   // Mark retained nodes as used, do not reuse node more than once.
-  HashSet<wtf_size_t, WTF::IntHash<wtf_size_t>,
-          WTF::UnsignedWithZeroKeyHashTraits<wtf_size_t>>
-      used_old_ordinals;
+  HashSet<wtf_size_t, IntWithZeroKeyHashTraits<wtf_size_t>> used_old_ordinals;
   for (wtf_size_t i = 0; i < new_list.size(); ++i) {
     if (!new_map[i].first)
       continue;

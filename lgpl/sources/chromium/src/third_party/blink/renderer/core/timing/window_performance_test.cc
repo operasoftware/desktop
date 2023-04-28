@@ -133,8 +133,9 @@ class WindowPerformanceTest : public testing::Test {
 
   PerformanceEventTiming* CreatePerformanceEventTiming(
       const AtomicString& name) {
-    return PerformanceEventTiming::Create(name, 0.0, 0.0, 0.0, false, nullptr,
-                                          1);
+    return PerformanceEventTiming::Create(
+        name, 0.0, 0.0, 0.0, false, nullptr,
+        LocalDOMWindow::From(GetScriptState()));
   }
 
   LocalFrame* GetFrame() const { return &page_holder_->GetFrame(); }
@@ -156,7 +157,8 @@ class WindowPerformanceTest : public testing::Test {
 
     LocalDOMWindow* window = LocalDOMWindow::From(GetScriptState());
     performance_ = DOMWindowPerformance::performance(*window);
-    performance_->SetTickClockForTesting(test_task_runner_->GetMockTickClock());
+    performance_->SetClocksForTesting(test_task_runner_->GetMockClock(),
+                                      test_task_runner_->GetMockTickClock());
     performance_->time_origin_ = GetTimeOrigin();
     // Stop UKM sampling for testing.
     performance_->GetResponsivenessMetrics().StopUkmSamplingForTesting();
@@ -769,6 +771,9 @@ TEST_F(WindowPerformanceTest, TapOrClick) {
 }
 
 TEST_F(WindowPerformanceTest, PageVisibilityChanged) {
+  // The page visibility gets changed.
+  PageVisibilityChanged(GetTimeStamp(18));
+
   // Pointerdown
   base::TimeTicks pointerdown_timestamp = GetTimeOrigin();
   base::TimeTicks processing_start_pointerdown = GetTimeStamp(1);
@@ -780,9 +785,6 @@ TEST_F(WindowPerformanceTest, PageVisibilityChanged) {
                        pointer_id);
   SimulateSwapPromise(swap_time_pointerdown);
 
-  // The page visibility gets changed.
-  PageVisibilityChanged(GetTimeStamp(18));
-
   // Pointerup
   base::TimeTicks pointerup_timestamp = GetTimeStamp(3);
   base::TimeTicks processing_start_pointerup = GetTimeStamp(5);
@@ -792,6 +794,7 @@ TEST_F(WindowPerformanceTest, PageVisibilityChanged) {
                        processing_start_pointerup, processing_end_pointerup,
                        pointer_id);
   SimulateSwapPromise(swap_time_pointerup);
+
   // Click
   base::TimeTicks click_timestamp = GetTimeStamp(13);
   base::TimeTicks processing_start_click = GetTimeStamp(15);
@@ -809,13 +812,16 @@ TEST_F(WindowPerformanceTest, PageVisibilityChanged) {
       ukm::builders::Responsiveness_UserInteraction::kEntryName);
   EXPECT_EQ(1u, entries.size());
   const ukm::mojom::UkmEntry* ukm_entry = entries[0];
-  // The event duration of pointerdown is 5ms. Because the page visibility was
-  // changed after the pointerup, click were created, the event durations of
-  // them are 3ms, 3ms. The maximum event duration is 5ms. The total event
-  // duration is 9ms.
+  // The event duration of pointerdown is 5ms, all the way to presentation.
+  // Because the page visibility was changed after pointerup & click were
+  // created, the event durations fall back to processingEnd.  That means
+  // they are become 3ms duration each. So the max duration is 5ms.
   GetUkmRecorder()->ExpectEntryMetric(
       ukm_entry,
       ukm::builders::Responsiveness_UserInteraction::kMaxEventDurationName, 5);
+  // Because there is overlap with pointerdown and pointerup, the
+  // the non overlapping event duration for pointerup is only 1ms (not 3ms),
+  // So the total non-overlapping total is 5 + 1 + 3 = 9ms.
   GetUkmRecorder()->ExpectEntryMetric(
       ukm_entry,
       ukm::builders::Responsiveness_UserInteraction::kTotalEventDurationName,
@@ -1571,8 +1577,8 @@ TEST_F(InteractionIdTest, MultiTouch) {
   EXPECT_EQ(ids[1], ids[2]);
   // After a wait, flush UKM logging mojo request.
   test::RunDelayedTasks(base::Seconds(1));
-  CheckUKMValues({{50, 60, UserInteractionType::kTapOrClick},
-                  {30, 50, UserInteractionType::kTapOrClick}});
+  CheckUKMValues({{30, 50, UserInteractionType::kTapOrClick},
+                  {50, 60, UserInteractionType::kTapOrClick}});
 }
 
 TEST_F(InteractionIdTest, ClickIncorrectPointerId) {
@@ -1589,47 +1595,6 @@ TEST_F(InteractionIdTest, ClickIncorrectPointerId) {
   // Flush UKM logging mojo request.
   RunPendingTasks();
   CheckUKMValues({{40, 60, UserInteractionType::kTapOrClick}});
-}
-
-struct DummyWindowPerformance {
-  std::unique_ptr<DummyPageHolder> page_holder_;
-  Persistent<WindowPerformance> performance_;
-
-  explicit DummyWindowPerformance(const KURL& url) {
-    page_holder_ = std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
-    ScriptState* script_state =
-        ToScriptStateForMainWorld(page_holder_->GetDocument().GetFrame());
-    LocalDOMWindow* window = LocalDOMWindow::From(script_state);
-    performance_ = DOMWindowPerformance::performance(*window);
-  }
-};
-
-namespace {
-
-base::Time fake_time;
-base::Time FakeTimeNow() {
-  return fake_time;
-}
-}  // namespace
-
-class TimeOriginSyncTest : public testing::Test {};
-
-// Test is flaky on all platforms: https://crbug.com/1346004
-TEST_F(TimeOriginSyncTest, DISABLED_TimeOriginStableWhenSystemClockChanges) {
-  base::subtle::ScopedTimeClockOverrides clock_overrides(&FakeTimeNow, nullptr,
-                                                         nullptr);
-  base::TimeTicks before = base::TimeTicks::Now();
-  base::TimeDelta delta = base::Minutes(3);
-  ASSERT_TRUE(base::Time::FromString("10 Jul 2022 10:00 GMT", &fake_time));
-  DummyWindowPerformance perf1(KURL("https://a.com"));
-  perf1.performance_->ResetTimeOriginForTesting(before);
-  ASSERT_TRUE(base::Time::FromString("11 Jul 2023 11:30 GMT", &fake_time));
-  DummyWindowPerformance perf2(KURL("https://b.com"));
-  perf2.performance_->ResetTimeOriginForTesting(before + delta);
-  DOMHighResTimeStamp time_origin_1 = perf1.performance_->timeOrigin();
-  DOMHighResTimeStamp time_origin_2 = perf2.performance_->timeOrigin();
-  EXPECT_EQ(floor(time_origin_1 + delta.InMillisecondsF()),
-            floor(time_origin_2));
 }
 
 }  // namespace blink

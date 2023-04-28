@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope_proxy.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -40,9 +41,9 @@ PaintWorkletGlobalScopeProxy::PaintWorkletGlobalScopeProxy(
   const String user_agent =
       RuntimeEnabledFeatures::SendFullUserAgentAfterReductionEnabled(window)
           ? frame_client->FullUserAgent(window->Url())
-          : RuntimeEnabledFeatures::UserAgentReductionEnabled(window)
-                ? frame_client->ReducedUserAgent(window->Url())
-                : frame_client->UserAgent(window->Url());
+      : RuntimeEnabledFeatures::UserAgentReductionEnabled(window)
+          ? frame_client->ReducedUserAgent(window->Url())
+          : frame_client->UserAgent(window->Url());
 
   auto creation_params = std::make_unique<GlobalScopeCreationParams>(
       window->Url(), mojom::blink::ScriptType::kModule, global_scope_name,
@@ -59,11 +60,10 @@ PaintWorkletGlobalScopeProxy::PaintWorkletGlobalScopeProxy(
       mojom::blink::V8CacheOptions::kDefault, module_responses_map,
       mojo::NullRemote() /* browser_interface_broker */,
       window->GetFrame()->Loader().CreateWorkerCodeCacheHost(),
-      BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
-      window->GetAgentClusterID(), ukm::kInvalidSourceId,
-      window->GetExecutionContextToken(),
-      window->CrossOriginIsolatedCapability(),
-      window->IsolatedApplicationCapability());
+      mojo::NullRemote() /* blob_url_store */, BeginFrameProviderParams(),
+      nullptr /* parent_permissions_policy */, window->GetAgentClusterID(),
+      ukm::kInvalidSourceId, window->GetExecutionContextToken(),
+      window->CrossOriginIsolatedCapability(), window->IsIsolatedContext());
   global_scope_ = PaintWorkletGlobalScope::Create(
       frame, std::move(creation_params), *reporting_proxy_);
 }

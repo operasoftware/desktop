@@ -10,11 +10,14 @@ GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 GEN('#include "build/branding_buildflags.h"');
 GEN('#include "build/build_config.h"');
 GEN('#include "build/chromeos_buildflags.h"');
+GEN('#include "chrome/browser/preloading/preloading_features.h"');
 GEN('#include "chrome/browser/ui/ui_features.h"');
 GEN('#include "chrome/common/chrome_features.h"');
+GEN('#include "components/content_settings/core/common/features.h"');
 GEN('#include "components/performance_manager/public/features.h"');
 GEN('#include "components/privacy_sandbox/privacy_sandbox_features.h"');
 GEN('#include "components/autofill/core/common/autofill_features.h"');
+GEN('#include "components/privacy_sandbox/privacy_sandbox_features.h"');
 GEN('#include "content/public/common/content_features.h"');
 GEN('#include "content/public/test/browser_test.h"');
 
@@ -84,7 +87,12 @@ TEST_F('CrSettingsBasicPageTest', 'DISABLED_BasicPage', function() {
   runMochaSuite('SettingsBasicPage');
 });
 
-TEST_F('CrSettingsBasicPageTest', 'PrivacyGuidePromo', function() {
+GEN('#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)');
+GEN('#define MAYBE_PrivacyGuidePromo DISABLED_PrivacyGuidePromo');
+GEN('#else');
+GEN('#define MAYBE_PrivacyGuidePromo PrivacyGuidePromo');
+GEN('#endif');
+TEST_F('CrSettingsBasicPageTest', 'MAYBE_PrivacyGuidePromo', function() {
   runMochaSuite('PrivacyGuidePromo');
 });
 
@@ -213,10 +221,6 @@ TEST_F(
       runMochaSuite('ClearBrowsingDataAllPlatforms');
     });
 
-TEST_F('CrSettingsClearBrowsingDataTest', 'InstalledApps', () => {
-  runMochaSuite('InstalledApps');
-});
-
 GEN('#if !BUILDFLAG(IS_CHROMEOS_ASH)');
 TEST_F(
     'CrSettingsClearBrowsingDataTest', 'ClearBrowsingDataDesktop', function() {
@@ -257,22 +261,9 @@ var CrSettingsAutofillSectionCompanyEnabledTest =
   get browsePreload() {
     return 'chrome://settings/test_loader.html?module=settings/autofill_section_test.js';
   }
-
-  /** @override */
-  get featureListInternal() {
-    return {
-      enabled: ['autofill::features::kAutofillEnableExtendedAddressFormats'],
-    };
-  }
 };
 
 TEST_F('CrSettingsAutofillSectionCompanyEnabledTest', 'All', function() {
-  // Use 'EnableCompanyName' to inform tests that the feature is enabled.
-  const loadTimeDataOverride = {};
-  loadTimeDataOverride['EnableCompanyName'] = true;
-  loadTimeDataOverride['showHonorific'] = true;
-  loadTimeDataOverride['EnableExtendedAddressFormat'] = true;
-  loadTimeData.overrideValues(loadTimeDataOverride);
   mocha.run();
 });
 
@@ -349,7 +340,7 @@ var CrSettingsSafetyCheckPermissionsTest = class extends CrSettingsBrowserTest {
   get featureListInternal() {
     return {
       enabled: [
-        'features::kSafetyCheckUnusedSitePermissions',
+        'content_settings::features::kSafetyCheckUnusedSitePermissions',
         'features::kSafetyCheckNotificationPermissions',
       ],
     };
@@ -360,37 +351,46 @@ TEST_F('CrSettingsSafetyCheckPermissionsTest', 'All', function() {
   mocha.run();
 });
 
-GEN('#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)');
-var CrSettingsSafetyCheckChromeCleanerTest =
-    class extends CrSettingsBrowserTest {
-  /** @override */
-  get browsePreload() {
-    return 'chrome://settings/test_loader.html?module=settings/safety_check_chrome_cleaner_test.js';
-  }
-};
-
-TEST_F('CrSettingsSafetyCheckChromeCleanerTest', 'All', function() {
-  mocha.run();
-});
-GEN('#endif');
-
 var CrSettingsSiteListTest = class extends CrSettingsBrowserTest {
   /** @override */
   get browsePreload() {
     return 'chrome://settings/test_loader.html?module=settings/site_list_tests.js';
   }
+
+  /** @override */
+  get featureListInternal() {
+    return {
+      enabled: [
+        'privacy_sandbox::kPrivacySandboxSettings4',
+      ],
+    };
+  }
 };
 
-// Copied from Polymer 2 test:
-// TODO(crbug.com/929455): flaky, fix.
-TEST_F('CrSettingsSiteListTest', 'DISABLED_SiteList', function() {
+TEST_F('CrSettingsSiteListTest', 'SiteList', function() {
   runMochaSuite('SiteList');
 });
 
+// TODO(crbug.com/929455, crbug.com/1064002): Flaky test. When it is fixed,
+// merge SiteListDisabled back into SiteList.
+TEST_F('CrSettingsSiteListTest', 'DISABLED_SiteListDisabled', function() {
+  runMochaSuite('DISABLED_SiteList');
+});
+
 // TODO(crbug.com/929455): When the bug is fixed, merge
-// SiteListEmbargoedOrigin into SiteList
+// SiteListEmbargoedOrigin into SiteList.
 TEST_F('CrSettingsSiteListTest', 'SiteListEmbargoedOrigin', function() {
   runMochaSuite('SiteListEmbargoedOrigin');
+});
+
+// TODO(crbug.com/929455): When the bug is fixed, merge
+// SiteListCookiesExceptionTypes into SiteList.
+TEST_F('CrSettingsSiteListTest', 'SiteListCookiesExceptionTypes', function() {
+  runMochaSuite('SiteListCookiesExceptionTypes');
+});
+
+TEST_F('CrSettingsSiteListTest', 'SiteListSearchTests', function() {
+  runMochaSuite('SiteListSearchTests');
 });
 
 TEST_F('CrSettingsSiteListTest', 'EditExceptionDialog', function() {
@@ -401,10 +401,26 @@ TEST_F('CrSettingsSiteListTest', 'AddExceptionDialog', function() {
   runMochaSuite('AddExceptionDialog');
 });
 
+// TODO(crbug.com/1378703): Remove after crbug/1378703 launched.
+TEST_F(
+    'CrSettingsSiteListTest', 'AddExceptionDialog_PrivacySandbox4Disabled',
+    function() {
+      runMochaSuite('AddExceptionDialog_PrivacySandbox4Disabled');
+    });
+
 var CrSettingsSiteDetailsTest = class extends CrSettingsBrowserTest {
   /** @override */
   get browsePreload() {
     return 'chrome://settings/test_loader.html?module=settings/site_details_tests.js';
+  }
+
+  /** @override */
+  get featureListInternal() {
+    return {
+      enabled: [
+        'privacy_sandbox::kPrivacySandboxSettings4',
+      ],
+    };
   }
 };
 
@@ -521,7 +537,7 @@ var CrSettingsPrivacyPageTest = class extends CrSettingsBrowserTest {
   get featureListInternal() {
     return {
       enabled: [
-        'features::kPrivacyGuide2',
+        'privacy_sandbox::kPrivacySandboxSettings4',
       ],
     };
   }
@@ -544,16 +560,18 @@ TEST_F('CrSettingsPrivacyPageTest', 'MAYBE_PrivacyPageTests', function() {
   runMochaSuite('PrivacyPage');
 });
 
-TEST_F('CrSettingsPrivacyPageTest', 'PrivacySandboxEnabled', function() {
-  runMochaSuite('PrivacySandboxEnabled');
+// TODO(crbug.com/1378703): Remove once PrivacySandboxSettings4 has been rolled
+// out.
+TEST_F('CrSettingsPrivacyPageTest', 'PrivacySandbox4Disabled', function() {
+  runMochaSuite('PrivacySandbox4Disabled');
+});
+
+TEST_F('CrSettingsPrivacyPageTest', 'PrivacySandbox4Enabled', function() {
+  runMochaSuite('PrivacySandbox4Enabled');
 });
 
 TEST_F('CrSettingsPrivacyPageTest', 'PrivacyGuideRowTests', function() {
   runMochaSuite('PrivacyGuideRowTests');
-});
-
-TEST_F('CrSettingsPrivacyPageTest', 'PrivacyGuide2Disabled', function() {
-  runMochaSuite('PrivacyGuide2Disabled');
 });
 
 TEST_F('CrSettingsPrivacyPageTest', 'NotificationPermissionReview', function() {
@@ -582,105 +600,55 @@ TEST_F(
     });
 GEN('#endif');
 
-var CrSettingsPrivacyGuidePageTest = class extends CrSettingsBrowserTest {
+var CrSettingsPrivacySandboxPageTest = class extends CrSettingsBrowserTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://settings/test_loader.html?module=settings/privacy_guide_page_test.js';
+    return 'chrome://settings/test_loader.html?module=settings/privacy_sandbox_page_test.js';
   }
 
   /** @override */
   get featureListInternal() {
     return {
       enabled: [
-        'features::kPrivacyGuide2',
+        'privacy_sandbox::kPrivacySandboxSettings4',
       ],
     };
   }
 };
 
-TEST_F('CrSettingsPrivacyGuidePageTest', 'PrivacyGuidePageTests', function() {
-  runMochaSuite('PrivacyGuidePageTests');
-});
-
-TEST_F('CrSettingsPrivacyGuidePageTest', 'MsbbFragmentNavigations', function() {
-  runMochaSuite('MsbbFragmentNavigations');
-});
-
 TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'HistorySyncFragmentNavigations',
-    function() {
-      runMochaSuite('HistorySyncFragmentNavigations');
+    'CrSettingsPrivacySandboxPageTest', 'PrivacySandboxPageTests', function() {
+      runMochaSuite('PrivacySandboxPageTests');
     });
 
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'SafeBrowsingFragmentNavigations',
-    function() {
-      runMochaSuite('SafeBrowsingFragmentNavigations');
-    });
-
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'CookiesFragmentNavigations', function() {
-      runMochaSuite('CookiesFragmentNavigations');
-    });
-
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'MsbbFragmentMetricsTests', function() {
-      runMochaSuite('MsbbFragmentMetricsTests');
-    });
-
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'HistorySyncFragmentMetricsTests',
-    function() {
-      runMochaSuite('HistorySyncFragmentMetricsTests');
-    });
-
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'SafeBrowsingFragmentMetricsTests',
-    function() {
-      runMochaSuite('SafeBrowsingFragmentMetricsTests');
-    });
-
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'CookiesFragmentMetricsTests',
-    function() {
-      runMochaSuite('CookiesFragmentMetricsTests');
-    });
-
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'HistorySyncFragmentTests', function() {
-      runMochaSuite('HistorySyncFragment');
-    });
-
-TEST_F('CrSettingsPrivacyGuidePageTest', 'CompletionFragmentTests', function() {
-  runMochaSuite('CompletionFragment');
+TEST_F('CrSettingsPrivacySandboxPageTest', 'TopicsSubpageTests', function() {
+  runMochaSuite('PrivacySandboxTopicsSubpageTests');
 });
 
 TEST_F(
-    'CrSettingsPrivacyGuidePageTest',
-    'CompletionFragmentPrivacySandboxRestricted', function() {
-      runMochaSuite('CompletionFragmentPrivacySandboxRestricted');
+    'CrSettingsPrivacySandboxPageTest', 'TopicsSubpageEmptyTests', function() {
+      runMochaSuite('PrivacySandboxTopicsSubpageEmptyTests');
     });
 
-TEST_F(
-    'CrSettingsPrivacyGuidePageTest',
-    'CompletionFragmentPrivacyGuide2DisabledTests', function() {
-      runMochaSuite('CompletionFragmentPrivacyGuide2Disabled');
-    });
-
-TEST_F('CrSettingsPrivacyGuidePageTest', 'PrivacyGuideDialogTests', function() {
-  runMochaSuite('PrivacyGuideDialog');
+TEST_F('CrSettingsPrivacySandboxPageTest', 'FledgeSubpageTests', function() {
+  runMochaSuite('PrivacySandboxFledgeSubpageTests');
 });
 
 TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'CardHeaderTestsPrivacyGuide2Enabled',
-    function() {
-      runMochaSuite('CardHeaderTestsPrivacyGuide2Enabled');
+    'CrSettingsPrivacySandboxPageTest', 'FledgeSubpageEmptyTests', function() {
+      runMochaSuite('PrivacySandboxFledgeSubpageEmptyTests');
     });
 
 TEST_F(
-    'CrSettingsPrivacyGuidePageTest', 'CardHeaderTestsPrivacyGuide2Disabled',
+    'CrSettingsPrivacySandboxPageTest', 'FledgeSubpageSeeAllSitesTests',
     function() {
-      runMochaSuite('CardHeaderTestsPrivacyGuide2Disabled');
+      runMochaSuite('PrivacySandboxFledgeSubpageSeeAllSitesTests');
+    });
+
+TEST_F(
+    'CrSettingsPrivacySandboxPageTest', 'AdMeasurementSubpageTests',
+    function() {
+      runMochaSuite('PrivacySandboxAdMeasurementSubpageTests');
     });
 
 var CrSettingsCookiesPageTest = class extends CrSettingsBrowserTest {
@@ -688,21 +656,59 @@ var CrSettingsCookiesPageTest = class extends CrSettingsBrowserTest {
   get browsePreload() {
     return 'chrome://settings/test_loader.html?module=settings/cookies_page_test.js';
   }
+
+  /** @override */
+  get featureList() {
+    return {
+      enabled: [
+        'privacy_sandbox::kPrivacySandboxSettings4',
+        'privacy_sandbox::kPrivacySandboxFirstPartySetsUI',
+        'features::kPreloadingDesktopSettingsSubPage',
+      ],
+    };
+  }
 };
 
-// Flaky on MacOS bots and times out on Linux Dbg: https://crbug.com/1240747
-GEN('#if (BUILDFLAG(IS_MAC)) || (BUILDFLAG(IS_LINUX) && !defined(NDEBUG))');
+GEN('#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)');
 GEN('#define MAYBE_CookiesPageTest DISABLED_CookiesPageTest');
 GEN('#else');
 GEN('#define MAYBE_CookiesPageTest CookiesPageTest');
 GEN('#endif');
+// TODO(crbug.com/1409653): fix flakiness on Linux debug builds and re-enable.
 TEST_F('CrSettingsCookiesPageTest', 'MAYBE_CookiesPageTest', function() {
   runMochaSuite('CrSettingsCookiesPageTest');
 });
 
-TEST_F('CrSettingsCookiesPageTest', 'FirstPartySetsUIEnabled', function() {
-  runMochaSuite('CrSettingsCookiesPageTest_FirstPartySetsUIEnabled');
+TEST_F('CrSettingsCookiesPageTest', 'FirstPartySetsUIDisabled', function() {
+  runMochaSuite('CrSettingsCookiesPageTest_FirstPartySetsUIDisabled');
 });
+
+GEN('#if BUILDFLAG(IS_CHROMEOS_LACROS)');
+TEST_F('CrSettingsCookiesPageTest', 'LacrosSecondaryProfile', function() {
+  runMochaSuite('CrSettingsCookiesPageTest_lacrosSecondaryProfile');
+});
+GEN('#endif');
+
+GEN('#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)');
+GEN('#define MAYBE_PrivacySandboxSettings4Disabled2 DISABLED_PrivacySandboxSettings4Disabled');
+GEN('#else');
+GEN('#define MAYBE_PrivacySandboxSettings4Disabled2 PrivacySandboxSettings4Disabled');
+GEN('#endif');
+// TODO(crbug.com/1409653): fix flakiness on Linux debug builds and re-enable.
+// The "MAYBE..." portion of the test has a 2 at the end because there is
+// already a macro with the same name defined in this file.
+TEST_F(
+    'CrSettingsCookiesPageTest', 'MAYBE_PrivacySandboxSettings4Disabled2',
+    function() {
+      runMochaSuite(
+          'CrSettingsCookiesPageTest_PrivacySandboxSettings4Disabled');
+    });
+
+TEST_F(
+    'CrSettingsCookiesPageTest', 'PreloadingDesktopSettingsSubPageDisabled',
+    function() {
+      runMochaSuite('PreloadingDesktopSettingsSubPageDisabled');
+    });
 
 var CrSettingsRouteTest = class extends CrSettingsBrowserTest {
   /** @override */
@@ -710,12 +716,6 @@ var CrSettingsRouteTest = class extends CrSettingsBrowserTest {
     return 'chrome://settings/test_loader.html?module=settings/route_tests.js';
   }
 };
-
-GEN('#if BUILDFLAG(IS_CHROMEOS_LACROS)');
-TEST_F('CrSettingsCookiesPageTest', 'LacrosSecondaryProfile', function() {
-  runMochaSuite('CrSettingsCookiesPageTest_lacrosSecondaryProfile');
-});
-GEN('#endif');
 
 TEST_F('CrSettingsRouteTest', 'Basic', function() {
   runMochaSuite('route');
@@ -757,7 +757,6 @@ TEST_F('CrSettingsAdvancedPageTest', 'MAYBE_Load', function() {
   mocha.run();
 });
 
-
 var CrSettingsReviewNotificationPermissionsTest =
     class extends CrSettingsBrowserTest {
   /** @override */
@@ -779,6 +778,110 @@ TEST_F('CrSettingsReviewNotificationPermissionsTest', 'All', function() {
   mocha.run();
 });
 
+var CrSettingsUnusedSitePermissionsTest = class extends CrSettingsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://settings/test_loader.html?module=settings/unused_site_permissions_test.js';
+  }
+
+  /** @override */
+  get featureList() {
+    return {
+      enabled: [
+        'content_settings::features::kSafetyCheckUnusedSitePermissions',
+      ],
+    };
+  }
+};
+
+TEST_F('CrSettingsUnusedSitePermissionsTest', 'All', function() {
+  mocha.run();
+});
+
+var CrSettingsSiteSettingsPageTest = class extends CrSettingsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://settings/test_loader.html?module=settings/site_settings_page_test.js';
+  }
+
+  /** @override */
+  get featureList() {
+    return {
+      enabled: [
+        'privacy_sandbox::kPrivacySandboxSettings4',
+        'content_settings::features::kSafetyCheckUnusedSitePermissions',
+      ],
+    };
+  }
+};
+
+// TODO(crbug.com/1401833): Flaky.
+GEN('#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)');
+GEN('#define MAYBE_SiteSettingsPage DISABLED_SiteSettingsPage');
+GEN('#else');
+GEN('#define MAYBE_SiteSettingsPage SiteSettingsPage');
+GEN('#endif');
+TEST_F('CrSettingsSiteSettingsPageTest', 'MAYBE_SiteSettingsPage', function() {
+  runMochaSuite('SiteSettingsPage');
+});
+
+// TODO(crbug.com/1401833): Flaky.
+GEN('#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)');
+GEN('#define MAYBE_PrivacySandboxSettings4Disabled DISABLED_PrivacySandboxSettings4Disabled');
+GEN('#else');
+GEN('#define MAYBE_PrivacySandboxSettings4Disabled PrivacySandboxSettings4Disabled');
+GEN('#endif');
+TEST_F(
+    'CrSettingsSiteSettingsPageTest', 'MAYBE_PrivacySandboxSettings4Disabled',
+    function() {
+      runMochaSuite('PrivacySandboxSettings4Disabled');
+    });
+
+// TODO(crbug.com/1401833): Flaky.
+GEN('#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)');
+GEN('#define MAYBE_UnusedSitePermissionsReview DISABLED_UnusedSitePermissionsReview');
+GEN('#else');
+GEN('#define MAYBE_UnusedSitePermissionsReview UnusedSitePermissionsReview');
+GEN('#endif');
+TEST_F(
+    'CrSettingsSiteSettingsPageTest', 'MAYBE_UnusedSitePermissionsReview',
+    function() {
+      runMochaSuite('UnusedSitePermissionsReview');
+    });
+
+// TODO(crbug.com/1401833): Flaky.
+GEN('#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)');
+GEN('#define MAYBE_UnusedSitePermissionsReviewDisabled DISABLED_UnusedSitePermissionsReviewDisabled');
+GEN('#else');
+GEN('#define MAYBE_UnusedSitePermissionsReviewDisabled UnusedSitePermissionsReviewDisabled');
+GEN('#endif');
+TEST_F(
+    'CrSettingsSiteSettingsPageTest',
+    'MAYBE_UnusedSitePermissionsReviewDisabled', function() {
+      runMochaSuite('UnusedSitePermissionsReviewDisabled');
+    });
+
+var CrSettingsMenuTest = class extends CrSettingsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://settings/test_loader.html?module=settings/settings_menu_test.js';
+  }
+
+  /** @override */
+  get featureList() {
+    return {
+      disabled: [
+        'performance_manager::features::kHighEfficiencyModeAvailable',
+        'performance_manager::features::kBatterySaverModeAvailable',
+      ],
+    };
+  }
+};
+
+TEST_F('CrSettingsMenuTest', 'All', function() {
+  mocha.run()
+});
+
 [['AppearanceFontsPage', 'appearance_fonts_page_test.js'],
  [
    'SettingsCategoryDefaultRadioGroup',
@@ -792,21 +895,20 @@ TEST_F('CrSettingsReviewNotificationPermissionsTest', 'All', function() {
  ['CollapseRadioButton', 'collapse_radio_button_tests.js'],
  ['ControlledButton', 'controlled_button_tests.js'],
  ['ControlledRadioButton', 'controlled_radio_button_tests.js'],
+ ['AutofillAddressValidation', 'autofill_section_address_validation_test.js'],
  ['DoNotTrackToggle', 'do_not_track_toggle_test.js'],
  ['DownloadsPage', 'downloads_page_test.js'],
  ['DropdownMenu', 'dropdown_menu_tests.js'],
  ['ExtensionControlledIndicator', 'extension_controlled_indicator_tests.js'],
  ['HelpPage', 'help_page_test.js'],
- ['Menu', 'settings_menu_test.js'],
  ['PasswordView', 'password_view_test.js'],
  ['PasswordsExportDialog', 'passwords_export_dialog_test.js'],
  ['PasswordsImportDialog', 'passwords_import_dialog_test.js'],
- ['PaymentsSection', 'payments_section_test.js'],
  ['PeoplePage', 'people_page_test.js'],
  ['PeoplePageSyncControls', 'people_page_sync_controls_test.js'],
- ['PeoplePageSyncPage', 'people_page_sync_page_test.js'],
  ['Prefs', 'prefs_tests.js'],
  ['PrefUtil', 'pref_util_tests.js'],
+ ['PreloadingPage', 'preloading_page_test.js'],
  ['ProtocolHandlers', 'protocol_handlers_tests.js'],
  ['RecentSitePermissions', 'recent_site_permissions_test.js'],
  // Flaky on all OSes. TODO(crbug.com/1127733): Enable the test.
@@ -815,14 +917,25 @@ TEST_F('CrSettingsReviewNotificationPermissionsTest', 'All', function() {
  ['SearchEngines', 'search_engines_page_test.js'],
  ['SearchPage', 'search_page_test.js'],
  ['Search', 'search_settings_test.js'],
- ['SecurityKeysSubpage', 'security_keys_subpage_test.js'],
+ ['Section', 'settings_section_test.js'],
+ ['SecurityKeysBioEnrollment', 'security_keys_bio_enrollment_test.js'],
+ [
+   'SecurityKeysCredentialManagement',
+   'security_keys_credential_management_test.js'
+ ],
+ ['SecurityKeysResetDialog', 'security_keys_reset_dialog_test.js'],
+ ['SecurityKeysSetPinDialog', 'security_keys_set_pin_dialog_test.js'],
  ['SecurityKeysPhonesSubpage', 'security_keys_phones_subpage_test.js'],
  ['SecureDns', 'secure_dns_test.js'],
+ ['SiteDataTest', 'site_data_test.js'],
  ['SiteDetailsPermission', 'site_details_permission_tests.js'],
+ [
+   'SiteDetailsPermissionDeviceEntry',
+   'site_details_permission_device_entry_tests.js'
+ ],
  ['SiteEntry', 'site_entry_tests.js'],
  ['SiteFavicon', 'site_favicon_test.js'],
  ['SiteListEntry', 'site_list_entry_tests.js'],
- ['SiteSettingsPage', 'site_settings_page_test.js'],
  ['Slider', 'settings_slider_tests.js'],
  ['StartupUrlsPage', 'startup_urls_page_test.js'],
  // Flaky on all OSes. TODO(crbug.com/1302405): Enable the test.
@@ -832,16 +945,16 @@ TEST_F('CrSettingsReviewNotificationPermissionsTest', 'All', function() {
  ['ZoomLevels', 'zoom_levels_tests.js'],
 ].forEach(test => registerTest(...test));
 
-// Timeout on Linux dbg bots: https://crbug.com/1133412
-// Fails on Mac bots: https://crbug.com/1222886
-GEN('#if !((BUILDFLAG(IS_LINUX) && !defined(NDEBUG)) || BUILDFLAG(IS_MAC))');
-[['SecurityPage', 'security_page_test.js'],
-].forEach(test => registerTest(...test));
+// Timeout on Linux dbg bots: https://crbug.com/1394737
+GEN('#if !(BUILDFLAG(IS_LINUX) && !defined(NDEBUG))');
+[['PeoplePageSyncPage', 'people_page_sync_page_test.js']].forEach(
+    test => registerTest(...test));
 GEN('#endif');
 
-// Timeout on Linux dbg bots: https://crbug.com/1311163
+// Flaky on Linux dbg bots: https://crbug.com/1411294
 GEN('#if !(BUILDFLAG(IS_LINUX) && !defined(NDEBUG))');
-[['AllSites', 'all_sites_tests.js']].forEach(test => registerTest(...test));
+[['PaymentsSection', 'payments_section_test.js']].forEach(
+    test => registerTest(...test));
 GEN('#endif');
 
 GEN('#if BUILDFLAG(IS_CHROMEOS)');
@@ -882,12 +995,6 @@ GEN('#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)');
 ].forEach(test => registerTest(...test));
 GEN('#endif');
 
-GEN('#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)');
-[['ChromeCleanupPage', 'chrome_cleanup_page_test.js'],
- ['IncompatibleApplicationsPage', 'incompatible_applications_page_test.js'],
-].forEach(test => registerTest(...test));
-GEN('#endif');
-
 GEN('#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS_ASH)');
 registerTest('MetricsReporting', 'metrics_reporting_tests.js');
 GEN('#endif');
@@ -902,4 +1009,73 @@ function registerTest(testName, module, caseName) {
   };
 
   TEST_F(className, caseName || 'All', () => mocha.run());
+}
+
+// Some tests files are too large to run as a single "All" test (e.g. as above),
+// and flake on some bots. Each test suite can instead be run as an individual
+// test fixture, allowing more time to complete.
+[[
+  'SecurityPage', 'security_page_test.js',
+  [
+    'SecurityPage',
+    'SecurityPage_FlagsDisabled',
+  ]
+],
+ [
+   'AllSites',
+   'all_sites_tests.js',
+   [
+     'AllSites_EnableFirstPartySets',
+     'AllSites_DisableFirstPartySets',
+   ],
+ ],
+ [
+   'PrivacyGuidePage',
+   'privacy_guide_page_test.js',
+   [
+     'PrivacyGuidePageTests',
+     'MsbbCardNavigations',
+     'HistorySyncCardNavigations',
+     'SafeBrowsingCardNavigations',
+     'CookiesCardNavigations',
+     'PrivacyGuideDialogTests',
+   ],
+ ],
+ [
+   'PrivacyGuideFragments',
+   'privacy_guide_fragments_test.js',
+   [
+     'WelcomeFragmentTests',
+     'MsbbFragmentTests',
+     'HistorySyncFragmentTests',
+     'SafeBrowsingFragmentTests',
+     'CookiesFragmentTests',
+     'CompletionFragmentTests',
+     'CompletionFragmentPrivacySandboxRestricted',
+   ],
+ ],
+].forEach(test => registerTestSuites(...test));
+
+// TODO(crbug.com/1403969): SecurityPage_SafeBrowsing suite is flaky on Mac.
+// TODO(crbug.com/1404109): SecurityPage_SafeBrowsing suite is flaky on Linux.
+GEN('#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_LINUX)');
+registerTestSuites(
+    'SecurityPage', 'security_page_test.js', ['SecurityPage_SafeBrowsing']);
+GEN('#endif');
+
+function registerTestSuites(testName, module, suites) {
+  const className = `CrSettings${testName}Test`;
+  // The classname may have already been registered, such as if some suites only
+  // run on some platforms.
+  if (!this[className]) {
+    this[className] = class extends CrSettingsBrowserTest {
+      /** @override */
+      get browsePreload() {
+        return `chrome://settings/test_loader.html?module=settings/${module}`;
+      }
+    };
+  }
+  suites.forEach((suite) => {
+    TEST_F(className, suite, () => runMochaSuite(suite));
+  })
 }

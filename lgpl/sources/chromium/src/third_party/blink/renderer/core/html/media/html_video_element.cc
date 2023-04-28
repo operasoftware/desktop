@@ -27,10 +27,11 @@
 
 #include <memory>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "cc/paint/paint_canvas.h"
 #include "media/base/video_frame.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/web_fullscreen_video_status.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_fullscreen_options.h"
@@ -59,7 +60,7 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/resource/video_timing.h"
-#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing_detector.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/extensions_3d_util.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
@@ -144,7 +145,7 @@ void HTMLVideoElement::ContextDestroyed() {
   HTMLMediaElement::ContextDestroyed();
 }
 
-bool HTMLVideoElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
+bool HTMLVideoElement::LayoutObjectIsNeeded(const DisplayStyle& style) const {
   return HTMLElement::LayoutObjectIsNeeded(style);
 }
 
@@ -218,16 +219,6 @@ void HTMLVideoElement::ParseAttribute(
       remoting_interstitial_->OnPosterImageChanged();
     if (picture_in_picture_interstitial_)
       picture_in_picture_interstitial_->OnPosterImageChanged();
-  } else if (params.name == html_names::kAutopictureinpictureAttr &&
-             RuntimeEnabledFeatures::AutoPictureInPictureEnabled(
-                 GetExecutionContext())) {
-    if (!params.new_value.IsNull()) {
-      PictureInPictureController::From(GetDocument())
-          .AddToAutoPictureInPictureElementsList(this);
-    } else {
-      PictureInPictureController::From(GetDocument())
-          .RemoveFromAutoPictureInPictureElementsList(this);
-    }
   } else {
     HTMLMediaElement::ParseAttribute(params);
   }
@@ -380,6 +371,10 @@ void HTMLVideoElement::RequestExitPictureInPicture() {
       .ExitPictureInPicture(this, nullptr);
 }
 
+void HTMLVideoElement::RequestMediaRemoting() {
+  GetWebMediaPlayer()->RequestMediaRemoting();
+}
+
 void HTMLVideoElement::PaintCurrentFrame(cc::PaintCanvas* canvas,
                                          const gfx::Rect& dest_rect,
                                          const cc::PaintFlags* flags) const {
@@ -390,7 +385,7 @@ void HTMLVideoElement::PaintCurrentFrame(cc::PaintCanvas* canvas,
   if (flags) {
     media_flags = *flags;
   } else {
-    media_flags.setAlpha(0xFF);
+    media_flags.setAlphaf(1.0f);
     media_flags.setFilterQuality(cc::PaintFlags::FilterQuality::kLow);
     media_flags.setBlendMode(SkBlendMode::kSrc);
   }
@@ -407,6 +402,9 @@ bool HTMLVideoElement::HasAvailableVideoFrame() const {
 void HTMLVideoElement::OnFirstFrame(base::TimeTicks frame_time,
                                     size_t bytes_to_first_frame) {
   DCHECK(GetWebMediaPlayer());
+  if (!base::FeatureList::IsEnabled(features::kLCPVideoFirstFrame)) {
+    return;
+  }
   LayoutObject* layout_object = GetLayoutObject();
   // HasLocalBorderBoxProperties will be false in some cases, specifically
   // picture-in-picture video may return false here.
@@ -607,11 +605,14 @@ ScriptPromise HTMLVideoElement::CreateImageBitmap(
 
   return ImageBitmapSource::FulfillImageBitmap(
       script_state, MakeGarbageCollected<ImageBitmap>(this, crop_rect, options),
-      exception_state);
+      options, exception_state);
 }
 
 void HTMLVideoElement::MediaRemotingStarted(
     const WebString& remote_device_friendly_name) {
+  is_remote_rendering_ = true;
+  remote_device_friendly_name_ = remote_device_friendly_name;
+  OnRemotePlaybackMetadataChange();
   if (!remoting_interstitial_) {
     remoting_interstitial_ =
         MakeGarbageCollected<MediaRemotingInterstitial>(*this);
@@ -623,6 +624,9 @@ void HTMLVideoElement::MediaRemotingStarted(
 }
 
 void HTMLVideoElement::MediaRemotingStopped(int error_code) {
+  is_remote_rendering_ = false;
+  remote_device_friendly_name_.Reset();
+  OnRemotePlaybackMetadataChange();
   if (remoting_interstitial_)
     remoting_interstitial_->Hide(error_code);
 }

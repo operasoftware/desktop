@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/platform/graphics/filters/filter_effect.h"
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/style/gpu_shader_resource.h"
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
@@ -46,8 +47,9 @@ void ReferenceFilterOperation::Trace(Visitor* visitor) const {
 
 gfx::RectF ReferenceFilterOperation::MapRect(const gfx::RectF& rect) const {
   const auto* last_effect = filter_ ? filter_->LastEffect() : nullptr;
-  if (!last_effect)
+  if (!last_effect) {
     return rect;
+  }
   return last_effect->MapRect(rect);
 }
 
@@ -58,13 +60,15 @@ ReferenceFilterOperation::ReferenceFilterOperation(const AtomicString& url,
       resource_(resource) {}
 
 void ReferenceFilterOperation::AddClient(SVGResourceClient& client) {
-  if (resource_)
+  if (resource_) {
     resource_->AddClient(client);
+  }
 }
 
 void ReferenceFilterOperation::RemoveClient(SVGResourceClient& client) {
-  if (resource_)
+  if (resource_) {
     resource_->RemoveClient(client);
+  }
 }
 
 bool ReferenceFilterOperation::IsEqualAssumingSameType(
@@ -101,13 +105,17 @@ GpuShaderFilterOperation::GpuShaderFilterOperation(
     const AtomicString& absolute_url,
     const Referrer& referrer,
     GpuShaderResource* resource,
+    const CSSValueList* args,
     float animation_frame)
     : FilterOperation(OperationType::kGpuShader),
       relative_url_(relative_url),
       absolute_url_(absolute_url),
       referrer_(referrer),
       resource_(resource),
-      animation_frame_(animation_frame) {}
+      args_(args),
+      animation_frame_(animation_frame) {
+  DCHECK(args);
+}
 
 gfx::RectF GpuShaderFilterOperation::MapRect(const gfx::RectF& rect) const {
   return rect;
@@ -128,10 +136,11 @@ bool GpuShaderFilterOperation::IsEqualAssumingSameType(
   const auto& other = To<GpuShaderFilterOperation>(o);
   return relative_url_ == other.relative_url_ &&
          absolute_url_ == other.absolute_url_ && resource_ == other.resource_ &&
-         animation_frame_ == other.animation_frame_;
+         args_ == other.args_ && animation_frame_ == other.animation_frame_;
 }
 
 void GpuShaderFilterOperation::Trace(Visitor* visitor) const {
+  visitor->Trace(args_);
   visitor->Trace(resource_);
   FilterOperation::Trace(visitor);
 }

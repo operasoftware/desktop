@@ -46,11 +46,13 @@
 #include "third_party/blink/public/platform/web_vector.h"
 
 namespace network {
+class TriggerAttestation;
 namespace mojom {
 enum class AlternateProtocolUsage;
 enum class FetchResponseSource;
 enum class FetchResponseType : int32_t;
 enum class IPAddressSpace : int32_t;
+class URLResponseHead;
 class LoadTimingInfo;
 }  // namespace mojom
 }  // namespace network
@@ -74,6 +76,11 @@ class BLINK_PLATFORM_EXPORT WebURLResponse {
     kHTTPVersion_1_1,
     kHTTPVersion_2_0
   };
+
+  static WebURLResponse Create(const WebURL& url,
+                               const network::mojom::URLResponseHead& head,
+                               bool report_security_info,
+                               int request_id);
 
   ~WebURLResponse();
 
@@ -103,6 +110,9 @@ class BLINK_PLATFORM_EXPORT WebURLResponse {
   void SetConnectionID(unsigned);
 
   void SetConnectionReused(bool);
+
+  void SetTriggerAttestation(
+      const absl::optional<network::TriggerAttestation>&);
 
   void SetLoadTiming(const network::mojom::LoadTimingInfo&);
 
@@ -139,7 +149,6 @@ class BLINK_PLATFORM_EXPORT WebURLResponse {
   void VisitHttpHeaderFields(WebHTTPHeaderVisitor*) const;
 
   void SetHasMajorCertificateErrors(bool);
-  void SetIsLegacyTLSVersion(bool);
   void SetHasRangeRequested(bool);
   void SetTimingAllowPassed(bool);
   bool TimingAllowPassed() const;
@@ -241,7 +250,7 @@ class BLINK_PLATFORM_EXPORT WebURLResponse {
 
   // Original size of the response body before decompression.
   int64_t EncodedBodyLength() const;
-  void SetEncodedBodyLength(int64_t);
+  void SetEncodedBodyLength(uint64_t);
 
   void SetIsSignedExchangeInnerResponse(bool);
   void SetWasInPrefetchCache(bool);
@@ -270,8 +279,6 @@ class BLINK_PLATFORM_EXPORT WebURLResponse {
 
   void SetWasFetchedViaCache(bool);
   void SetArrivalTimeAtRenderer(base::TimeTicks arrival);
-
-  void SetHasPartitionedCookie(bool has_partitioned_cookie);
 
 #if INSIDE_BLINK
  protected:

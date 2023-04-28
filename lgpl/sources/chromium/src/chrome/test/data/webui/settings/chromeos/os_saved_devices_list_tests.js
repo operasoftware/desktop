@@ -8,10 +8,10 @@ import 'chrome://os-settings/strings.m.js';
 import {OsBluetoothDevicesSubpageBrowserProxyImpl} from 'chrome://os-settings/chromeos/os_settings.js';
 import {DeviceConnectionState} from 'chrome://resources/mojo/chromeos/ash/services/bluetooth_config/public/mojom/cros_bluetooth_config.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {createDefaultBluetoothDevice} from 'chrome://test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
+import {createDefaultBluetoothDevice} from 'chrome://webui-test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
 import {eventToPromise, isVisible} from 'chrome://webui-test/test_util.js';
 
-import {assertEquals, assertTrue} from '../../../chai_assert.js';
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 import {TestOsBluetoothDevicesSubpageBrowserProxy} from './test_os_bluetooth_subpage_browser_proxy.js';
 
@@ -63,11 +63,13 @@ suite('OsSavedDevicesListTest', function() {
     const ironResizePromise = eventToPromise('iron-resize', savedDevicesList);
 
     const listItem = getListItems()[1];
-    listItem.$$('#dotsMenu').click();
+    listItem.shadowRoot.querySelector('#dotsMenu').click();
     await flushAsync();
-    listItem.$$('#removeButton').click();
+    listItem.shadowRoot.querySelector('#removeButton').click();
     await flushAsync();
-    listItem.$$('#removeDeviceDialog').$$('#remove').click();
+    const removeDialog =
+        listItem.shadowRoot.querySelector('#removeDeviceDialog');
+    removeDialog.shadowRoot.querySelector('#remove').click();
 
     await ironResizePromise;
     await flushAsync();
@@ -141,9 +143,13 @@ suite('OsSavedDevicesListTest', function() {
     savedDevicesList.devices = [device0, device1];
     await flushAsync();
 
-    assertTrue(isVisible(getListItems()[0].$$('#noDeviceImage')));
-    assertFalse(isVisible(getListItems()[0].$$('#deviceImage')));
-    assertFalse(isVisible(getListItems()[1].$$('#noDeviceImage')));
-    assertTrue(isVisible(getListItems()[1].$$('#deviceImage')));
+    assertTrue(isVisible(
+        getListItems()[0].shadowRoot.querySelector('#noDeviceImage')));
+    assertFalse(
+        isVisible(getListItems()[0].shadowRoot.querySelector('#deviceImage')));
+    assertFalse(isVisible(
+        getListItems()[1].shadowRoot.querySelector('#noDeviceImage')));
+    assertTrue(
+        isVisible(getListItems()[1].shadowRoot.querySelector('#deviceImage')));
   });
 });

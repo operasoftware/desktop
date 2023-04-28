@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_H_
 
+#include "base/task/single_thread_task_runner.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -98,6 +99,16 @@ class CORE_EXPORT RemoteFrame final : public Frame,
       scoped_refptr<const SecurityOrigin> source_security_origin,
       scoped_refptr<const SecurityOrigin> target_security_origin);
 
+  // Whether the RemoteFrame is bound to a browser-side counterpart or not.
+  // It's possible for a RemoteFrame to be a placeholder main frame for a new
+  // Page, to be replaced by a provisional main LocalFrame that will do a
+  // LocalFrame <-> LocalFrame swap with the previous Page's main frame. See
+  // comments in `AgentSchedulingGroup::CreateWebView()` for more details.
+  // For those placeholder RemoteFrame, there won't be a browser-side
+  // counterpart, so we shouldn't try to use the RemoteFrameHost. Method calls
+  // that might trigger on a Page that hasn't committed yet (e.g. Detach())
+  // should gate calls `GetRemoteFrameHostRemote()` with this function first.
+  bool IsRemoteFrameHostRemoteBound();
   mojom::blink::RemoteFrameHost& GetRemoteFrameHostRemote();
 
   RemoteFrameView* View() const override;
@@ -205,6 +216,8 @@ class CORE_EXPORT RemoteFrame final : public Frame,
       const absl::optional<FrameToken>& opener_frame_token,
       mojom::blink::TreeScopeType tree_scope_type,
       mojom::blink::FrameReplicationStatePtr replication_state,
+      mojom::blink::FrameOwnerPropertiesPtr owner_properties,
+      bool is_loading,
       const base::UnguessableToken& devtools_frame_token,
       mojom::blink::RemoteFrameInterfacesFromBrowserPtr remote_frame_interfaces)
       override;

@@ -243,6 +243,8 @@ void avcodec_align_dimensions2(AVCodecContext *s, int *width, int *height,
     case AV_PIX_FMT_GBRAP16BE:
         w_align = 16; //FIXME assume 16 pixel per macroblock
         h_align = 16 * 2; // interlaced needs 2 macroblocks height
+        if (s->codec_id == AV_CODEC_ID_BINKVIDEO)
+            w_align = 16*2;
         break;
     case AV_PIX_FMT_YUV411P:
     case AV_PIX_FMT_YUVJ411P:
@@ -353,29 +355,17 @@ void avcodec_align_dimensions(AVCodecContext *s, int *width, int *height)
     align               = FFMAX3(align, linesize_align[1], linesize_align[2]);
     *width              = FFALIGN(*width, align);
 }
-
+#if FF_API_AVCODEC_CHROMA_POS
 int avcodec_enum_to_chroma_pos(int *xpos, int *ypos, enum AVChromaLocation pos)
 {
-    if (pos <= AVCHROMA_LOC_UNSPECIFIED || pos >= AVCHROMA_LOC_NB)
-        return AVERROR(EINVAL);
-    pos--;
-
-    *xpos = (pos&1) * 128;
-    *ypos = ((pos>>1)^(pos<4)) * 128;
-
-    return 0;
+    return av_chroma_location_enum_to_pos(xpos, ypos, pos);
 }
 
 enum AVChromaLocation avcodec_chroma_pos_to_enum(int xpos, int ypos)
 {
-    int pos, xout, yout;
-
-    for (pos = AVCHROMA_LOC_UNSPECIFIED + 1; pos < AVCHROMA_LOC_NB; pos++) {
-        if (avcodec_enum_to_chroma_pos(&xout, &yout, pos) == 0 && xout == xpos && yout == ypos)
-            return pos;
-    }
-    return AVCHROMA_LOC_UNSPECIFIED;
+    return av_chroma_location_pos_to_enum(xpos, ypos);
 }
+#endif
 
 int avcodec_fill_audio_frame(AVFrame *frame, int nb_channels,
                              enum AVSampleFormat sample_fmt, const uint8_t *buf,
@@ -526,7 +516,9 @@ int av_get_exact_bits_per_sample(enum AVCodecID codec_id)
     case AV_CODEC_ID_PCM_SGA:
     case AV_CODEC_ID_PCM_U8:
     case AV_CODEC_ID_SDX2_DPCM:
+    case AV_CODEC_ID_CBD2_DPCM:
     case AV_CODEC_ID_DERF_DPCM:
+    case AV_CODEC_ID_WADY_DPCM:
         return 8;
     case AV_CODEC_ID_PCM_S16BE:
     case AV_CODEC_ID_PCM_S16BE_PLANAR:
@@ -639,6 +631,7 @@ static int get_audio_frame_duration(enum AVCodecID id, int sr, int ch, int ba,
     case AV_CODEC_ID_MP2:
     case AV_CODEC_ID_MUSEPACK7:    return 1152;
     case AV_CODEC_ID_AC3:          return 1536;
+    case AV_CODEC_ID_FTR:          return 1024;
     }
 
     if (sr > 0) {
@@ -775,6 +768,9 @@ static int get_audio_frame_duration(enum AVCodecID id, int sr, int ch, int ba,
                     break;
                 case AV_CODEC_ID_ADPCM_MTAF:
                     tmp = blocks * (ba - 16LL) * 2 / ch;
+                    break;
+                case AV_CODEC_ID_ADPCM_XMD:
+                    tmp = blocks * 32;
                     break;
                 }
                 if (tmp) {

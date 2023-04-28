@@ -19,6 +19,7 @@ using PseudoElementStyleCache = Vector<scoped_refptr<const ComputedStyle>, 4>;
 class CORE_EXPORT StyleCachedData final {
  private:
   friend class ComputedStyle;
+  friend class ComputedStyleBuilder;
 
   // This cache stores ComputedStyles for pseudo elements originating from this
   // ComputedStyle's element. Pseudo elements which are represented by
@@ -48,6 +49,12 @@ class CORE_EXPORT StyleCachedData final {
 
   // Stores the names of of all custom properties on a given ComputedStyle.
   std::unique_ptr<Vector<AtomicString>> variable_names_;
+
+  // If this style is a "decorating box" stores the list of applied text
+  // decorations (with the most recent decoration from this box being at the
+  // end of the Vector).
+  scoped_refptr<base::RefCountedData<Vector<AppliedTextDecoration, 1>>>
+      applied_text_decorations_;
 };
 
 }  // namespace blink

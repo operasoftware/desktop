@@ -1375,7 +1375,8 @@ static int mov_write_vpcc_tag(AVFormatContext *s, AVIOContext *pb, MOVTrack *tra
     ffio_wfourcc(pb, "vpcC");
     avio_w8(pb, 1); /* version */
     avio_wb24(pb, 0); /* flags */
-    ff_isom_write_vpcc(s, pb, track->par);
+    ff_isom_write_vpcc(s, pb, track->vos_data, track->vos_len, track->par);
+
     return update_size(pb, pos);
 }
 
@@ -2179,6 +2180,16 @@ static int mov_write_ccst_tag(AVIOContext *pb)
     return update_size(pb, pos);
 }
 
+static int mov_write_aux_tag(AVIOContext *pb, const char *aux_type)
+{
+    int64_t pos = avio_tell(pb);
+    avio_wb32(pb, 0); /* size */
+    ffio_wfourcc(pb, aux_type);
+    avio_wb32(pb, 0); /* Version & flags */
+    avio_write(pb, "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0", 44);
+    return update_size(pb, pos);
+}
+
 static int mov_write_video_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContext *mov, MOVTrack *track)
 {
     int ret = AVERROR_BUG;
@@ -2319,10 +2330,11 @@ static int mov_write_video_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContex
             av_stream_get_side_data(track->st, AV_PKT_DATA_ICC_PROFILE, NULL)) {
             int prefer_icc = mov->flags & FF_MOV_FLAG_PREFER_ICC || !has_color_info;
             mov_write_colr_tag(pb, track, prefer_icc);
-        } else if (mov->flags & FF_MOV_FLAG_WRITE_COLR) {
-             av_log(mov->fc, AV_LOG_WARNING, "Not writing 'colr' atom. Format is not MOV or MP4.\n");
         }
+    } else if (mov->flags & FF_MOV_FLAG_WRITE_COLR) {
+        av_log(mov->fc, AV_LOG_WARNING, "Not writing 'colr' atom. Format is not MOV or MP4 or AVIF.\n");
     }
+
     if (track->mode == MODE_MOV || track->mode == MODE_MP4) {
         mov_write_clli_tag(pb, track);
         mov_write_mdcv_tag(pb, track);
@@ -2363,8 +2375,11 @@ static int mov_write_video_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContex
     if (avid)
         avio_wb32(pb, 0);
 
-    if (track->mode == MODE_AVIF)
+    if (track->mode == MODE_AVIF) {
         mov_write_ccst_tag(pb);
+        if (s->nb_streams > 0 && track == &mov->tracks[1])
+            mov_write_aux_tag(pb, "auxi");
+    }
 
     return update_size(pb, pos);
 }
@@ -3044,16 +3059,6 @@ static int mov_write_pixi_tag(AVIOContext *pb, MOVMuxContext *mov, AVFormatConte
     return update_size(pb, pos);
 }
 
-static int mov_write_auxC_tag(AVIOContext *pb)
-{
-    int64_t pos = avio_tell(pb);
-    avio_wb32(pb, 0); /* size */
-    ffio_wfourcc(pb, "auxC");
-    avio_wb32(pb, 0); /* Version & flags */
-    avio_write(pb, "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0", 44);
-    return update_size(pb, pos);
-}
-
 static int mov_write_ipco_tag(AVIOContext *pb, MOVMuxContext *mov, AVFormatContext *s)
 {
     int64_t pos = avio_tell(pb);
@@ -3066,7 +3071,7 @@ static int mov_write_ipco_tag(AVIOContext *pb, MOVMuxContext *mov, AVFormatConte
         if (!i)
             mov_write_colr_tag(pb, &mov->tracks[0], 0);
         else
-            mov_write_auxC_tag(pb);
+            mov_write_aux_tag(pb, "auxC");
     }
     return update_size(pb, pos);
 }
@@ -3282,13 +3287,21 @@ static int mov_write_tkhd_tag(AVIOContext *pb, MOVMuxContext *mov,
     int64_t duration = av_rescale_rnd(calc_pts_duration(mov, track),
                                       mov->movie_timescale, track->timescale,
                                       AV_ROUND_UP);
-    int version = duration < INT32_MAX ? 0 : 1;
+    int version;
     int flags   = MOV_TKHD_FLAG_IN_MOVIE;
     int group   = 0;
 
     uint32_t *display_matrix = NULL;
     size_t display_matrix_size;
     int       i;
+
+    if (mov->mode == MODE_AVIF)
+        if (!mov->avif_loop_count)
+            duration = INT64_MAX;
+        else
+            duration *= mov->avif_loop_count;
+
+     version = duration < INT32_MAX ? 0 : 1;
 
     if (st) {
         if (mov->per_stream_grouping)
@@ -3409,7 +3422,10 @@ static int mov_write_tapt_tag(AVIOContext *pb, MOVTrack *track)
     return update_size(pb, pos);
 }
 
-// This box seems important for the psp playback ... without it the movie seems to hang
+// This box is written in the following cases:
+//   * Seems important for the psp playback. Without it the movie seems to hang.
+//   * Used for specifying the looping behavior of animated AVIF (as specified
+//   in Section 9.6 of the HEIF specification ISO/IEC 23008-12).
 static int mov_write_edts_tag(AVIOContext *pb, MOVMuxContext *mov,
                               MOVTrack *track)
 {
@@ -3420,6 +3436,7 @@ static int mov_write_edts_tag(AVIOContext *pb, MOVMuxContext *mov,
     int entry_size, entry_count, size;
     int64_t delay, start_ct = track->start_cts;
     int64_t start_dts = track->start_dts;
+    int flags = 0;
 
     if (track->entry) {
         if (start_dts != track->cluster[0].dts || start_ct != track->cluster[0].cts) {
@@ -3435,6 +3452,17 @@ static int mov_write_edts_tag(AVIOContext *pb, MOVMuxContext *mov,
 
     delay = av_rescale_rnd(start_dts + start_ct, mov->movie_timescale,
                            track->timescale, AV_ROUND_DOWN);
+
+    if (mov->mode == MODE_AVIF) {
+        delay = 0;
+        // Section 9.6.3 of ISO/IEC 23008-12: flags specifies repetition of the
+        // edit list as follows: (flags & 1) equal to 0 specifies that the edit
+        // list is not repeated, while (flags & 1) equal to 1 specifies that the
+        // edit list is repeated.
+        flags = mov->avif_loop_count != 1;
+        start_ct = 0;
+    }
+
     version |= delay < INT32_MAX ? 0 : 1;
 
     entry_size = (version == 1) ? 20 : 12;
@@ -3447,7 +3475,7 @@ static int mov_write_edts_tag(AVIOContext *pb, MOVMuxContext *mov,
     avio_wb32(pb, size - 8);
     ffio_wfourcc(pb, "elst");
     avio_w8(pb, version);
-    avio_wb24(pb, 0); /* flags */
+    avio_wb24(pb, flags); /* flags */
 
     avio_wb32(pb, entry_count);
     if (delay > 0) { /* add an empty edit to delay presentation */
@@ -3464,7 +3492,7 @@ static int mov_write_edts_tag(AVIOContext *pb, MOVMuxContext *mov,
             avio_wb32(pb, -1);
         }
         avio_wb32(pb, 0x00010000);
-    } else {
+    } else if (mov->mode != MODE_AVIF) {
         /* Avoid accidentally ending up with start_ct = -1 which has got a
          * special meaning. Normally start_ct should end up positive or zero
          * here, but use FFMIN in case dts is a small positive integer
@@ -3664,6 +3692,9 @@ static int mov_write_trak_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContext
             av_log(mov->fc, AV_LOG_WARNING,
                    "Not writing any edit list even though one would have been required\n");
     }
+
+    if (mov->is_animated_avif)
+        mov_write_edts_tag(pb, mov, track);
 
     if (track->tref_tag)
         mov_write_tref_tag(pb, track);
@@ -4106,7 +4137,7 @@ static int mov_write_mdta_hdlr_tag(AVIOContext *pb, MOVMuxContext *mov,
 static int mov_write_mdta_keys_tag(AVIOContext *pb, MOVMuxContext *mov,
                                    AVFormatContext *s)
 {
-    AVDictionaryEntry *t = NULL;
+    const AVDictionaryEntry *t = NULL;
     int64_t pos = avio_tell(pb);
     int64_t curpos, entry_pos;
     int count = 0;
@@ -4117,7 +4148,7 @@ static int mov_write_mdta_keys_tag(AVIOContext *pb, MOVMuxContext *mov,
     entry_pos = avio_tell(pb);
     avio_wb32(pb, 0); /* entry count */
 
-    while (t = av_dict_get(s->metadata, "", t, AV_DICT_IGNORE_SUFFIX)) {
+    while (t = av_dict_iterate(s->metadata, t)) {
         size_t key_len = strlen(t->key);
         avio_wb32(pb, key_len + 8);
         ffio_wfourcc(pb, "mdta");
@@ -4135,14 +4166,14 @@ static int mov_write_mdta_keys_tag(AVIOContext *pb, MOVMuxContext *mov,
 static int mov_write_mdta_ilst_tag(AVIOContext *pb, MOVMuxContext *mov,
                                    AVFormatContext *s)
 {
-    AVDictionaryEntry *t = NULL;
+    const AVDictionaryEntry *t = NULL;
     int64_t pos = avio_tell(pb);
     int count = 1; /* keys are 1-index based */
 
     avio_wb32(pb, 0); /* size */
     ffio_wfourcc(pb, "ilst");
 
-    while (t = av_dict_get(s->metadata, "", t, AV_DICT_IGNORE_SUFFIX)) {
+    while (t = av_dict_iterate(s->metadata, t)) {
         int64_t entry_pos = avio_tell(pb);
         avio_wb32(pb, 0); /* size */
         avio_wb32(pb, count); /* key */
@@ -6030,6 +6061,7 @@ int ff_mov_write_packet(AVFormatContext *s, AVPacket *pkt)
     if ((par->codec_id == AV_CODEC_ID_DNXHD ||
          par->codec_id == AV_CODEC_ID_H264 ||
          par->codec_id == AV_CODEC_ID_HEVC ||
+         par->codec_id == AV_CODEC_ID_VP9 ||
          par->codec_id == AV_CODEC_ID_TRUEHD) && !trk->vos_len &&
          !TAG_IS_AVCI(trk->tag)) {
         /* copy frame to create needed atoms */
@@ -7752,6 +7784,12 @@ static const AVCodecTag codec_f4v_tags[] = {
 };
 
 #if CONFIG_AVIF_MUXER
+
+static const AVOption avif_options[] = {
+    { "movie_timescale", "set movie timescale", offsetof(MOVMuxContext, movie_timescale), AV_OPT_TYPE_INT, {.i64 = MOV_TIMESCALE}, 1, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM},
+    { "loop", "Number of times to loop animated AVIF: 0 - infinite loop", offsetof(MOVMuxContext, avif_loop_count), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM, 0 },
+    { NULL },
+};
 static const AVCodecTag codec_avif_tags[] = {
     { AV_CODEC_ID_AV1,     MKTAG('a','v','0','1') },
     { AV_CODEC_ID_NONE, 0 },
@@ -7761,6 +7799,7 @@ static const AVCodecTag *const codec_avif_tags_list[] = { codec_avif_tags, NULL 
 static const AVClass mov_avif_muxer_class = {
     .class_name = "avif muxer",
     .item_name  = av_default_item_name,
+    .option     = avif_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 #endif

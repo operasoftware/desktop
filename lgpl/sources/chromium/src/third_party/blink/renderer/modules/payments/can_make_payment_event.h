@@ -26,17 +26,14 @@ class MODULES_EXPORT CanMakePaymentEvent final : public ExtendableEvent {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CanMakePaymentEvent* Create(ScriptState*,
-                                     const AtomicString& type,
+  static CanMakePaymentEvent* Create(const AtomicString& type,
                                      const CanMakePaymentEventInit*);
-  static CanMakePaymentEvent* Create(ScriptState*,
-                                     const AtomicString& type,
+  static CanMakePaymentEvent* Create(const AtomicString& type,
                                      const CanMakePaymentEventInit*,
                                      CanMakePaymentRespondWithObserver*,
                                      WaitUntilObserver*);
 
-  CanMakePaymentEvent(ScriptState*,
-                      const AtomicString& type,
+  CanMakePaymentEvent(const AtomicString& type,
                       const CanMakePaymentEventInit*,
                       CanMakePaymentRespondWithObserver*,
                       WaitUntilObserver*);

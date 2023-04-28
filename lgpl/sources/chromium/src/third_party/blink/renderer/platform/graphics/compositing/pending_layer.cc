@@ -49,34 +49,26 @@ bool IsCompositedScrollbar(const DisplayItem& item) {
 
 // Snap |bounds| if within floating-point numeric limits of an integral rect.
 void PreserveNearIntegralBounds(gfx::RectF& bounds) {
-  if (std::abs(std::round(bounds.x()) - bounds.x()) <=
-          std::numeric_limits<float>::epsilon() &&
-      std::abs(std::round(bounds.y()) - bounds.y()) <=
-          std::numeric_limits<float>::epsilon() &&
-      std::abs(std::round(bounds.right()) - bounds.right()) <=
-          std::numeric_limits<float>::epsilon() &&
-      std::abs(std::round(bounds.bottom()) - bounds.bottom()) <=
-          std::numeric_limits<float>::epsilon()) {
+  constexpr float kTolerance = 1e-5f;
+  if (std::abs(std::round(bounds.x()) - bounds.x()) <= kTolerance &&
+      std::abs(std::round(bounds.y()) - bounds.y()) <= kTolerance &&
+      std::abs(std::round(bounds.right()) - bounds.right()) <= kTolerance &&
+      std::abs(std::round(bounds.bottom()) - bounds.bottom()) <= kTolerance) {
     bounds = gfx::RectF(gfx::ToRoundedRect(bounds));
   }
 }
 
 }  // anonymous namespace
 
-PendingLayer::PendingLayer(const PaintChunkSubset& chunks,
-                           const PaintChunkIterator& first_chunk)
-    : PendingLayer(chunks, *first_chunk, first_chunk.IndexInPaintArtifact()) {}
-
-PendingLayer::PendingLayer(const PaintChunkSubset& chunks,
-                           const PaintChunk& first_chunk,
-                           wtf_size_t first_chunk_index_in_paint_artifact)
+PendingLayer::PendingLayer(scoped_refptr<const PaintArtifact> artifact,
+                           const PaintChunk& first_chunk)
     : bounds_(first_chunk.bounds),
       rect_known_to_be_opaque_(first_chunk.rect_known_to_be_opaque),
       has_text_(first_chunk.has_text),
       draws_content_(first_chunk.DrawsContent()),
       text_known_to_be_on_opaque_background_(
           first_chunk.text_known_to_be_on_opaque_background),
-      chunks_(&chunks.GetPaintArtifact(), first_chunk_index_in_paint_artifact),
+      chunks_(std::move(artifact), first_chunk),
       property_tree_state_(
           first_chunk.properties.GetPropertyTreeState().Unalias()),
       compositing_type_(kOther) {
@@ -88,18 +80,20 @@ PendingLayer::PendingLayer(const PaintChunkSubset& chunks,
   if (const absl::optional<gfx::RectF>& visibility_limit =
           VisibilityLimit(GetPropertyTreeState())) {
     bounds_.Intersect(*visibility_limit);
-    if (bounds_.IsEmpty())
+    if (bounds_.IsEmpty()) {
       draws_content_ = false;
+    }
   }
 
   if (IsCompositedScrollHitTest(first_chunk)) {
     compositing_type_ = kScrollHitTestLayer;
   } else if (first_chunk.size()) {
     const auto& first_display_item = FirstDisplayItem();
-    if (first_display_item.IsForeignLayer())
+    if (first_display_item.IsForeignLayer()) {
       compositing_type_ = kForeignLayer;
-    else if (IsCompositedScrollbar(first_display_item))
+    } else if (IsCompositedScrollbar(first_display_item)) {
       compositing_type_ = kScrollbarLayer;
+    }
   }
 }
 
@@ -143,6 +137,16 @@ std::unique_ptr<JSONObject> PendingLayer::ToJSON() const {
   result->SetArray("paint_chunks", chunks_.ToJSON());
   result->SetBoolean("draws_content", DrawsContent());
   return result;
+}
+
+String PendingLayer::DebugName() const {
+  return Chunks().GetPaintArtifact().ClientDebugName(
+      FirstPaintChunk().id.client_id);
+}
+
+DOMNodeId PendingLayer::OwnerNodeId() const {
+  return Chunks().GetPaintArtifact().ClientOwnerNodeId(
+      FirstPaintChunk().id.client_id);
 }
 
 std::ostream& operator<<(std::ostream& os, const PendingLayer& layer) {
@@ -371,7 +375,7 @@ void PendingLayer::DecompositeTransforms(Vector<PendingLayer>& pending_layers) {
     for (const auto* node = &property_state.Transform();
          !node->IsRoot() && !can_be_decomposited.Contains(node);
          node = &node->Parent()->Unalias()) {
-      if (!node->IsIdentityOr2DTranslation() || node->ScrollNode() ||
+      if (!node->IsIdentityOr2dTranslation() || node->ScrollNode() ||
           node->HasDirectCompositingReasonsOtherThan3dTransform() ||
           !node->FlattensInheritedTransformSameAsParent() ||
           !node->BackfaceVisibilitySameAsParent()) {
@@ -414,7 +418,7 @@ void PendingLayer::DecompositeTransforms(Vector<PendingLayer>& pending_layers) {
     const auto* transform = &pending_layer.GetPropertyTreeState().Transform();
     while (!transform->IsRoot() && can_be_decomposited.at(transform)) {
       pending_layer.offset_of_decomposited_transforms_ +=
-          transform->Translation2D();
+          transform->Get2dTranslation();
       pending_layer.change_of_decomposited_transforms_ =
           std::max(pending_layer.ChangeOfDecompositedTransforms(),
                    transform->NodeChanged());

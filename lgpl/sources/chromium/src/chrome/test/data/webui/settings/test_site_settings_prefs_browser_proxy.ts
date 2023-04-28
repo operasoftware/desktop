@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {assert} from 'chrome://resources/js/assert.js';
-import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {assert} from 'chrome://resources/js/assert_ts.js';
+import {webUIListenerCallback} from 'chrome://resources/js/cr.js';
 import {AppProtocolEntry, ChooserType, ContentSetting, ContentSettingsTypes, HandlerEntry, NotificationPermission, ProtocolEntry, RawChooserException, RawSiteException, RecentSitePermissions, SiteGroup, SiteSettingSource, SiteSettingsPrefsBrowserProxy, ZoomLevelEntry} from 'chrome://settings/lazy_load.js';
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
@@ -75,6 +75,7 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
       'undoIgnoreNotificationPermissionForOrigins',
       'getFpsMembershipLabel',
       'getNumCookiesString',
+      'getExtensionName',
     ]);
 
 
@@ -424,11 +425,9 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
 
   /** @override */
   resetChooserExceptionForSite(
-      chooserType: ChooserType, origin: string, embeddingOrigin: string,
-      exception: Object) {
+      chooserType: ChooserType, origin: string, exception: Object) {
     this.methodCalled(
-        'resetChooserExceptionForSite',
-        [chooserType, origin, embeddingOrigin, exception]);
+        'resetChooserExceptionForSite', [chooserType, origin, exception]);
   }
 
   /** @override */
@@ -651,5 +650,10 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
     this.methodCalled('getNumCookiesString', numCookies);
     return Promise.resolve(
         `${numCookies} ` + (numCookies === 1 ? 'cookie' : 'cookies'));
+  }
+
+  getExtensionName(id: string) {
+    this.methodCalled('getExtensionName', id);
+    return Promise.resolve(`Test Extension ${id}`);
   }
 }

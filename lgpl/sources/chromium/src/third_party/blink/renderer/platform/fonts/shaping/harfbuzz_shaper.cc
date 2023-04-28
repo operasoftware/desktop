@@ -35,6 +35,7 @@
 #include <unicode/uchar.h>
 #include <unicode/uscript.h>
 #include <algorithm>
+#include <hb-cplusplus.hh>
 #include <memory>
 #include <utility>
 
@@ -190,32 +191,6 @@ struct ReshapeQueueItem {
       : action_(action), start_index_(start), num_characters_(num) {}
 };
 
-template <typename T>
-class HarfBuzzScopedPtr {
-  STACK_ALLOCATED();
-
- public:
-  typedef void (*DestroyFunction)(T*);
-
-  HarfBuzzScopedPtr(T* ptr, DestroyFunction destroy)
-      : ptr_(ptr), destroy_(destroy) {
-    DCHECK(destroy_);
-  }
-  HarfBuzzScopedPtr(const HarfBuzzScopedPtr&) = delete;
-  HarfBuzzScopedPtr& operator=(const HarfBuzzScopedPtr&) = delete;
-  ~HarfBuzzScopedPtr() {
-    if (ptr_)
-      (*destroy_)(ptr_);
-  }
-
-  T* Get() { return ptr_; }
-  void Set(T* ptr) { ptr_ = ptr; }
-
- private:
-  T* ptr_;
-  DestroyFunction destroy_;
-};
-
 struct RangeData {
   STACK_ALLOCATED();
 
@@ -282,8 +257,7 @@ void RoundHarfBuzzBufferPositions(hb_buffer_t* buffer) {
 }
 
 inline bool ShapeRange(hb_buffer_t* buffer,
-                       const hb_feature_t* font_features,
-                       unsigned font_features_size,
+                       const FontFeatures& font_features,
                        const SimpleFontData* current_font,
                        scoped_refptr<UnicodeRangeSet> current_font_range_set,
                        UScriptCode current_run_script,
@@ -297,6 +271,25 @@ inline bool ShapeRange(hb_buffer_t* buffer,
     return false;
   }
 
+  FontFeatures variant_features;
+  if (!platform_data->ResolvedFeatures().empty()) {
+    const ResolvedFontFeatures& resolved_features =
+        platform_data->ResolvedFeatures();
+    for (const std::pair<uint32_t, uint32_t>& feature : resolved_features) {
+      variant_features.Append({feature.first, feature.second, 0 /* start */,
+                               static_cast<unsigned>(-1) /* end */});
+    }
+  }
+
+  bool needs_feature_merge = variant_features.size();
+  if (needs_feature_merge) {
+    for (wtf_size_t i = 0; i < font_features.size(); ++i) {
+      variant_features.Append(font_features.data()[i]);
+    }
+  }
+  const FontFeatures& argument_features =
+      needs_feature_merge ? variant_features : font_features;
+
   hb_buffer_set_language(buffer, language);
   hb_buffer_set_script(buffer, ICUScriptToHBScript(current_run_script));
   hb_buffer_set_direction(buffer, direction);
@@ -307,7 +300,7 @@ inline bool ShapeRange(hb_buffer_t* buffer,
                               ? HarfBuzzFace::kPrepareForVerticalLayout
                               : HarfBuzzFace::kNoVerticalLayout,
                           specified_size);
-  hb_shape(hb_font, buffer, font_features, font_features_size);
+  hb_shape(hb_font, buffer, argument_features.data(), argument_features.size());
   if (!face->ShouldSubpixelPosition())
     RoundHarfBuzzBufferPositions(buffer);
 
@@ -851,13 +844,10 @@ void HarfBuzzShaper::ShapeSegment(
         caps_support.FontFeatureToUse(small_caps_behavior));
     hb_direction_t direction = range_data->HarfBuzzDirection(canvas_rotation);
 
-    if (!ShapeRange(range_data->buffer,
-                    range_data->font_features.IsEmpty()
-                        ? nullptr
-                        : range_data->font_features.data(),
-                    range_data->font_features.size(), adjusted_font,
-                    current_font_data_for_range_set->Ranges(), segment.script,
-                    direction, language, font_description.SpecifiedSize()))
+    if (!ShapeRange(range_data->buffer, range_data->font_features,
+                    adjusted_font, current_font_data_for_range_set->Ranges(),
+                    segment.script, direction, language,
+                    font_description.SpecifiedSize()))
       DLOG(ERROR) << "Shaping range failed.";
 
     ExtractShapeResults(range_data, font_cycle_queued, current_queue_item,
@@ -893,8 +883,8 @@ scoped_refptr<ShapeResult> HarfBuzzShaper::Shape(const Font* font,
   scoped_refptr<ShapeResult> result =
       ShapeResult::Create(font, start, length, direction);
 
-  HarfBuzzScopedPtr<hb_buffer_t> buffer(hb_buffer_create(), hb_buffer_destroy);
-  RangeData range_data = CreateRangeData(font, direction, buffer.Get());
+  hb::unique_ptr<hb_buffer_t> buffer(hb_buffer_create());
+  RangeData range_data = CreateRangeData(font, direction, buffer.get());
   range_data.start = start;
   range_data.end = end;
 
@@ -950,8 +940,8 @@ scoped_refptr<ShapeResult> HarfBuzzShaper::Shape(
   scoped_refptr<ShapeResult> result =
       ShapeResult::Create(font, start, length, direction);
 
-  HarfBuzzScopedPtr<hb_buffer_t> buffer(hb_buffer_create(), hb_buffer_destroy);
-  RangeData range_data = CreateRangeData(font, direction, buffer.Get());
+  hb::unique_ptr<hb_buffer_t> buffer(hb_buffer_create());
+  RangeData range_data = CreateRangeData(font, direction, buffer.get());
 
   for (const RunSegmenter::RunSegmenterRange& segmented_range : ranges) {
     DCHECK_GE(segmented_range.end, segmented_range.start);
@@ -986,8 +976,8 @@ scoped_refptr<ShapeResult> HarfBuzzShaper::Shape(
   scoped_refptr<ShapeResult> result =
       ShapeResult::Create(font, start, length, direction);
 
-  HarfBuzzScopedPtr<hb_buffer_t> buffer(hb_buffer_create(), hb_buffer_destroy);
-  RangeData range_data = CreateRangeData(font, direction, buffer.Get());
+  hb::unique_ptr<hb_buffer_t> buffer(hb_buffer_create());
+  RangeData range_data = CreateRangeData(font, direction, buffer.get());
   range_data.start = start;
   range_data.end = end;
 

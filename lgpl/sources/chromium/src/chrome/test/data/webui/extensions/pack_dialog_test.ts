@@ -7,7 +7,6 @@
 import 'chrome://extensions/extensions.js';
 
 import {ExtensionsPackDialogAlertElement, ExtensionsPackDialogElement, PackDialogDelegate} from 'chrome://extensions/extensions.js';
-import {assert} from 'chrome://resources/js/assert.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
@@ -31,11 +30,11 @@ Object.assign(window, {extension_pack_dialog_tests});
 class MockDelegate implements PackDialogDelegate {
   rootPromise: PromiseResolver<string>|null = null;
   keyPromise: PromiseResolver<string>|null = null;
-  flag: number|undefined = 0;
-  mockResponse: chrome.developerPrivate.PackDirectoryResponse|null = null;
-
   rootPath: string|null = null;
   keyPath: string|null = null;
+  flag: number|undefined = 0;
+  packPromise: PromiseResolver<chrome.developerPrivate.PackDirectoryResponse>|
+      null = null;
 
   choosePackRootDirectory() {
     this.rootPromise = new PromiseResolver();
@@ -47,17 +46,12 @@ class MockDelegate implements PackDialogDelegate {
     return this.keyPromise.promise;
   }
 
-  packExtension(
-      rootPath: string, keyPath: string, flag?: number,
-      callback?:
-          (response: chrome.developerPrivate.PackDirectoryResponse) => void) {
+  packExtension(rootPath: string, keyPath: string, flag?: number) {
     this.rootPath = rootPath;
     this.keyPath = keyPath;
     this.flag = flag;
-
-    if (callback && this.mockResponse) {
-      callback(this.mockResponse);
-    }
+    this.packPromise = new PromiseResolver();
+    return this.packPromise.promise;
   }
 }
 
@@ -66,15 +60,14 @@ suite(extension_pack_dialog_tests.suiteName, function() {
   let mockDelegate: MockDelegate;
 
   setup(function() {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     mockDelegate = new MockDelegate();
     packDialog = document.createElement('extensions-pack-dialog');
     packDialog.delegate = mockDelegate;
     document.body.appendChild(packDialog);
   });
 
-  test(assert(extension_pack_dialog_tests.TestNames.Interaction), function() {
+  test(extension_pack_dialog_tests.TestNames.Interaction, function() {
     const dialogElement = packDialog.$.dialog.getNative();
 
     assertTrue(isElementVisible(dialogElement));
@@ -111,7 +104,7 @@ suite(extension_pack_dialog_tests.suiteName, function() {
     });
   });
 
-  test(assert(extension_pack_dialog_tests.TestNames.PackSuccess), function() {
+  test(extension_pack_dialog_tests.TestNames.PackSuccess, function() {
     const dialogElement = packDialog.$.dialog.getNative();
     let packDialogAlert: ExtensionsPackDialogAlertElement;
     let alertElement: HTMLDialogElement;
@@ -119,13 +112,6 @@ suite(extension_pack_dialog_tests.suiteName, function() {
     assertTrue(isElementVisible(dialogElement));
 
     const kRootPath = 'this/is/a/path';
-    mockDelegate.mockResponse = {
-      message: '',
-      item_path: '',
-      pem_path: '',
-      override_flags: 0,
-      status: chrome.developerPrivate.PackStatus.SUCCESS,
-    };
 
     packDialog.$.rootDirBrowse.click();
     mockDelegate.rootPromise!.resolve(kRootPath);
@@ -135,8 +121,17 @@ suite(extension_pack_dialog_tests.suiteName, function() {
           assertEquals(kRootPath, packDialog.$.rootDir.value);
           packDialog.shadowRoot!.querySelector<HTMLElement>(
                                     '.action-button')!.click();
-
           return flushTasks();
+        })
+        .then(() => {
+          mockDelegate.packPromise!.resolve({
+            message: '',
+            item_path: '',
+            pem_path: '',
+            override_flags: 0,
+            status: chrome.developerPrivate.PackStatus.SUCCESS,
+          });
+          return mockDelegate.packPromise!.promise;
         })
         .then(() => {
           packDialogAlert = packDialog.shadowRoot!.querySelector(
@@ -160,7 +155,7 @@ suite(extension_pack_dialog_tests.suiteName, function() {
         });
   });
 
-  test(assert(extension_pack_dialog_tests.TestNames.PackError), function() {
+  test(extension_pack_dialog_tests.TestNames.PackError, function() {
     const dialogElement = packDialog.$.dialog.getNative();
     let packDialogAlert: ExtensionsPackDialogAlertElement;
     let alertElement: HTMLDialogElement;
@@ -168,56 +163,6 @@ suite(extension_pack_dialog_tests.suiteName, function() {
     assertTrue(isElementVisible(dialogElement));
 
     const kRootPath = 'this/is/a/path';
-    mockDelegate.mockResponse = {
-      message: '',
-      item_path: '',
-      pem_path: '',
-      override_flags: 0,
-      status: chrome.developerPrivate.PackStatus.ERROR,
-    };
-
-    packDialog.$.rootDirBrowse.click();
-    mockDelegate.rootPromise!.resolve(kRootPath);
-
-    return mockDelegate.rootPromise!.promise.then(() => {
-      assertEquals(kRootPath, packDialog.$.rootDir.value);
-      packDialog.shadowRoot!.querySelector<HTMLElement>(
-                                '.action-button')!.click();
-      flush();
-
-      // Make sure new alert and the appropriate buttons are visible.
-      packDialogAlert =
-          packDialog.shadowRoot!.querySelector('extensions-pack-dialog-alert')!;
-      alertElement = packDialogAlert.$.dialog.getNative();
-      assertTrue(isElementVisible(alertElement));
-      assertTrue(isElementVisible(dialogElement));
-      assertTrue(!!packDialogAlert.shadowRoot!.querySelector('.action-button'));
-
-      // After cancel, original dialog is still open and values unchanged.
-      packDialogAlert.shadowRoot!.querySelector<HTMLElement>(
-                                     '.action-button')!.click();
-      flush();
-      assertFalse(isElementVisible(alertElement));
-      assertTrue(isElementVisible(dialogElement));
-      assertEquals(kRootPath, packDialog.$.rootDir.value);
-    });
-  });
-
-  test(assert(extension_pack_dialog_tests.TestNames.PackWarning), function() {
-    const dialogElement = packDialog.$.dialog.getNative();
-    let packDialogAlert: ExtensionsPackDialogAlertElement;
-    let alertElement: HTMLDialogElement;
-
-    assertTrue(isElementVisible(dialogElement));
-
-    const kRootPath = 'this/is/a/path';
-    mockDelegate.mockResponse = {
-      message: '',
-      status: chrome.developerPrivate.PackStatus.WARNING,
-      item_path: 'item_path',
-      pem_path: 'pem_path',
-      override_flags: 1,
-    };
 
     packDialog.$.rootDirBrowse.click();
     mockDelegate.rootPromise!.resolve(kRootPath);
@@ -227,7 +172,71 @@ suite(extension_pack_dialog_tests.suiteName, function() {
           assertEquals(kRootPath, packDialog.$.rootDir.value);
           packDialog.shadowRoot!.querySelector<HTMLElement>(
                                     '.action-button')!.click();
+          return flushTasks();
+        })
+        .then(() => {
+          mockDelegate.packPromise!.resolve({
+            message: '',
+            item_path: '',
+            pem_path: '',
+            override_flags: 0,
+            status: chrome.developerPrivate.PackStatus.ERROR,
+          });
+          return mockDelegate.packPromise!.promise;
+        })
+        .then(() => {
+          // Make sure new alert and the appropriate buttons are visible.
+          packDialogAlert = packDialog.shadowRoot!.querySelector(
+              'extensions-pack-dialog-alert')!;
+          alertElement = packDialogAlert.$.dialog.getNative();
+          assertTrue(isElementVisible(alertElement));
+          assertTrue(isElementVisible(dialogElement));
+          assertTrue(
+              !!packDialogAlert.shadowRoot!.querySelector('.action-button'));
+
+          // After cancel, original dialog is still open and values unchanged.
+          packDialogAlert.shadowRoot!
+              .querySelector<HTMLElement>('.action-button')!.click();
           flush();
+          assertFalse(isElementVisible(alertElement));
+          assertTrue(isElementVisible(dialogElement));
+          assertEquals(kRootPath, packDialog.$.rootDir.value);
+        });
+  });
+
+  test(extension_pack_dialog_tests.TestNames.PackWarning, function() {
+    const dialogElement = packDialog.$.dialog.getNative();
+    let packDialogAlert: ExtensionsPackDialogAlertElement;
+    let alertElement: HTMLDialogElement;
+
+    assertTrue(isElementVisible(dialogElement));
+
+    const kRootPath = 'this/is/a/path';
+    const kOverrideFlags = 1;
+
+    packDialog.$.rootDirBrowse.click();
+    mockDelegate.rootPromise!.resolve(kRootPath);
+
+    return mockDelegate.rootPromise!.promise
+        .then(() => {
+          assertEquals(kRootPath, packDialog.$.rootDir.value);
+          packDialog.shadowRoot!.querySelector<HTMLElement>(
+                                    '.action-button')!.click();
+          return flushTasks();
+        })
+        .then(() => {
+          mockDelegate.packPromise!.resolve({
+            message: '',
+            status: chrome.developerPrivate.PackStatus.WARNING,
+            item_path: 'item_path',
+            pem_path: 'pem_path',
+            override_flags: kOverrideFlags,
+          });
+          return mockDelegate.packPromise!.promise;
+        })
+        .then(() => {
+          // Clear the flag. We expect it to change later.
+          mockDelegate.flag = 0;
 
           // Make sure new alert and the appropriate buttons are visible.
           packDialogAlert = packDialog.shadowRoot!.querySelector(
@@ -251,8 +260,7 @@ suite(extension_pack_dialog_tests.suiteName, function() {
         .then(() => {
           // Make sure packExtension is called again with the right params.
           assertFalse(isElementVisible(alertElement));
-          assertEquals(
-              mockDelegate.flag, mockDelegate.mockResponse!.override_flags);
+          assertEquals(mockDelegate.flag, kOverrideFlags);
         });
   });
 });

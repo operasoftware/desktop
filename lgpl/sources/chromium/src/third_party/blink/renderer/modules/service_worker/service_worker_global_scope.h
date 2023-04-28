@@ -37,6 +37,7 @@
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/network/public/cpp/data_element.h"
 #include "services/network/public/mojom/network_context.mojom-blink-forward.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom-blink-forward.h"
@@ -315,7 +316,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   const ServiceWorkerToken& GetServiceWorkerToken() const { return token_; }
   WorkerToken GetWorkerToken() const final { return token_; }
   bool CrossOriginIsolatedCapability() const final;
-  bool IsolatedApplicationCapability() const final;
+  bool IsIsolatedContext() const final;
   ExecutionContextToken GetExecutionContextToken() const final {
     return token_;
   }
@@ -326,6 +327,10 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   }
 
   mojom::blink::ServiceWorkerFetchHandlerType FetchHandlerType();
+
+  // EventTarget
+  bool SetAttributeEventListener(const AtomicString& event_type,
+                                 EventListener* listener) override;
 
  protected:
   // EventTarget
@@ -497,6 +502,8 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
       DispatchContentDeleteEventCallback callback) override;
   void Ping(PingCallback callback) override;
   void SetIdleDelay(base::TimeDelta delay) override;
+  void AddKeepAlive() override;
+  void ClearKeepAlive() override;
   void AddMessageToConsole(mojom::blink::ConsoleMessageLevel,
                            const String& message) override;
   void ExecuteScriptForTest(const String& script,
@@ -592,8 +599,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   // current execution context.
   HeapHashMap<int64_t,
               WeakMember<::blink::ServiceWorker>,
-              WTF::IntHash<int64_t>,
-              WTF::UnsignedWithZeroKeyHashTraits<int64_t>>
+              IntWithZeroKeyHashTraits<int64_t>>
       service_worker_objects_;
   bool did_evaluate_script_ = false;
   bool is_installing_ = false;

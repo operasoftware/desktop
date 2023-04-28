@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {FittingType, PdfScriptingApi} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_viewer_wrapper.js';
-import {isMac} from 'chrome://resources/js/cr.m.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util.js';
+import {PdfScriptingApi} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_scripting_api.js';
+import {FittingType} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_viewer_wrapper.js';
+import {isMac} from 'chrome://resources/js/platform.js';
+import {getDeepActiveElement} from 'chrome://resources/js/util_ts.js';
 import {keyDownOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 

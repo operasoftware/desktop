@@ -29,6 +29,7 @@
 
 #include <memory>
 
+#include "base/task/sequenced_task_runner.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
@@ -70,6 +71,7 @@
 #include "third_party/blink/renderer/core/script_type_names.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/integrity_metadata.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
@@ -86,14 +88,17 @@ bool Match(const AtomicString& name, const QualifiedName& q_name) {
   return q_name.LocalName() == name;
 }
 
-String InitiatorFor(const StringImpl* tag_impl) {
+String InitiatorFor(const StringImpl* tag_impl, bool link_is_modulepreload) {
   DCHECK(tag_impl);
   if (Match(tag_impl, html_names::kImgTag))
     return html_names::kImgTag.LocalName();
   if (Match(tag_impl, html_names::kInputTag))
     return html_names::kInputTag.LocalName();
-  if (Match(tag_impl, html_names::kLinkTag))
+  if (Match(tag_impl, html_names::kLinkTag)) {
+    if (link_is_modulepreload)
+      return fetch_initiator_type_names::kOther;
     return html_names::kLinkTag.LocalName();
+  }
   if (Match(tag_impl, html_names::kScriptTag))
     return html_names::kScriptTag.LocalName();
   if (Match(tag_impl, html_names::kVideoTag))
@@ -199,7 +204,7 @@ class TokenPreloadScanner::StartTagScanner {
       return;
     for (const HTMLToken::Attribute& html_token_attribute : attributes) {
       AtomicString attribute_name(html_token_attribute.GetName());
-      String attribute_value = html_token_attribute.Value8BitIfNecessary();
+      String attribute_value = html_token_attribute.Value();
       ProcessAttribute(attribute_name, attribute_value);
     }
     PostProcessAfterAttributes();
@@ -280,9 +285,9 @@ class TokenPreloadScanner::StartTagScanner {
             ? referrer_policy_
             : document_parameters.referrer_policy;
     auto request = PreloadRequest::CreateIfNeeded(
-        InitiatorFor(tag_impl_), position, url_to_load_, predicted_base_url,
-        type.value(), referrer_policy, is_image_set, exclusion_info,
-        resource_width, request_type);
+        InitiatorFor(tag_impl_, link_is_modulepreload_), position, url_to_load_,
+        predicted_base_url, type.value(), referrer_policy, is_image_set,
+        exclusion_info, resource_width, request_type);
     if (!request)
       return nullptr;
 
@@ -910,6 +915,9 @@ void TokenPreloadScanner::ScanCommon(
           --template_count_;
         return;
       }
+      if (template_count_) {
+        return;
+      }
       if (Match(tag_impl, html_names::kStyleTag)) {
         if (in_style_)
           css_scanner_.Reset();
@@ -930,8 +938,21 @@ void TokenPreloadScanner::ScanCommon(
     case HTMLToken::kStartTag: {
       const StringImpl* tag_impl = TagImplFor(token.Data());
       if (Match(tag_impl, html_names::kTemplateTag)) {
-        ++template_count_;
-        return;
+        bool is_declarative_shadow_root = false;
+        const HTMLToken::Attribute* shadowrootmode_attribute =
+            token.GetAttributeItem(html_names::kShadowrootmodeAttr);
+        if (shadowrootmode_attribute) {
+          String shadowrootmode_value(shadowrootmode_attribute->Value());
+          is_declarative_shadow_root =
+              EqualIgnoringASCIICase(shadowrootmode_value, "open") ||
+              EqualIgnoringASCIICase(shadowrootmode_value, "closed");
+        }
+        // If this is a declarative shadow root <template shadowrootmode>
+        // element *and* we're not already inside a non-DSD <template> element,
+        // then we leave the template count at zero. Otherwise, increment it.
+        if (!(is_declarative_shadow_root && !template_count_)) {
+          ++template_count_;
+        }
       }
       if (template_count_)
         return;
@@ -1047,8 +1068,8 @@ void TokenPreloadScanner::UpdatePredictedBaseURL(const HTMLToken& token) {
   DCHECK(predicted_base_element_url_.IsEmpty());
   if (const HTMLToken::Attribute* href_attribute =
           token.GetAttributeItem(html_names::kHrefAttr)) {
-    KURL url(document_url_, StripLeadingAndTrailingHTMLSpaces(
-                                href_attribute->Value8BitIfNecessary()));
+    KURL url(document_url_,
+             StripLeadingAndTrailingHTMLSpaces(href_attribute->Value()));
     bool is_valid_base_url =
         url.IsValid() && !url.ProtocolIsData() && !url.ProtocolIsJavaScript();
     predicted_base_element_url_ = is_valid_base_url ? url : KURL();
@@ -1130,17 +1151,17 @@ std::unique_ptr<PendingPreloadData> HTMLPreloadScanner::Scan(
   if (script_token_scanner_)
     script_token_scanner_->set_first_script_in_scan(true);
 
-  while (tokenizer_->NextToken(source_, token_)) {
-    if (token_.GetType() == HTMLToken::kStartTag)
-      tokenizer_->UpdateStateFor(token_);
+  while (HTMLToken* token = tokenizer_->NextToken(source_)) {
+    if (token->GetType() == HTMLToken::kStartTag)
+      tokenizer_->UpdateStateFor(*token);
     bool seen_csp_meta_tag = false;
-    scanner_.Scan(token_, source_, pending_data->requests,
+    scanner_.Scan(*token, source_, pending_data->requests,
                   pending_data->meta_ch_values, &pending_data->viewport,
                   &seen_csp_meta_tag);
     if (script_token_scanner_)
-      script_token_scanner_->ScanToken(token_);
+      script_token_scanner_->ScanToken(*token);
     pending_data->has_csp_meta_tag |= seen_csp_meta_tag;
-    token_.Clear();
+    token->Clear();
     // Don't preload anything if a CSP meta tag is found. We should rarely find
     // them here because the HTMLPreloadScanner is only used for the synchronous
     // parsing path.

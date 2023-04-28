@@ -8,17 +8,16 @@
 
 #include <algorithm>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/profiler/sample_metadata.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -272,7 +271,7 @@ void InputHandlerProxy::HandleInputEventWithLatencyInfo(
   input_handler_->NotifyInputEvent();
 
   int64_t trace_id = event->latency_info().trace_id();
-  TRACE_EVENT("input,benchmark", "LatencyInfo.Flow",
+  TRACE_EVENT("input,benchmark,latencyInfo", "LatencyInfo.Flow",
               [trace_id](perfetto::EventContext ctx) {
                 ChromeLatencyInfo* info =
                     ctx.event()->set_chrome_latency_info();
@@ -699,7 +698,8 @@ InputHandlerProxy::RouteToTypeSpecificHandler(
     case WebInputEvent::Type::kGestureScrollUpdate:
       return HandleGestureScrollUpdate(
           static_cast<const WebGestureEvent&>(event), original_attribution,
-          event_with_callback->metrics());
+          event_with_callback->metrics(),
+          event_with_callback->latency_info().trace_id());
 
     case WebInputEvent::Type::kGestureScrollEnd:
       return HandleGestureScrollEnd(static_cast<const WebGestureEvent&>(event));
@@ -860,11 +860,6 @@ void InputHandlerProxy::RecordMainThreadScrollingReasons(
       device != WebGestureDevice::kTouchscreen) {
     return;
   }
-
-  // The "NonCompositedScrollReasons" are only reported by the pre-unification
-  // main thread event handling path.
-  DCHECK(!cc::MainThreadScrollingReason::HasNonCompositedScrollReasons(
-      reasons_from_scroll_begin));
 
   // This records whether a scroll is handled on the main or compositor
   // threads. Note: scrolls handled on the compositor but blocked on main due
@@ -1056,10 +1051,14 @@ InputHandlerProxy::EventDisposition
 InputHandlerProxy::HandleGestureScrollUpdate(
     const WebGestureEvent& gesture_event,
     const WebInputEventAttribution& original_attribution,
-    cc::EventMetrics* metrics) {
-  TRACE_EVENT2("input", "InputHandlerProxy::HandleGestureScrollUpdate", "dx",
-               -gesture_event.data.scroll_update.delta_x, "dy",
-               -gesture_event.data.scroll_update.delta_y);
+    cc::EventMetrics* metrics,
+    int64_t trace_id) {
+  TRACE_EVENT("input", "InputHandlerProxy::HandleGestureScrollUpdate",
+              "trace_id", trace_id, "dx",
+              -gesture_event.data.scroll_update.delta_x, "dy",
+              -gesture_event.data.scroll_update.delta_y);
+  const float provided_delta_x = gesture_event.data.scroll_update.delta_x;
+  const float provided_delta_y = gesture_event.data.scroll_update.delta_y;
 
   if (scroll_sequence_ignored_) {
     TRACE_EVENT_INSTANT0("input", "Scroll Sequence Ignored",
@@ -1067,8 +1066,11 @@ InputHandlerProxy::HandleGestureScrollUpdate(
     return DROP_EVENT;
   }
 
-  if (!handling_gesture_on_impl_thread_ && !gesture_pinch_in_progress_)
-    return DID_NOT_HANDLE;
+  if (!handling_gesture_on_impl_thread_ && !gesture_pinch_in_progress_) {
+    return base::FeatureList::IsEnabled(::features::kScrollUnification)
+               ? DROP_EVENT
+               : DID_NOT_HANDLE;
+  }
 
   cc::ScrollState scroll_state = CreateScrollStateForGesture(gesture_event);
   in_inertial_scrolling_ = scroll_state.is_in_inertial_phase();
@@ -1107,6 +1109,21 @@ InputHandlerProxy::HandleGestureScrollUpdate(
 
   cc::InputHandlerScrollResult scroll_result =
       input_handler_->ScrollUpdate(&scroll_state, delay);
+
+  TRACE_EVENT(
+      "input", "InputHandlerProxy::HandleGestureScrollUpdate_Result",
+      [trace_id, provided_delta_x, provided_delta_y,
+       visual_offset_x = scroll_result.current_visual_offset.x(),
+       visual_offset_y = scroll_result.current_visual_offset.y()](
+          perfetto::EventContext& ctx) {
+        auto* event = ctx.event<perfetto::protos::pbzero::ChromeTrackEvent>();
+        auto* scroll_data = event->set_scroll_deltas();
+        scroll_data->set_trace_id(trace_id);
+        scroll_data->set_provided_to_compositor_delta_x(provided_delta_x);
+        scroll_data->set_provided_to_compositor_delta_y(provided_delta_y);
+        scroll_data->set_visual_offset_x(visual_offset_x);
+        scroll_data->set_visual_offset_y(visual_offset_y);
+      });
 
   HandleOverscroll(gesture_event.PositionInWidget(), scroll_result);
 
@@ -1151,7 +1168,9 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleGestureScrollEnd(
 
   if (!handling_gesture_on_impl_thread_) {
     DCHECK(!currently_active_gesture_device_.has_value());
-    return DID_NOT_HANDLE;
+    return base::FeatureList::IsEnabled(::features::kScrollUnification)
+               ? DROP_EVENT
+               : DID_NOT_HANDLE;
   }
 
   if (!currently_active_gesture_device_.has_value() ||
@@ -1310,11 +1329,19 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleTouchStart(
     cc::InputHandlerPointerResult pointer_result = HandlePointerDown(
         event_with_callback, touch_event.touches[0].PositionInWidget());
     if (pointer_result.type == cc::PointerResultType::kScrollbarScroll) {
-      client_->SetAllowedTouchAction(
-          allowed_touch_action, touch_event.unique_touch_event_id, DID_HANDLE);
+      client_->SetAllowedTouchAction(allowed_touch_action);
       return DID_HANDLE;
     }
   }
+
+  // main_thread_touch_sequence_start_disposition_ will indicate that touchmoves
+  // in the sequence should be sent to the main thread if the touchstart event
+  // was blocking. We may change |result| from DROP_EVENT if there is a touchend
+  // listener so we need to update main_thread_touch_sequence_start_disposition_
+  // here (before the check for a touchend listener) so that we send touchmoves
+  // only IF we send the (blocking) touchstart.
+  if (!(result == DID_HANDLE || result == DROP_EVENT))
+    main_thread_touch_sequence_start_disposition_ = result;
 
   // If |result| is still DROP_EVENT look at the touch end handler as we may
   // not want to discard the entire touch sequence. Note this code is
@@ -1348,8 +1375,7 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleTouchStart(
   TRACE_EVENT_INSTANT2(
       "input", "Allowed TouchAction", TRACE_EVENT_SCOPE_THREAD, "TouchAction",
       cc::TouchActionToString(allowed_touch_action), "disposition", result);
-  client_->SetAllowedTouchAction(allowed_touch_action,
-                                 touch_event.unique_touch_event_id, result);
+  client_->SetAllowedTouchAction(allowed_touch_action);
 
   return result;
 }
@@ -1376,13 +1402,24 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleTouchMove(
       touch_event.touch_start_or_first_touch_move) {
     bool is_touching_scrolling_layer;
     cc::TouchAction allowed_touch_action = cc::TouchAction::kAuto;
-    EventDisposition result = HitTestTouchEvent(
-        touch_event, &is_touching_scrolling_layer, &allowed_touch_action);
+    EventDisposition result;
+    bool is_main_thread_touch_sequence_with_blocking_start =
+        main_thread_touch_sequence_start_disposition_.has_value() &&
+        main_thread_touch_sequence_start_disposition_.value() == DID_NOT_HANDLE;
+    // If the touchmove occurs in a touch sequence that's being forwarded to
+    // the main thread, we can avoid the hit test since we want to also forward
+    // touchmoves in the sequence to the main thread.
+    if (is_main_thread_touch_sequence_with_blocking_start) {
+      touch_result_ = main_thread_touch_sequence_start_disposition_.value();
+      result = touch_result_.value();
+    } else {
+      result = HitTestTouchEvent(touch_event, &is_touching_scrolling_layer,
+                                 &allowed_touch_action);
+    }
     TRACE_EVENT_INSTANT2(
         "input", "Allowed TouchAction", TRACE_EVENT_SCOPE_THREAD, "TouchAction",
         cc::TouchActionToString(allowed_touch_action), "disposition", result);
-    client_->SetAllowedTouchAction(allowed_touch_action,
-                                   touch_event.unique_touch_event_id, result);
+    client_->SetAllowedTouchAction(allowed_touch_action);
     return result;
   }
   return touch_result_.value();
@@ -1401,9 +1438,23 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleTouchEnd(
       return DID_HANDLE;
     }
   }
+
+  EventDisposition result = DID_NOT_HANDLE;
+  // If all other touch events in this interaction sequence were dropped, we can
+  // safely drop the touchend too.
+  if (base::FeatureList::IsEnabled(
+          features::kDroppedTouchSequenceIncludesTouchEnd) &&
+      touch_result_.has_value() && touch_result_ == DROP_EVENT) {
+    result = DROP_EVENT;
+  }
+
   if (touch_event.touches_length == 1)
     touch_result_.reset();
-  return DID_NOT_HANDLE;
+
+  if (main_thread_touch_sequence_start_disposition_.has_value())
+    main_thread_touch_sequence_start_disposition_.reset();
+
+  return result;
 }
 
 void InputHandlerProxy::Animate(base::TimeTicks time) {

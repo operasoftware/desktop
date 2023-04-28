@@ -32,6 +32,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -222,7 +223,6 @@ class CORE_EXPORT HTMLPreloadScanner
  private:
   TokenPreloadScanner scanner_;
   SegmentedString source_;
-  HTMLToken token_;
   std::unique_ptr<HTMLTokenizer> tokenizer_;
   std::unique_ptr<BackgroundHTMLScanner::ScriptTokenScanner>
       script_token_scanner_;

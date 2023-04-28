@@ -31,8 +31,9 @@ const char kExtensionFeaturesHistogramName[] =
 const char kExtensionUrl[] = "chrome-extension://dummysite/";
 
 int GetPageVisitsBucketforHistogram(const std::string& histogram_name) {
-  if (histogram_name.find("CSS") == std::string::npos)
+  if (histogram_name.find("CSS") == std::string::npos) {
     return static_cast<int>(blink::mojom::WebFeature::kPageVisits);
+  }
   // For CSS histograms, the page visits bucket should be 1.
   return static_cast<int>(
       blink::mojom::blink::CSSSampleId::kTotalPagesMeasured);
@@ -74,6 +75,33 @@ class UseCounterImplTest : public testing::Test {
 
   bool IsInternal(CSSPropertyID property) const {
     return CSSProperty::Get(property).IsInternal();
+  }
+
+  // Returns all alternative properties. In other words, a set of of all
+  // properties marked with 'alternative_of' in css_properties.json5.
+  //
+  // This is useful for checking whether or not a given CSSPropertyID is an
+  // an alternative property.
+  HashSet<CSSPropertyID> GetAlternatives() const {
+    HashSet<CSSPropertyID> alternatives;
+
+    for (CSSPropertyID property : CSSPropertyIDList()) {
+      if (CSSPropertyID alternative_id =
+              CSSUnresolvedProperty::Get(property).GetAlternative();
+          alternative_id != CSSPropertyID::kInvalid) {
+        alternatives.insert(alternative_id);
+      }
+    }
+
+    for (CSSPropertyID property : kCSSPropertyAliasList) {
+      if (CSSPropertyID alternative_id =
+              CSSUnresolvedProperty::Get(property).GetAlternative();
+          alternative_id != CSSPropertyID::kInvalid) {
+        alternatives.insert(alternative_id);
+      }
+    }
+
+    return alternatives;
   }
 
  protected:
@@ -478,14 +506,27 @@ TEST_F(UseCounterImplTest, CSSSelectorHostContextInSnapshotProfile) {
 TEST_F(UseCounterImplTest, UniqueCSSSampleIds) {
   HashSet<int> ids;
 
+  HashSet<CSSPropertyID> alternatives = GetAlternatives();
+
   for (CSSPropertyID property : CSSPropertyIDList()) {
-    if (IsInternal(property))
+    if (IsInternal(property)) {
       continue;
+    }
+    if (alternatives.Contains(property)) {
+      // Alternative properties should use the same CSSSampleId as the
+      // corresponding main property.
+      continue;
+    }
     EXPECT_FALSE(ids.Contains(ToSampleId(property)));
     ids.insert(ToSampleId(property));
   }
 
   for (CSSPropertyID property : kCSSPropertyAliasList) {
+    if (alternatives.Contains(property)) {
+      // Alternative properties should use the same CSSSampleId as the
+      // corresponding main property.
+      continue;
+    }
     EXPECT_FALSE(ids.Contains(ToSampleId(property)));
     ids.insert(ToSampleId(property));
   }
@@ -495,13 +536,15 @@ TEST_F(UseCounterImplTest, MaximumCSSSampleId) {
   int max_sample_id = 0;
 
   for (CSSPropertyID property : CSSPropertyIDList()) {
-    if (IsInternal(property))
+    if (IsInternal(property)) {
       continue;
+    }
     max_sample_id = std::max(max_sample_id, ToSampleId(property));
   }
 
-  for (CSSPropertyID property : kCSSPropertyAliasList)
+  for (CSSPropertyID property : kCSSPropertyAliasList) {
     max_sample_id = std::max(max_sample_id, ToSampleId(property));
+  }
 
   EXPECT_EQ(static_cast<int>(mojom::blink::CSSSampleId::kMaxValue),
             max_sample_id);
@@ -559,6 +602,89 @@ TEST_F(UseCounterImplTest, CSSMarkerPseudoElementAuthor) {
   )HTML");
   UpdateAllLifecyclePhases(document);
   EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterImplTest, BackgroundClip) {
+  auto dummy_page_holder =
+      std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{background-clip: border-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{background-clip: content-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{background-clip: padding-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: border-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: content-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: padding-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: text;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: border;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_TRUE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.ClearUseCounterForTesting(WebFeature::kCSSBackgroundClipBorder);
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: content;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_TRUE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.ClearUseCounterForTesting(WebFeature::kCSSBackgroundClipContent);
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: padding;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_TRUE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
 }
 
 TEST_F(UseCounterImplTest, H1UserAgentFontSizeInSectionApplied) {
@@ -640,22 +766,165 @@ TEST_F(UseCounterImplTest, CSSAtSupportsDropInvalidWhileForgivingParsing) {
   test_counter(":host(:is(.a .b))", true);
   test_counter("::part(foo):is(.a)", true);
 
-  test_counter(":has(.a)", false);
-  test_counter(":has(.a .b)", false);
-  test_counter(":has(.a, .b)", false);
-  test_counter(":has(:not(.a))", false);
-  test_counter(":has()", true);
-  test_counter(":has(:foo)", true);
-  test_counter(":has(:foo,.a)", true);
-  test_counter(":has(.a,:foo)", true);
-  test_counter(":has(,.a)", true);
-  test_counter(":has(::first-line)", true);
-  test_counter(":host(:has())", true);
-  test_counter(":host(:has(:foo))", true);
-  test_counter(":host(:has(,.a))", true);
-  test_counter(":host(:has(.a))", true);
-  test_counter("::part(foo):has(.a)", true);
-  test_counter(":has(:has(.a))", true);
+  {
+    ScopedCSSPseudoHasNonForgivingParsingForTest
+        scoped_feature_for_forgiving_has(false);
+
+    test_counter(":has(.a)", false);
+    test_counter(":has(.a .b)", false);
+    test_counter(":has(.a, .b)", false);
+    test_counter(":has(:not(.a))", false);
+    test_counter(":has()", true);
+    test_counter(":has(:foo)", true);
+    test_counter(":has(:foo,.a)", true);
+    test_counter(":has(.a,:foo)", true);
+    test_counter(":has(,.a)", true);
+    test_counter(":has(::first-line)", true);
+    test_counter(":host(:has())", true);
+    test_counter(":host(:has(:foo))", true);
+    test_counter(":host(:has(,.a))", true);
+    test_counter(":host(:has(.a))", true);
+    test_counter("::part(foo):has(.a)", true);
+    test_counter(":has(:has(.a))", true);
+  }
+}
+
+TEST_F(UseCounterImplTest, ForgivingParsingContainsMixOfValidAndInvalid) {
+  ScopedCSSAtSupportsAlwaysNonForgivingParsingForTest scoped_feature(false);
+  ScopedCSSPseudoHasNonForgivingParsingForTest scoped_feature_for_forgiving_has(
+      false);
+
+  auto test_counter = [this](const char* selector, bool has_counted,
+                             bool is_where_counted) {
+    auto test_counter_for_feature = [this, selector](WebFeature feature,
+                                                     bool counted) {
+      auto dummy_page_holder =
+          std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
+      Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+      Document& document = dummy_page_holder->GetDocument();
+      EXPECT_FALSE(document.IsUseCounted(feature));
+
+      {
+        StringBuilder html;
+        html.Append("<style> ");
+        html.Append(selector);
+        html.Append(" {} </style>");
+        document.body()->setInnerHTML(html.ReleaseString());
+        UpdateAllLifecyclePhases(document);
+        EXPECT_EQ(document.IsUseCounted(feature), counted) << selector;
+      }
+
+      {
+        StringBuilder html;
+        html.Append("<style> @supports selector(");
+        html.Append(selector);
+        html.Append(") {} </style>");
+        document.body()->setInnerHTML(html.ReleaseString());
+        UpdateAllLifecyclePhases(document);
+        EXPECT_EQ(document.IsUseCounted(feature), counted)
+            << selector << " / " << feature;
+      }
+    };
+
+    test_counter_for_feature(
+        WebFeature::kCSSPseudoHasContainsMixOfValidAndInvalid, has_counted);
+    test_counter_for_feature(
+        WebFeature::kCSSPseudoIsWhereContainsMixOfValidAndInvalid,
+        is_where_counted);
+  };
+
+  test_counter(":has(.a)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":has(.a .b)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":has(.a, .b)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":has(not(.a))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":has()", /* has_counted */ false, /* is_where_counted*/ false);
+  test_counter(":has(:foo)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":has(.a, :foo)", /* has_counted */ true,
+               /* is_where_counted*/ false);
+  test_counter(":has(:foo, .a)", /* has_counted */ true,
+               /* is_where_counted*/ false);
+  test_counter(":has(, .a)", /* has_counted */ true,
+               /* is_where_counted*/ false);
+  test_counter(":has(.a, )", /* has_counted */ true,
+               /* is_where_counted*/ false);
+  test_counter(":has(:where(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":has(:where(.a, :foo))", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":has(.a, :where(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+
+  test_counter(":is(.a)", /* has_counted */ false, /* is_where_counted*/ false);
+  test_counter(":is(.a .b)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":is(.a, .b)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":is(not(.a))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":is()", /* has_counted */ false, /* is_where_counted*/ false);
+  test_counter(":is(:foo)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":is(.a, :foo)", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":is(:foo, .a)", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":is(, .a)", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":is(.a, )", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":is(:has(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":is(:has(.a, :foo))", /* has_counted */ true,
+               /* is_where_counted*/ false);
+  test_counter(":is(.a, :where(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":is(.a, :has(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ true);
+
+  test_counter(":where(.a)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where(.a .b)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where(.a, .b)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where(not(.a))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where()", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where(:foo)", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where(.a, :foo)", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":where(:foo, .a)", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":where(, .a)", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":where(.a, )", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":where(:has(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where(:has(.a, :foo))", /* has_counted */ true,
+               /* is_where_counted*/ false);
+  test_counter(":where(.a, :is(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":where(.a, :has(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ true);
+
+  test_counter(":host(:where())", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":host(:where(.a))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":host(:where(:foo))", /* has_counted */ false,
+               /* is_where_counted*/ false);
+  test_counter(":host(:where(.a, :foo))", /* has_counted */ false,
+               /* is_where_counted*/ true);
+  test_counter(":host(:where(:foo, .a))", /* has_counted */ false,
+               /* is_where_counted*/ true);
 }
 
 }  // namespace blink

@@ -44,7 +44,7 @@
 
     boolean doesWindowHaveUrlFragment(Window window);
 
-    CSSStyleDeclaration computedStyleIncludingVisitedInfo(Node node);
+    CSSStyleDeclaration computedStyleIncludingVisitedInfo(Element element);
 
     ShadowRoot createUserAgentShadowRoot(Element host);
 
@@ -127,7 +127,6 @@
     [RaisesException] DOMString suggestedValue(Element inputElement);
     [RaisesException] void setSuggestedValue(Element inputElement, DOMString value);
     [RaisesException] void setAutofilledValue(Element inputElement, DOMString value);
-    [RaisesException] void setEditingValue(Element inputElement, DOMString value);
     [RaisesException] void setAutofilled(Element inputElement, boolean enabled);
     [RaisesException] void setSelectionRangeForNumberType(Element inputElement, unsigned long start, unsigned long end);
 
@@ -140,6 +139,7 @@
     [RaisesException] Node touchNodeAdjustedToBestClickableNode(long x, long y, long width, long height, Document document);
     [RaisesException] DOMPoint touchPositionAdjustedToBestContextMenuNode(long x, long y, long width, long height, Document document);
     [RaisesException] Node touchNodeAdjustedToBestContextMenuNode(long x, long y, long width, long height, Document document);
+    [RaisesException] Node touchNodeAdjustedToBestStylusWritableNode(long x, long y, long width, long height, Document document);
 
     [RaisesException] long lastSpellCheckRequestSequence(Document document);
     [RaisesException] long lastSpellCheckProcessedSequence(Document document);
@@ -396,10 +396,6 @@
     // simulateRasterUnderInvalidation(true) is called, all changed pixels will
     // be reported as raster under-invalidations.
     void simulateRasterUnderInvalidations(boolean enable);
-
-    // The number of calls to update the blink lifecycle (see:
-    // LocalFrameView::UpdateLifecyclePhasesInternal).
-    unsigned long LifecycleUpdateCount();
 
     // Disable the 'delay' option for IntersectionObserver, so that observations
     // are recomputed on every frame.  This eliminates the need to add

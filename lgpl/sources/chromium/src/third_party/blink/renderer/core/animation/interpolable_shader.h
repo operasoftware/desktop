@@ -8,10 +8,12 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_INTERPOLABLE_SHADER_H_
 
 #include <memory>
+#include <vector>
 #include "base/notreached.h"
 #include "third_party/blink/renderer/core/animation/interpolable_value.h"
 #include "third_party/blink/renderer/core/animation/interpolation_value.h"
 #include "third_party/blink/renderer/core/animation/pairwise_interpolation_value.h"
+#include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/style/gpu_shader_resource.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
@@ -34,6 +36,7 @@ class InterpolableShader : public InterpolableValue {
                      AtomicString absolute_url,
                      const Referrer& referrer,
                      GpuShaderResource* resource,
+                     std::unique_ptr<InterpolableList> args,
                      float animation_frame);
   static std::unique_ptr<InterpolableShader> CreateNeutral();
 
@@ -47,6 +50,7 @@ class InterpolableShader : public InterpolableValue {
   float animation_frame() const {
     return To<InterpolableNumber>(*animation_frame_).Value();
   }
+  CSSValueList* CreateArgsList() const;
 
   // InterpolableValue implementation:
   void Interpolate(const InterpolableValue& to,
@@ -60,6 +64,7 @@ class InterpolableShader : public InterpolableValue {
   void Scale(double scale) final;
   void Add(const InterpolableValue& other) final;
   void AssertCanInterpolateWith(const InterpolableValue& other) const final;
+  bool IsCompatibleWith(const InterpolableShader& other) const;
 
  private:
   InterpolableShader* RawClone() const final;
@@ -71,6 +76,7 @@ class InterpolableShader : public InterpolableValue {
   Persistent<GpuShaderResource> resource_;
 
   // The interpolable components of a shader. These should all be non-null.
+  std::unique_ptr<InterpolableList> args_;
   std::unique_ptr<InterpolableValue> animation_frame_;
 };
 

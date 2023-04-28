@@ -5,10 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_CANVAS_RENDERING_CONTEXT_2D_STATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_CANVAS_RENDERING_CONTEXT_2D_STATE_H_
 
+#include "base/types/pass_key.h"
 #include "cc/paint/paint_flags.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/clip_list.h"
+#include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector_client.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
@@ -23,6 +25,8 @@ namespace blink {
 class BaseRenderingContext2D;
 class CanvasRenderingContext2D;
 class CanvasFilter;
+class CanvasGradient;
+class CanvasPattern;
 class CanvasStyle;
 class CSSValue;
 class Element;
@@ -33,7 +37,7 @@ enum ShadowMode {
   kDrawForegroundOnly
 };
 
-class CanvasRenderingContext2DState final
+class MODULES_EXPORT CanvasRenderingContext2DState final
     : public GarbageCollected<CanvasRenderingContext2DState>,
       public FontSelectorClient {
  public:
@@ -130,9 +134,15 @@ class CanvasRenderingContext2DState final
   void ClearResolvedFilter();
   void ValidateFilterState() const;
 
+  void SetStrokeColor(Color color);
+  void SetStrokePattern(CanvasPattern* pattern);
+  void SetStrokeGradient(CanvasGradient* gradient);
   void SetStrokeStyle(CanvasStyle*);
   CanvasStyle* StrokeStyle() const { return stroke_style_.Get(); }
 
+  void SetFillColor(Color color);
+  void SetFillPattern(CanvasPattern* pattern);
+  void SetFillGradient(CanvasGradient* gradient);
   void SetFillStyle(CanvasStyle*);
   CanvasStyle* FillStyle() const { return fill_style_.Get(); }
 
@@ -212,8 +222,8 @@ class CanvasRenderingContext2DState final
   void SetShadowBlur(double);
   double ShadowBlur() const { return shadow_blur_; }
 
-  void SetShadowColor(SkColor);
-  SkColor ShadowColor() const { return shadow_color_; }
+  void SetShadowColor(Color);
+  Color ShadowColor() const { return shadow_color_; }
 
   void SetGlobalAlpha(double);
   double GlobalAlpha() const { return global_alpha_; }
@@ -249,6 +259,8 @@ class CanvasRenderingContext2DState final
   sk_sp<PaintFilter>& ShadowAndForegroundImageFilter() const;
 
  private:
+  using PassKey = base::PassKey<CanvasRenderingContext2DState>;
+
   void UpdateLineDash() const;
   void UpdateStrokeStyle() const;
   void UpdateFillStyle() const;
@@ -271,7 +283,7 @@ class CanvasRenderingContext2DState final
 
   gfx::Vector2dF shadow_offset_;
   double shadow_blur_;
-  SkColor shadow_color_;
+  Color shadow_color_;
   mutable sk_sp<SkDrawLooper> empty_draw_looper_;
   mutable sk_sp<SkDrawLooper> shadow_only_draw_looper_;
   mutable sk_sp<SkDrawLooper> shadow_and_foreground_draw_looper_;
@@ -337,7 +349,7 @@ class CanvasRenderingContext2DState final
 };
 
 ALWAYS_INLINE bool CanvasRenderingContext2DState::ShouldDrawShadows() const {
-  return SkColorGetA(shadow_color_) &&
+  return (!shadow_color_.IsTransparent()) &&
          (shadow_blur_ || !shadow_offset_.IsZero());
 }
 

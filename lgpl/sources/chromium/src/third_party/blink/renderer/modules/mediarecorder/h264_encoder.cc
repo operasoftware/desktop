@@ -12,7 +12,6 @@
 #include "media/base/video_frame.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
@@ -20,14 +19,11 @@
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
-#include "third_party/openh264/src/codec/api/svc/codec_app_def.h"
-#include "third_party/openh264/src/codec/api/svc/codec_def.h"
+#include "third_party/openh264/src/codec/api/wels/codec_app_def.h"
+#include "third_party/openh264/src/codec/api/wels/codec_def.h"
 #include "ui/gfx/geometry/size.h"
 
-using media::VideoFrame;
-
 namespace blink {
-
 namespace {
 
 absl::optional<EProfileIdc> ToOpenH264Profile(
@@ -73,7 +69,6 @@ absl::optional<ELevelIdc> ToOpenH264Level(uint8_t level) {
     return it->value;
   return absl::nullopt;
 }
-
 }  // namespace
 
 void H264Encoder::ISVCEncoderDeleter::operator()(ISVCEncoder* codec) {
@@ -84,48 +79,38 @@ void H264Encoder::ISVCEncoderDeleter::operator()(ISVCEncoder* codec) {
   WelsDestroySVCEncoder(codec);
 }
 
-// static
-void H264Encoder::ShutdownEncoder(
-    std::unique_ptr<NonMainThread> encoding_thread,
-    ScopedISVCEncoderPtr encoder) {
-  DCHECK(encoding_thread);
-  // Both |encoding_thread| and |encoder| will be destroyed at end-of-scope.
-}
-
 H264Encoder::H264Encoder(
     const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
     VideoTrackRecorder::CodecProfile codec_profile,
-    uint32_t bits_per_second,
-    scoped_refptr<base::SequencedTaskRunner> task_runner)
-    : Encoder(on_encoded_video_cb, bits_per_second, std::move(task_runner)),
+    uint32_t bits_per_second)
+    : Encoder(on_encoded_video_cb, bits_per_second),
       codec_profile_(codec_profile) {
-  DCHECK(encoding_thread_);
   DCHECK_EQ(codec_profile_.codec_id, VideoTrackRecorder::CodecId::kH264);
 }
 
-H264Encoder::~H264Encoder() {
-  PostCrossThreadTask(*main_task_runner_.get(), FROM_HERE,
-                      CrossThreadBindOnce(&H264Encoder::ShutdownEncoder,
-                                          std::move(encoding_thread_),
-                                          std::move(openh264_encoder_)));
-}
+// Needs to be defined here to combat a Windows linking issue.
+H264Encoder::~H264Encoder() = default;
 
-void H264Encoder::EncodeOnEncodingTaskRunner(
-    scoped_refptr<VideoFrame> frame,
-    base::TimeTicks capture_timestamp) {
-  TRACE_EVENT0("media", "H264Encoder::EncodeOnEncodingTaskRunner");
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
+void H264Encoder::EncodeFrame(scoped_refptr<media::VideoFrame> frame,
+                              base::TimeTicks capture_timestamp) {
+  TRACE_EVENT0("media", "H264Encoder::EncodeFrame");
+  using media::VideoFrame;
   DCHECK(frame->format() == media::VideoPixelFormat::PIXEL_FORMAT_NV12 ||
          frame->format() == media::VideoPixelFormat::PIXEL_FORMAT_I420 ||
          frame->format() == media::VideoPixelFormat::PIXEL_FORMAT_I420A);
 
-  if (frame->format() == media::PIXEL_FORMAT_NV12)
+  if (frame->format() == media::PIXEL_FORMAT_NV12) {
     frame = ConvertToI420ForSoftwareEncoder(frame);
+    if (!frame) {
+      DLOG(ERROR) << "VideoFrame failed to map";
+      return;
+    }
+  }
   DCHECK(frame->IsMappable());
 
   const gfx::Size frame_size = frame->visible_rect().size();
   if (!openh264_encoder_ || configured_size_ != frame_size) {
-    if (!ConfigureEncoderOnEncodingTaskRunner(frame_size)) {
+    if (!ConfigureEncoder(frame_size)) {
       return;
     }
     first_frame_timestamp_ = capture_timestamp;
@@ -152,7 +137,7 @@ void H264Encoder::EncodeOnEncodingTaskRunner(
     NOTREACHED() << "OpenH264 encoding failed";
     return;
   }
-  const media::WebmMuxer::VideoParameters video_params(frame);
+  const media::Muxer::VideoParameters video_params(*frame);
   frame = nullptr;
 
   std::string data;
@@ -176,17 +161,12 @@ void H264Encoder::EncodeOnEncodingTaskRunner(
   }
 
   const bool is_key_frame = info.eFrameType == videoFrameTypeIDR;
-  PostCrossThreadTask(
-      *origin_task_runner_.get(), FROM_HERE,
-      CrossThreadBindOnce(OnFrameEncodeCompleted,
-                          CrossThreadBindRepeating(on_encoded_video_cb_),
-                          video_params, std::move(data), std::string(),
-                          capture_timestamp, is_key_frame));
+  on_encoded_video_cb_.Run(video_params, std::move(data), std::string(),
+                           capture_timestamp, is_key_frame);
 }
 
-bool H264Encoder::ConfigureEncoderOnEncodingTaskRunner(const gfx::Size& size) {
-  TRACE_EVENT0("media", "H264Encoder::ConfigureEncoderOnEncodingTaskRunner");
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
+bool H264Encoder::ConfigureEncoder(const gfx::Size& size) {
+  TRACE_EVENT0("media", "H264Encoder::ConfigureEncoder");
   ISVCEncoder* temp_encoder = nullptr;
   if (WelsCreateSVCEncoder(&temp_encoder) != 0) {
     NOTREACHED() << "Failed to create OpenH264 encoder";

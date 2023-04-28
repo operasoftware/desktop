@@ -65,6 +65,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
 #include "third_party/blink/renderer/core/frame/ad_tracker.h"
+#include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
@@ -89,7 +90,7 @@
 #include "third_party/blink/renderer/core/loader/resource_load_observer_for_frame.h"
 #include "third_party/blink/renderer/core/loader/subresource_filter.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/paint/first_meaningful_paint_detector.h"
+#include "third_party/blink/renderer/core/paint/timing/first_meaningful_paint_detector.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_chrome_client.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
@@ -107,7 +108,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_timing_utils.h"
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/mhtml/mhtml_archive.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
@@ -251,7 +252,9 @@ FrameFetchContext::FrameFetchContext(
     DocumentLoader& document_loader,
     Document& document,
     const DetachableResourceFetcherProperties& properties)
-    : BaseFetchContext(properties),
+    : BaseFetchContext(properties,
+                       MakeGarbageCollected<DetachableConsoleLogger>(
+                           document.GetExecutionContext())),
       document_loader_(document_loader),
       document_(document) {}
 
@@ -289,6 +292,21 @@ void FrameFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request) {
 
   if (GetResourceFetcherProperties().IsDetached())
     return;
+
+  // TODO(crbug.com/1375791): Consider overriding Attribution-Reporting-Support
+  // header.
+  if (base::FeatureList::IsEnabled(
+          blink::features::kAttributionReportingCrossAppWeb) &&
+      !request.HttpHeaderField(http_names::kAttributionReportingEligible)
+           .IsNull() &&
+      request.HttpHeaderField(http_names::kAttributionReportingSupport)
+          .IsNull()) {
+    if (AttributionSrcLoader* attribution_src_loader =
+            GetFrame()->GetAttributionSrcLoader()) {
+      request.AddHttpHeaderField(http_names::kAttributionReportingSupport,
+                                 attribution_src_loader->GetSupportHeader());
+    }
+  }
 }
 
 // TODO(toyoshim, arthursonzogni): PlzNavigate doesn't use this function to set
@@ -355,6 +373,7 @@ void FrameFetchContext::PrepareRequest(
     return;
 
   request.SetUkmSourceId(document_->UkmSourceID());
+  request.SetHasStorageAccess(document_->HasStorageAccess());
 
   if (document_loader_->ForceFetchCacheMode())
     request.SetCacheMode(*document_loader_->ForceFetchCacheMode());
@@ -378,7 +397,9 @@ void FrameFetchContext::PrepareRequest(
   }
 }
 
-void FrameFetchContext::AddResourceTiming(const ResourceTimingInfo& info) {
+void FrameFetchContext::AddResourceTiming(
+    mojom::blink::ResourceTimingInfoPtr info,
+    const AtomicString& initiator_type) {
   // Normally, |document_| is cleared on Document shutdown. In that case,
   // early return, as there is nothing to report the resource timing to.
   if (GetResourceFetcherProperties().IsDetached())
@@ -387,7 +408,7 @@ void FrameFetchContext::AddResourceTiming(const ResourceTimingInfo& info) {
   // Timing for main resource is handled in DocumentLoader.
   // All other resources are reported to the corresponding Document.
   DOMWindowPerformance::performance(*document_->domWindow())
-      ->GenerateAndAddResourceTiming(info);
+      ->AddResourceTiming(std::move(info), initiator_type);
 }
 
 bool FrameFetchContext::AllowImage(bool images_enabled, const KURL& url) const {
@@ -469,7 +490,17 @@ void FrameFetchContext::AddReducedAcceptLanguageIfNecessary(
     ResourceRequest& request) {
   // If the feature is enabled, then reduce accept language are allowed only on
   // http and https.
-  if (!base::FeatureList::IsEnabled(network::features::kReduceAcceptLanguage)) {
+
+  // For detached frame, we check whether the feature flag turns on because it
+  // will crash when detach frame calls GetExecutionContext().
+  if (GetResourceFetcherProperties().IsDetached() &&
+      !base::FeatureList::IsEnabled(network::features::kReduceAcceptLanguage)) {
+    return;
+  }
+
+  if (!GetResourceFetcherProperties().IsDetached() &&
+      !RuntimeEnabledFeatures::ReduceAcceptLanguageEnabled(
+          GetExecutionContext())) {
     return;
   }
 
@@ -678,13 +709,6 @@ ContentSecurityPolicy* FrameFetchContext::GetContentSecurityPolicy() const {
   return document_->domWindow()->GetContentSecurityPolicy();
 }
 
-void FrameFetchContext::AddConsoleMessage(ConsoleMessage* message) const {
-  if (GetResourceFetcherProperties().IsDetached())
-    return;
-
-  document_->AddConsoleMessage(message);
-}
-
 WebContentSettingsClient* FrameFetchContext::GetContentSettingsClient() const {
   if (GetResourceFetcherProperties().IsDetached())
     return nullptr;
@@ -849,10 +873,12 @@ absl::optional<ResourceRequestBlockedReason> FrameFetchContext::CanRequest(
     const absl::optional<ResourceRequest::RedirectInfo>& redirect_info) const {
   if (!GetResourceFetcherProperties().IsDetached() &&
       document_->IsFreezingInProgress() && !resource_request.GetKeepalive()) {
-    AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kJavaScript,
-        mojom::ConsoleMessageLevel::kError,
-        "Only fetch keepalive is allowed during onfreeze: " + url.GetString()));
+    GetDetachableConsoleLogger().AddConsoleMessage(
+        MakeGarbageCollected<ConsoleMessage>(
+            mojom::ConsoleMessageSource::kJavaScript,
+            mojom::ConsoleMessageLevel::kError,
+            "Only fetch keepalive is allowed during onfreeze: " +
+                url.GetString()));
     return ResourceRequestBlockedReason::kOther;
   }
   return BaseFetchContext::CanRequest(type, resource_request, url, options,
@@ -861,6 +887,19 @@ absl::optional<ResourceRequestBlockedReason> FrameFetchContext::CanRequest(
 
 CoreProbeSink* FrameFetchContext::Probe() const {
   return probe::ToCoreProbeSink(GetFrame()->GetDocument());
+}
+
+void FrameFetchContext::UpdateSubresourceLoadMetrics(
+    uint32_t number_of_subresources_loaded,
+    uint32_t number_of_subresource_loads_handled_by_service_worker,
+    bool pervasive_payload_requested,
+    int64_t pervasive_bytes_fetched,
+    int64_t total_bytes_fetched) {
+  document_loader_->UpdateSubresourceLoadMetrics(
+      number_of_subresources_loaded,
+      number_of_subresource_loads_handled_by_service_worker,
+      pervasive_payload_requested, pervasive_bytes_fetched,
+      total_bytes_fetched);
 }
 
 }  // namespace blink

@@ -40,6 +40,10 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
   ~AnimationTimeline() override = default;
 
   virtual V8CSSNumberish* currentTime();
+  virtual CSSNumericValue* getCurrentTime(const String& rangeName) {
+    return nullptr;
+  }
+
   absl::optional<AnimationTimeDelta> CurrentTime();
   absl::optional<double> CurrentTimeMilliseconds();
   absl::optional<double> CurrentTimeSeconds();
@@ -69,6 +73,7 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
   // consideration here: https://github.com/w3c/csswg-drafts/issues/2075.
   virtual absl::optional<base::TimeDelta> InitialStartTimeForAnimations() = 0;
   virtual AnimationTimeDelta CalculateIntrinsicIterationDuration(
+      const Animation*,
       const Timing&) {
     return AnimationTimeDelta();
   }
@@ -77,9 +82,11 @@ class CORE_EXPORT AnimationTimeline : public ScriptWrappable {
   // the timeline duration. In the event that the timeline is not an instance
   // of a view timeline, the delays are zero.
   using TimeDelayPair = std::pair<AnimationTimeDelta, AnimationTimeDelta>;
-  virtual TimeDelayPair TimelineOffsetsToTimeDelays(
+  virtual TimeDelayPair ComputeEffectiveAnimationDelays(
+      const Animation* animation,
       const Timing& timing) const {
-    return std::make_pair(AnimationTimeDelta(), AnimationTimeDelta());
+    return std::make_pair(timing.start_delay.AsTimeValue(),
+                          timing.end_delay.AsTimeValue());
   }
 
   Document* GetDocument() const { return document_; }

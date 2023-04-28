@@ -29,8 +29,8 @@
 #include <memory>
 
 #include "base/auto_reset.h"
-#include "base/callback_forward.h"
 #include "base/dcheck_is_on.h"
+#include "base/functional/callback_forward.h"
 #include "base/functional/function_ref.h"
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
@@ -39,7 +39,6 @@
 #include "third_party/blink/public/mojom/frame/viewport_intersection_state.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/document_transition/document_transition_request.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/frame/frame_view.h"
 #include "third_party/blink/renderer/core/frame/layout_subtree_root_list.h"
@@ -48,6 +47,7 @@
 #include "third_party/blink/renderer/core/layout/depth_ordered_layout_object_list.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/paint/layout_object_counter.h"
+#include "third_party/blink/renderer/core/view_transition/view_transition_request_forward.h"
 #include "third_party/blink/renderer/platform/geometry/layout_size.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
@@ -61,16 +61,12 @@
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "ui/gfx/geometry/rect.h"
 
-template <typename T>
-class sk_sp;
-
 namespace cc {
 class AnimationHost;
 class AnimationTimeline;
 class Layer;
-class PaintOpBuffer;
+class PaintRecord;
 enum class PaintHoldingCommitTrigger;
-using PaintRecord = PaintOpBuffer;
 struct PaintBenchmarkResult;
 }
 
@@ -104,7 +100,6 @@ class MobileFriendlinessChecker;
 class Page;
 class PaintArtifactCompositor;
 class PaintController;
-class PaintControllerCycleScope;
 class PaintLayer;
 class PaintLayerScrollableArea;
 class PaintTimingDetector;
@@ -113,12 +108,12 @@ class RootFrameViewport;
 class ScrollableArea;
 class Scrollbar;
 class ScrollingCoordinator;
+class TapFriendlinessChecker;
 class TransformState;
 class LocalFrameUkmAggregator;
 class WebPluginContainerImpl;
 struct AnnotatedRegionValue;
 struct IntrinsicSizingInfo;
-struct MobileFriendliness;
 struct PhysicalOffset;
 struct PhysicalRect;
 
@@ -199,9 +194,13 @@ class CORE_EXPORT LocalFrameView final
   bool WillDoPaintHoldingForFCP() const;
 
   unsigned LayoutCountForTesting() const { return layout_count_for_testing_; }
-  unsigned LifecycleUpdateCountForTesting() const {
-    return lifecycle_update_count_for_testing_;
+  // Returns the number of block layout calls.
+  //  * It's incremented when NGBlockNode::Layout() is called with NeedsLayout()
+  //  * It can overflow. Do not use it in production.
+  uint32_t BlockLayoutCountForTesting() const {
+    return block_layout_count_for_testing_;
   }
+  void IncBlockLayoutCount() { ++block_layout_count_for_testing_; }
 
   void CountObjectsNeedingLayout(unsigned& needs_layout_objects,
                                  unsigned& total_objects,
@@ -476,6 +475,8 @@ class CORE_EXPORT LocalFrameView final
   void ScheduleAnimation(base::TimeDelta = base::TimeDelta(),
                          base::Location location = base::Location::Current());
 
+  void OnCommitRequested();
+
   // FIXME: This should probably be renamed as the 'inSubtreeLayout' parameter
   // passed around the LocalFrameView layout methods can be true while this
   // returns false.
@@ -571,7 +572,7 @@ class CORE_EXPORT LocalFrameView final
 
   // Get the PaintRecord based on the cached paint artifact generated during
   // the last paint in lifecycle update.
-  sk_sp<cc::PaintRecord> GetPaintRecord() const;
+  cc::PaintRecord GetPaintRecord(const gfx::Rect* cull_rect = nullptr) const;
 
   void Show() override;
   void Hide() override;
@@ -662,11 +663,6 @@ class CORE_EXPORT LocalFrameView final
   std::unique_ptr<JSONObject> CompositedLayersAsJSON(LayerTreeFlags);
 
   String MainThreadScrollingReasonsAsText();
-  // Main thread scrolling reasons including reasons from ancestors.
-  MainThreadScrollingReasons GetMainThreadScrollingReasons() const;
-  // Main thread scrolling reasons for this object only. For all reasons,
-  // see: mainThreadScrollingReasons().
-  MainThreadScrollingReasons MainThreadScrollingReasonsPerFrame() const;
 
   bool MapToVisualRectInRemoteRootFrame(PhysicalRect& rect,
                                         bool apply_overflow_clip = true);
@@ -709,11 +705,11 @@ class CORE_EXPORT LocalFrameView final
   MobileFriendlinessChecker* GetMobileFriendlinessChecker() const {
     return mobile_friendliness_checker_;
   }
-  void DidChangeMobileFriendliness(const MobileFriendliness& mf);
+  void RegisterTapEvent(Element* target);
 
   // Returns the UKM aggregator for this frame's local root, creating it if
-  // necessary.
-  LocalFrameUkmAggregator& EnsureUkmAggregator();
+  // necessary. Returns null if no aggregator is needed, such as for SVG images.
+  LocalFrameUkmAggregator* GetUkmAggregator();
   void ResetUkmAggregatorForTesting();
 
   // Report the First Contentful Paint signal to the LocalFrameView.
@@ -769,7 +765,13 @@ class CORE_EXPORT LocalFrameView final
 
   void AddPendingTransformUpdate(LayoutObject& object);
   bool RemovePendingTransformUpdate(const LayoutObject& object);
-  void UpdateAllPendingTransforms();
+  bool UpdateAllPendingTransforms();
+
+  void AddPendingOpacityUpdate(LayoutObject& object);
+  bool RemovePendingOpacityUpdate(const LayoutObject& object);
+  bool UpdateAllPendingOpacityUpdates();
+
+  void ForAllChildLocalFrameViews(base::FunctionRef<void(LocalFrameView&)>);
 
  protected:
   void FrameRectsChanged(const gfx::Rect&) override;
@@ -890,8 +892,6 @@ class CORE_EXPORT LocalFrameView final
   // earlier if we don't need to run future lifecycle phases.
   bool RunStyleAndLayoutLifecyclePhases(
       DocumentLifecycle::LifecycleState target_state);
-  bool RunAccessibilityLifecyclePhase(
-      DocumentLifecycle::LifecycleState target_state);
   bool RunCompositingInputsLifecyclePhase(
       DocumentLifecycle::LifecycleState target_state);
   bool RunPrePaintLifecyclePhase(
@@ -904,7 +904,7 @@ class CORE_EXPORT LocalFrameView final
   void PerformLayout();
   void PerformPostLayoutTasks(bool view_size_changed);
 
-  bool PaintTree(PaintBenchmarkMode, PaintControllerCycleScope&);
+  bool PaintTree(PaintBenchmarkMode);
   void PushPaintArtifactToCompositor(bool repainted);
   void CreatePaintTimelineEvents();
 
@@ -912,6 +912,7 @@ class CORE_EXPORT LocalFrameView final
 
   DocumentLifecycle& Lifecycle() const;
 
+  void RunAccessibilitySteps();
   void RunIntersectionObserverSteps();
   void RenderThrottlingStatusChanged();
 
@@ -946,7 +947,6 @@ class CORE_EXPORT LocalFrameView final
 
   void ForAllChildViewsAndPlugins(
       base::FunctionRef<void(EmbeddedContentView&)>);
-  void ForAllChildLocalFrameViews(base::FunctionRef<void(LocalFrameView&)>);
 
   enum TraversalOrder { kPreOrder, kPostOrder };
   void ForAllNonThrottledLocalFrameViews(
@@ -961,7 +961,7 @@ class CORE_EXPORT LocalFrameView final
       absl::optional<base::TimeTicks>& monotonic_time) override;
   void DeliverSynchronousIntersectionObservations();
 
-  bool RunScrollTimelineSteps();
+  bool RunScrollSnapshotClientSteps();
 
   bool RunCSSToggleSteps();
 
@@ -969,8 +969,7 @@ class CORE_EXPORT LocalFrameView final
   bool RunResizeObserverSteps(DocumentLifecycle::LifecycleState target_state);
   void ClearResizeObserverLimit();
 
-  bool RunDocumentTransitionSteps(
-      DocumentLifecycle::LifecycleState target_state);
+  bool RunViewTransitionSteps(DocumentLifecycle::LifecycleState target_state);
 
   bool CheckLayoutInvalidationIsAllowed() const;
 
@@ -1006,15 +1005,15 @@ class CORE_EXPORT LocalFrameView final
   // StyleEngine instead of the base background color.
   bool ShouldUseColorAdjustBackground() const;
 
-  // Verifies the shared elements for the document transition on this view.
-  void VerifySharedElementsForDocumentTransition();
-  // Append document transition requests from this view into the given vector.
-  void AppendDocumentTransitionRequests(
-      WTF::Vector<std::unique_ptr<DocumentTransitionRequest>>&);
+  // Append view transition requests from this view into the given vector.
+  void AppendViewTransitionRequests(
+      WTF::Vector<std::unique_ptr<ViewTransitionRequest>>&);
 
   bool AnyFrameIsPrintingOrPaintingPreview();
 
   DarkModeFilter& EnsureDarkModeFilter();
+
+  bool HasViewTransitionThrottlingRendering() const;
 
   LayoutSize size_;
 
@@ -1032,10 +1031,12 @@ class CORE_EXPORT LocalFrameView final
 
   bool layout_scheduling_enabled_;
   unsigned layout_count_for_testing_;
+  uint32_t block_layout_count_for_testing_ = 0;
   unsigned lifecycle_update_count_for_testing_;
   HeapTaskRunnerTimer<LocalFrameView> update_plugins_timer_;
 
-  bool first_layout_;
+  bool first_layout_ = true;
+  bool first_layout_with_body_ = true;
   UseColorAdjustBackground use_color_adjust_background_{
       UseColorAdjustBackground::kNo};
   Color base_background_color_;
@@ -1156,6 +1157,8 @@ class CORE_EXPORT LocalFrameView final
   // Non-null in the outermost main frame of an ordinary page only.
   Member<MobileFriendlinessChecker> mobile_friendliness_checker_;
 
+  Member<TapFriendlinessChecker> tap_friendliness_checker_;
+
   HeapHashSet<WeakMember<LifecycleNotificationObserver>> lifecycle_observers_;
 
   HeapHashSet<WeakMember<HTMLVideoElement>> fullscreen_video_elements_;
@@ -1176,12 +1179,9 @@ class CORE_EXPORT LocalFrameView final
   // possible, avoids needing to walk the tree to update them. See:
   // https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/paint/README.md#Transform-update-optimization
   // for more on the fast path
+  // TODO(yotha): unify these into one HeapHashMap.
   Member<HeapHashSet<Member<LayoutObject>>> pending_transform_updates_;
-
-  // TODO(1370937): Currently we don't yet know how to handle soft navigation
-  // UKM reporting. This flag indicates that First Contentful Paint was reported
-  // once and should not be reported again.
-  bool was_fcp_reported_ = false;
+  Member<HeapHashSet<Member<LayoutObject>>> pending_opacity_updates_;
 
 #if DCHECK_IS_ON()
   bool is_updating_descendant_dependent_flags_;

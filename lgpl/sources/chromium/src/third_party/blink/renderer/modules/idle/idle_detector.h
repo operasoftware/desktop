@@ -6,11 +6,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_IDLE_IDLE_DETECTOR_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/idle/idle_manager.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_idle_options.h"
+#include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
@@ -22,7 +24,6 @@
 
 namespace blink {
 
-class AbortSignal;
 class ExceptionState;
 
 class MODULES_EXPORT IdleDetector final
@@ -91,6 +92,9 @@ class MODULES_EXPORT IdleDetector final
 
   base::TimeDelta threshold_ = base::Seconds(60);
   Member<AbortSignal> signal_;
+  // The handle is valid from the time start() is called until the detector is
+  // stopped, if an AbortSignal is passed to start().
+  Member<AbortSignal::AlgorithmHandle> abort_handle_;
   Member<ScriptPromiseResolver> resolver_;
 
   // Holds a pipe which the service uses to notify this object

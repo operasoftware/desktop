@@ -5,8 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_CSSPAINT_PAINT_RENDERING_CONTEXT_2D_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CSSPAINT_PAINT_RENDERING_CONTEXT_2D_H_
 
-#include <memory>
-
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_paint_rendering_context_2d_settings.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.h"
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope.h"
@@ -31,11 +30,13 @@ class MODULES_EXPORT PaintRenderingContext2D : public ScriptWrappable,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  PaintRenderingContext2D(const gfx::Size& container_size,
-                          const PaintRenderingContext2DSettings*,
-                          float zoom,
-                          float device_scale_factor,
-                          PaintWorkletGlobalScope* global_scope = nullptr);
+  PaintRenderingContext2D(
+      const gfx::Size& container_size,
+      const PaintRenderingContext2DSettings*,
+      float zoom,
+      float device_scale_factor,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      PaintWorkletGlobalScope* global_scope = nullptr);
 
   PaintRenderingContext2D(const PaintRenderingContext2D&) = delete;
   PaintRenderingContext2D& operator=(const PaintRenderingContext2D&) = delete;
@@ -56,13 +57,11 @@ class MODULES_EXPORT PaintRenderingContext2D : public ScriptWrappable,
   int Width() const final;
   int Height() const final;
 
-  bool ParseColorOrCurrentColor(Color&, const String& color_string) const final;
+  Color GetCurrentColor() const final;
 
   cc::PaintCanvas* GetOrCreatePaintCanvas() final { return GetPaintCanvas(); }
-  cc::PaintCanvas* GetPaintCanvas() const final;
-  cc::PaintCanvas* GetPaintCanvasForDraw(
-      const SkIRect&,
-      CanvasPerformanceMonitor::DrawType) final;
+  cc::PaintCanvas* GetPaintCanvas() final;
+  void WillDraw(const SkIRect&, CanvasPerformanceMonitor::DrawType) final;
 
   double shadowOffsetX() const final;
   void setShadowOffsetX(double) final;
@@ -98,7 +97,7 @@ class MODULES_EXPORT PaintRenderingContext2D : public ScriptWrappable,
 
   void FlushCanvas() final {}
 
-  sk_sp<PaintRecord> GetRecord();
+  PaintRecord GetRecord();
   cc::PaintCanvas* GetDrawingPaintCanvas();
 
   ExecutionContext* GetTopExecutionContext() const override {
@@ -113,8 +112,8 @@ class MODULES_EXPORT PaintRenderingContext2D : public ScriptWrappable,
  private:
   void InitializePaintRecorder();
 
-  std::unique_ptr<PaintRecorder> paint_recorder_;
-  sk_sp<PaintRecord> previous_frame_;
+  cc::InspectablePaintRecorder paint_recorder_;
+  absl::optional<PaintRecord> previous_frame_;
   gfx::Size container_size_;
   Member<const PaintRenderingContext2DSettings> context_settings_;
   bool did_record_draw_commands_in_paint_recorder_;

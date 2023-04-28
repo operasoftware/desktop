@@ -53,10 +53,11 @@ void Location::Trace(Visitor* visitor) const {
 }
 
 inline const KURL& Location::Url() const {
-  const KURL& web_bundle_claimed_url = GetDocument()->WebBundleClaimedUrl();
-  if (web_bundle_claimed_url.IsValid()) {
-    return web_bundle_claimed_url;
+  const KURL& base_url_override = GetDocument()->BaseURLOverride();
+  if (base_url_override.IsValid() && GetDocument()->BaseURLIsTheLocation()) {
+    return base_url_override;
   }
+
   const KURL& url = GetDocument()->Url();
   if (!url.IsValid()) {
     // Use "about:blank" while the page is still loading (before we have a
@@ -103,9 +104,8 @@ DOMStringList* Location::ancestorOrigins() const {
   auto* origins = MakeGarbageCollected<DOMStringList>();
   if (!IsAttached())
     return origins;
-  for (Frame* frame =
-           dom_window_->GetFrame()->Tree().Parent(FrameTreeBoundary::kFenced);
-       frame; frame = frame->Tree().Parent(FrameTreeBoundary::kFenced)) {
+  for (Frame* frame = dom_window_->GetFrame()->Tree().Parent(); frame;
+       frame = frame->Tree().Parent()) {
     origins->Append(
         frame->GetSecurityContext()->GetSecurityOrigin()->ToString());
   }
@@ -281,7 +281,11 @@ void Location::SetLocation(const String& url,
     activity_logger->LogEvent("blinkSetAttribute", argv.size(), argv.data());
   }
 
-  FrameLoadRequest request(incumbent_window, ResourceRequest(completed_url));
+  ResourceRequestHead resource_request(completed_url);
+  resource_request.SetHasUserGesture(
+      LocalFrame::HasTransientUserActivation(incumbent_window->GetFrame()));
+
+  FrameLoadRequest request(incumbent_window, resource_request);
   request.SetClientRedirectReason(ClientNavigationReason::kFrameNavigation);
   WebFrameLoadType frame_load_type = WebFrameLoadType::kStandard;
   if (set_location_policy == SetLocationPolicy::kReplaceThisFrame)

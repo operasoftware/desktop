@@ -70,16 +70,14 @@ TEST_F(PaintLayerClipperTest, BackgroundClipRectSubpixelAccumulation) {
       ->Clipper(PaintLayer::GeometryMapperOption::kUseGeometryMapper)
       .CalculateBackgroundClipRect(context, background_rect_gm);
 
-  EXPECT_GE(background_rect_gm.Rect().Width().ToInt(), 33554422);
-  EXPECT_GE(background_rect_gm.Rect().Height().ToInt(), 33554422);
+  EXPECT_TRUE(background_rect_gm.IsInfinite()) << background_rect_gm;
 
   ClipRect background_rect_nogm;
   target_paint_layer
       ->Clipper(PaintLayer::GeometryMapperOption::kDoNotUseGeometryMapper)
       .CalculateBackgroundClipRect(context, background_rect_nogm);
 
-  EXPECT_GE(background_rect_nogm.Rect().Width().ToInt(), 33554422);
-  EXPECT_GE(background_rect_nogm.Rect().Height().ToInt(), 33554422);
+  EXPECT_EQ(background_rect_gm.Rect().size, background_rect_nogm.Rect().size);
 }
 
 TEST_F(PaintLayerClipperTest, SVGBackgroundClipRectSubpixelAccumulation) {
@@ -101,16 +99,14 @@ TEST_F(PaintLayerClipperTest, SVGBackgroundClipRectSubpixelAccumulation) {
       ->Clipper(PaintLayer::GeometryMapperOption::kUseGeometryMapper)
       .CalculateBackgroundClipRect(context, background_rect_gm);
 
-  EXPECT_GE(background_rect_gm.Rect().Width().ToInt(), 33554422);
-  EXPECT_GE(background_rect_gm.Rect().Height().ToInt(), 33554422);
+  EXPECT_TRUE(background_rect_gm.IsInfinite()) << background_rect_gm;
 
   ClipRect background_rect_nogm;
   target_paint_layer
       ->Clipper(PaintLayer::GeometryMapperOption::kDoNotUseGeometryMapper)
       .CalculateBackgroundClipRect(context, background_rect_nogm);
 
-  EXPECT_GE(background_rect_nogm.Rect().Width().ToInt(), 33554422);
-  EXPECT_GE(background_rect_nogm.Rect().Height().ToInt(), 33554422);
+  EXPECT_EQ(background_rect_gm.Rect().size, background_rect_nogm.Rect().size);
 }
 
 TEST_F(PaintLayerClipperTest, LayoutSVGRoot) {
@@ -314,8 +310,7 @@ TEST_F(PaintLayerClipperTest, ContainPaintClip) {
   layer->Clipper(PaintLayer::GeometryMapperOption::kUseGeometryMapper)
       .CalculateRects(context, &layer->GetLayoutObject().FirstFragment(),
                       layer_offset, background_rect, foreground_rect);
-  EXPECT_GE(background_rect.Rect().Width().ToInt(), 33554422);
-  EXPECT_GE(background_rect.Rect().Height().ToInt(), 33554422);
+  EXPECT_TRUE(background_rect.IsInfinite()) << background_rect;
   EXPECT_EQ(background_rect.Rect(), foreground_rect.Rect());
   EXPECT_EQ(PhysicalOffset(), layer_offset);
 
@@ -456,13 +451,6 @@ TEST_F(PaintLayerClipperTest, Filter) {
   EXPECT_EQ(PhysicalRect(90, 90, 100, 200), foreground_rect.Rect());
 }
 
-// Computed infinite clip rects may not match LayoutRect::InfiniteIntRect()
-// due to floating point errors.
-static bool IsInfinite(const PhysicalRect& rect) {
-  return rect.X().Round() < -10000000 && rect.Right().Round() > 10000000 &&
-         rect.Y().Round() < -10000000 && rect.Bottom().Round() > 10000000;
-}
-
 TEST_F(PaintLayerClipperTest, IgnoreRootLayerClipWithCSSClip) {
   SetBodyInnerHTML(R"HTML(
     <style>
@@ -491,8 +479,8 @@ TEST_F(PaintLayerClipperTest, IgnoreRootLayerClipWithCSSClip) {
       .CalculateRects(context, &target->GetLayoutObject().FirstFragment(),
                       layer_offset, background_rect, foreground_rect);
 
-  EXPECT_TRUE(IsInfinite(background_rect.Rect()));
-  EXPECT_TRUE(IsInfinite(foreground_rect.Rect()));
+  EXPECT_TRUE(background_rect.IsInfinite());
+  EXPECT_TRUE(foreground_rect.IsInfinite());
 }
 
 TEST_F(PaintLayerClipperTest, IgnoreRootLayerClipWithOverflowClip) {
@@ -515,16 +503,15 @@ TEST_F(PaintLayerClipperTest, IgnoreRootLayerClipWithOverflowClip) {
   PaintLayer* target = GetPaintLayerByElementId("target");
   ClipRectsContext context(root, &root->GetLayoutObject().FirstFragment(),
                            kIgnoreOverlayScrollbarSize, kIgnoreOverflowClip);
-  PhysicalRect infinite_rect(LayoutRect::InfiniteIntRect());
-  PhysicalOffset layer_offset = infinite_rect.offset;
-  ClipRect background_rect(infinite_rect);
-  ClipRect foreground_rect(infinite_rect);
+  PhysicalOffset layer_offset(LayoutRect::InfiniteIntRect().origin());
+  ClipRect background_rect;
+  ClipRect foreground_rect;
   target->Clipper(PaintLayer::GeometryMapperOption::kUseGeometryMapper)
       .CalculateRects(context, &target->GetLayoutObject().FirstFragment(),
                       layer_offset, background_rect, foreground_rect);
 
-  EXPECT_TRUE(IsInfinite(background_rect.Rect()));
-  EXPECT_TRUE(IsInfinite(foreground_rect.Rect()));
+  EXPECT_TRUE(background_rect.IsInfinite());
+  EXPECT_TRUE(foreground_rect.IsInfinite());
 }
 
 TEST_F(PaintLayerClipperTest, IgnoreRootLayerClipWithBothClip) {
@@ -556,8 +543,8 @@ TEST_F(PaintLayerClipperTest, IgnoreRootLayerClipWithBothClip) {
       .CalculateRects(context, &target->GetLayoutObject().FirstFragment(),
                       layer_offset, background_rect, foreground_rect);
 
-  EXPECT_TRUE(IsInfinite(background_rect.Rect()));
-  EXPECT_TRUE(IsInfinite(foreground_rect.Rect()));
+  EXPECT_TRUE(background_rect.IsInfinite());
+  EXPECT_TRUE(foreground_rect.IsInfinite());
 }
 
 TEST_F(PaintLayerClipperTest, Fragmentation) {
@@ -592,15 +579,8 @@ TEST_F(PaintLayerClipperTest, Fragmentation) {
                       &target_paint_layer->GetLayoutObject().FirstFragment(),
                       layer_offset, background_rect, foreground_rect);
 
-  if (RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled()) {
-    EXPECT_TRUE(IsInfinite(background_rect.Rect()));
-    EXPECT_TRUE(IsInfinite(foreground_rect.Rect()));
-  } else {
-    EXPECT_EQ(PhysicalRect(-1000000, -1000000, 2000000, 1000100),
-              background_rect.Rect());
-    EXPECT_EQ(PhysicalRect(-1000000, -1000000, 2000000, 1000100),
-              foreground_rect.Rect());
-  }
+  EXPECT_TRUE(background_rect.IsInfinite());
+  EXPECT_TRUE(foreground_rect.IsInfinite());
   EXPECT_EQ(PhysicalOffset(), layer_offset);
 
   target_paint_layer
@@ -610,18 +590,9 @@ TEST_F(PaintLayerClipperTest, Fragmentation) {
           target_paint_layer->GetLayoutObject().FirstFragment().NextFragment(),
           layer_offset, background_rect, foreground_rect);
 
-  if (RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled()) {
-    EXPECT_TRUE(IsInfinite(background_rect.Rect()));
-    EXPECT_TRUE(IsInfinite(foreground_rect.Rect()));
-    EXPECT_EQ(PhysicalOffset(100, 0), layer_offset);
-  } else {
-    EXPECT_EQ(PhysicalRect(-999900, 0, 2000000, 999900),
-              background_rect.Rect());
-    EXPECT_EQ(PhysicalRect(-999900, 0, 2000000, 999900),
-              foreground_rect.Rect());
-    // Layer bounds adjusted for pagination offset of second fragment.
-    EXPECT_EQ(PhysicalOffset(100, -100), layer_offset);
-  }
+  EXPECT_TRUE(background_rect.IsInfinite());
+  EXPECT_TRUE(foreground_rect.IsInfinite());
+  EXPECT_EQ(PhysicalOffset(100, 0), layer_offset);
 }
 
 TEST_F(PaintLayerClipperTest, ScrollbarClipBehaviorChild) {

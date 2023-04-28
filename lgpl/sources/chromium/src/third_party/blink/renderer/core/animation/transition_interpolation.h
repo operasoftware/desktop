@@ -14,8 +14,7 @@
 
 namespace blink {
 
-class StyleResolverState;
-class InterpolationType;
+class InterpolationEnvironment;
 
 // See the documentation of Interpolation for general information about this
 // class hierarchy.
@@ -64,10 +63,13 @@ class CORE_EXPORT TransitionInterpolation : public Interpolation {
     CHECK(merge_);
     cached_interpolable_value_ = merge_.start_interpolable_value->Clone();
     DCHECK_EQ(compositor_start_ && compositor_end_,
-              property_.GetCSSProperty().IsCompositableProperty());
+
+              property_.GetCSSProperty().IsCompositableProperty() &&
+                  CompositorAnimations::CompositedPropertyRequiresSnapshot(
+                      property_));
   }
 
-  void Apply(StyleResolverState&) const;
+  void Apply(InterpolationEnvironment&) const;
 
   bool IsTransitionInterpolation() const final { return true; }
 

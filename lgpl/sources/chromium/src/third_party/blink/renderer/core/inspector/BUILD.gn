@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//third_party/blink/renderer/bindings/bindings.gni")
 import("//third_party/blink/renderer/core/core.gni")
 import("//third_party/inspector_protocol/inspector_protocol.gni")
@@ -70,6 +69,8 @@ inspector_protocol_generate("protocol_sources") {
     "inspector/protocol/memory.h",
     "inspector/protocol/network.cc",
     "inspector/protocol/network.h",
+    "inspector/protocol/preload.cc",
+    "inspector/protocol/preload.h",
     "inspector/protocol/overlay.cc",
     "inspector/protocol/overlay.h",
     "inspector/protocol/page.cc",
@@ -91,7 +92,7 @@ inspector_protocol_generate("protocol_sources") {
 }
 
 # Compiles the sources generated above.
-jumbo_source_set("generated") {
+source_set("generated") {
   sources = get_target_outputs(":protocol_sources")
 
   configs -= core_config_remove

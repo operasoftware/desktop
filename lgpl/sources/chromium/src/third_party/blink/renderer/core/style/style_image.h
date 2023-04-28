@@ -73,6 +73,9 @@ class CORE_EXPORT StyleImage : public GarbageCollected<StyleImage> {
   // All underlying resources this <image> references has finished loading.
   virtual bool IsLoaded() const { return true; }
 
+  // At least one underlying resource is still loading.
+  virtual bool IsLoading() const { return false; }
+
   // Any underlying resources this <image> references failed to load.
   virtual bool ErrorOccurred() const { return false; }
 
@@ -184,11 +187,16 @@ class CORE_EXPORT StyleImage : public GarbageCollected<StyleImage> {
 
   virtual bool IsEqual(const StyleImage&) const = 0;
 
-  gfx::SizeF ApplyZoom(const gfx::SizeF&, float multiplier) const;
-  gfx::SizeF ImageSizeForSVGImage(SVGImage*,
-                                  float multiplier,
-                                  const gfx::SizeF& default_object_size) const;
+  static gfx::SizeF ApplyZoom(const gfx::SizeF&, float multiplier);
+  static gfx::SizeF ImageSizeForSVGImage(const SVGImage&,
+                                         float multiplier,
+                                         const gfx::SizeF& default_object_size);
+  static bool HasIntrinsicDimensionsForSVGImage(const SVGImage&);
 };
+
+constexpr bool EqualResolutions(const float res1, const float res2) {
+  return std::abs(res1 - res2) < std::numeric_limits<float>::epsilon();
+}
 
 }  // namespace blink
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_STYLE_IMAGE_H_

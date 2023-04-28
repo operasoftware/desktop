@@ -346,6 +346,7 @@ void XMLHttpRequest::InitResponseDocument() {
   auto* document = To<LocalDOMWindow>(GetExecutionContext())->document();
   DocumentInit init = DocumentInit::Create()
                           .WithExecutionContext(GetExecutionContext())
+                          .WithAgent(*GetExecutionContext()->GetAgent())
                           .WithURL(response_.ResponseUrl());
   if (is_html) {
     response_document_ = MakeGarbageCollected<HTMLDocument>(init);
@@ -599,6 +600,10 @@ void XMLHttpRequest::setWithCredentials(bool value,
   }
 
   with_credentials_ = value;
+}
+
+void XMLHttpRequest::setDeprecatedBrowsingTopics(bool value) {
+  deprecated_browsing_topics_ = value;
 }
 
 void XMLHttpRequest::open(const AtomicString& method,
@@ -1055,6 +1060,11 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
   request.SetCredentialsMode(
       with_credentials_ ? network::mojom::CredentialsMode::kInclude
                         : network::mojom::CredentialsMode::kSameOrigin);
+  request.SetBrowsingTopics(deprecated_browsing_topics_);
+  if (deprecated_browsing_topics_) {
+    UseCounter::Count(&execution_context, WebFeature::kTopicsAPIXhr);
+  }
+
   request.SetSkipServiceWorker(world_ && world_->IsIsolatedWorld());
   if (trust_token_params_)
     request.SetTrustTokenParams(*trust_token_params_);
@@ -1389,9 +1399,10 @@ void XMLHttpRequest::setRequestHeader(const AtomicString& name,
     return;
   }
 
-  // "5. Terminate these steps if |name| is a forbidden header name."
+  // "5. Terminate these steps if (|name|, |value|) is a forbidden request
+  //      header."
   // No script (privileged or not) can set unsafe headers.
-  if (cors::IsForbiddenHeaderName(name)) {
+  if (cors::IsForbiddenRequestHeader(name, value)) {
     LogConsoleError(GetExecutionContext(),
                     "Refused to set unsafe header \"" + name + "\"");
     return;
@@ -1428,9 +1439,10 @@ void XMLHttpRequest::setTrustToken(const TrustToken* trust_token,
   }
 
   bool operation_requires_permissions_policy =
-      params->type ==
+      params->operation ==
           network::mojom::blink::TrustTokenOperationType::kRedemption ||
-      params->type == network::mojom::blink::TrustTokenOperationType::kSigning;
+      params->operation ==
+          network::mojom::blink::TrustTokenOperationType::kSigning;
   if (operation_requires_permissions_policy &&
       !GetExecutionContext()->IsFeatureEnabled(
           mojom::blink::PermissionsPolicyFeature::kTrustTokenRedemption)) {
@@ -1441,7 +1453,7 @@ void XMLHttpRequest::setTrustToken(const TrustToken* trust_token,
     return;
   }
 
-  if (params->type ==
+  if (params->operation ==
           network::mojom::blink::TrustTokenOperationType::kIssuance &&
       !IsTrustTokenIssuanceAvailableInExecutionContext(
           *GetExecutionContext())) {

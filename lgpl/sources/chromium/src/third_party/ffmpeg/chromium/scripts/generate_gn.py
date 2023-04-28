@@ -132,6 +132,8 @@ def CleanObjectFiles(object_files):
       'libavutil/ripemd.o',
       'libavutil/sha512.o',
       'libavutil/tree.o',
+      'libavutil/tx_double.o',
+      'libavutil/tx_int32.o',
       'libavutil/xtea.o',
       'libavutil/xga_font_data.o',
   ]
@@ -334,6 +336,8 @@ class SourceSet(object):
         platform_condition = None
       elif condition.PLATFORM == 'linux':
         platform_condition = 'use_linux_config'
+      elif condition.PLATFORM == 'mac':
+        platform_condition = 'is_apple'
       else:
         platform_condition = 'is_%s' % condition.PLATFORM
 

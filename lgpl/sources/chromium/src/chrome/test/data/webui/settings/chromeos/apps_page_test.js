@@ -4,14 +4,17 @@
 
 import 'chrome://os-settings/chromeos/os_settings.js';
 
-import {AndroidAppsBrowserProxyImpl, createBoolPermission, Router, routes, routesMojomWebui, setAppNotificationProviderForTesting} from 'chrome://os-settings/chromeos/os_settings.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {AndroidAppsBrowserProxyImpl, appNotificationHandlerMojom, createBoolPermission, Router, routes, routesMojomWebui, setAppNotificationProviderForTesting} from 'chrome://os-settings/chromeos/os_settings.js';
+import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
+import {getDeepActiveElement} from 'chrome://resources/ash/common/util.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 
 import {TestAndroidAppsBrowserProxy} from './test_android_apps_browser_proxy.js';
+
+const {App, AppNotificationsObserverRemote, Readiness} =
+    appNotificationHandlerMojom;
 
 /** @type {?OsSettingsAppsPageElement} */
 let appsPage = null;
@@ -63,14 +66,12 @@ class FakeAppNotificationHandler {
     this.resolverMap_ = new Map();
 
     /**
-     * @private
-     *     {?ash.settings.appNotification.mojom.
-     *      AppNotificationObserverRemote}
+     * @private {?AppNotificationsObserverRemote}
      */
-    this.appNotificationObserverRemote_;
+    this.appNotificationsObserverRemote_;
 
     /**
-     * @private {!Array<!ash.settings.appNotification.mojom.App>}
+     * @private {!Array<!App>}
      */
     this.apps_ = [];
 
@@ -81,8 +82,8 @@ class FakeAppNotificationHandler {
   }
 
   resetForTest() {
-    if (this.appNotificationObserverRemote_) {
-      this.appNotificationObserverRemote_ = null;
+    if (this.appNotificationsObserverRemote_) {
+      this.appNotificationsObserverRemote_ = null;
     }
 
     this.resolverMap_.set('addObserver', new PromiseResolver());
@@ -123,25 +124,21 @@ class FakeAppNotificationHandler {
   }
 
   /**
-   * @return
-   *      {ash.settings.appNotification.mojom.
-   *        AppNotificationObserverRemote}
+   * @return {AppNotificationsObserverRemote}
    */
   getObserverRemote() {
-    return this.appNotificationObserverRemote_;
+    return this.appNotificationsObserverRemote_;
   }
 
   // appNotificationHandler methods
 
   /**
-   * @param {!ash.settings.appNotification.mojom.
-   *        AppNotificationObserverRemote}
-   *      remote
+   * @param {!AppNotificationsObserverRemote} remote
    * @return {!Promise}
    */
   addObserver(remote) {
     return new Promise(resolve => {
-      this.appNotificationObserverRemote_ = remote;
+      this.appNotificationsObserverRemote_ = remote;
       this.methodCalled('addObserver');
       resolve();
     });
@@ -165,7 +162,7 @@ class FakeAppNotificationHandler {
 
   /**
    * @param {string} id
-   * @param {!appManagement.mojom.Permission} permission
+   * @param {!Permission} permission
    */
   setNotificationPermission(id, permission) {
     return new Promise(resolve => {
@@ -175,7 +172,7 @@ class FakeAppNotificationHandler {
   }
 
   /**
-   * @return {!Promise<!Array<!ash.settings.appNotification.mojom.App>>}
+   * @return {!Promise<!Array<!App>>}
    */
   getApps() {
     return new Promise(resolve => {
@@ -188,7 +185,7 @@ class FakeAppNotificationHandler {
 suite('AppsPageTests', function() {
   /**
    * @type {
-   *    ?ash.settings.appNotification.mojom.AppNotificationHandlerRemote
+   *    ?AppNotificationHandlerRemote
    *  }
    */
   let mojoApi_;
@@ -196,13 +193,11 @@ suite('AppsPageTests', function() {
   /**
    * @param {string} id
    * @param {string} title
-   * @param {!appManagement.mojom.Permission} permission
-   * @param {?ash.settings.appNotification.mojom.Readiness} readiness
-   * @return {!ash.settings.appNotification.mojom.App}
+   * @param {!Permission} permission
+   * @param {?Readiness} readiness
+   * @return {!App}
    */
-  function createApp(
-      id, title, permission,
-      readiness = ash.settings.appNotification.mojom.Readiness.kReady) {
+  function createApp(id, title, permission, readiness = Readiness.kReady) {
     return {
       id: id,
       title: title,
@@ -218,7 +213,7 @@ suite('AppsPageTests', function() {
     return mojoApi_.whenCalled('addObserver');
   }
 
-  /** @param {!Array<!ash.settings.appNotification.mojom.App>} */
+  /** @param {!Array<!App>} */
   function simulateNotificationAppChanged(app) {
     mojoApi_.getObserverRemote().onNotificationAppChanged(app);
   }
@@ -313,9 +308,8 @@ suite('AppsPageTests', function() {
       assertEquals('2 apps', rowLink.subLabel);
 
       // Simulate an uninstalled app.
-      const app3 = createApp(
-          '2', 'App2', permission2,
-          ash.settings.appNotification.mojom.Readiness.kUninstalledByUser);
+      const app3 =
+          createApp('2', 'App2', permission2, Readiness.kUninstalledByUser);
       simulateNotificationAppChanged(app3);
       await flushTasks();
       assertEquals('1 apps', rowLink.subLabel);

@@ -290,10 +290,6 @@ class CORE_EXPORT HTMLCanvasElement final
   bool IsWebGLBlocked() const override;
   void SetContextCreationWasBlocked() override;
 
-  ScriptPromise convertToBlob(ScriptState*,
-                              const ImageEncodeOptions*,
-                              ExceptionState&);
-
   bool NeedsUnbufferedInputEvents() const { return needs_unbuffered_input_; }
 
   void SetNeedsUnbufferedInputEvents(bool value) {
@@ -318,9 +314,13 @@ class CORE_EXPORT HTMLCanvasElement final
 
  protected:
   void DidMoveToNewDocument(Document& old_document) override;
+  void DidRecalcStyle(const StyleRecalcChange change) override;
+  void RemovedFrom(ContainerNode& insertion_point) override;
 
  private:
   void Dispose();
+
+  void ColorSchemeMayHaveChanged();
 
   void RecordIdentifiabilityMetric(IdentifiableSurface surface,
                                    IdentifiableToken value) const;

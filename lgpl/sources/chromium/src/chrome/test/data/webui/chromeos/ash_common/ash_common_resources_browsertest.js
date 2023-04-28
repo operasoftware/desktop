@@ -21,6 +21,18 @@ var AshCommonResourcesBrowserTest = class extends PolymerTest {
   }
 };
 
+var AshCommonResourcesCrDeprecatedModuleTest =
+    class extends AshCommonResourcesBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://webui-test/test_loader.html?module=chromeos/ash_common/cr_deprecated_test.js';
+  }
+};
+
+TEST_F('AshCommonResourcesCrDeprecatedModuleTest', 'All', function() {
+  mocha.run();
+});
+
 var AshCommonResourcesListPropertyUpdateBehaviorTest =
     class extends AshCommonResourcesBrowserTest {
   /** @override */
@@ -79,5 +91,18 @@ var AshCommonResourcesScrollableBehaviorTest =
 };
 
 TEST_F('AshCommonResourcesScrollableBehaviorTest', 'All', function() {
+  mocha.run();
+});
+
+var AshCommonResourcesTypescriptUtilsStrictQueryTest =
+    class extends AshCommonResourcesBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://webui-test/test_loader.html?module=chromeos/ash_common/' +
+        'typescript_utils/strict_query_test.js'
+  }
+};
+
+TEST_F('AshCommonResourcesTypescriptUtilsStrictQueryTest', 'All', function() {
   mocha.run();
 });

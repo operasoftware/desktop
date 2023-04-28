@@ -8,8 +8,8 @@
 
 #include "base/debug/stack_trace.h"
 
-#include "base/bind.h"
 #include "base/check_op.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/task/common/lazy_now.h"
 #include "base/task/task_features.h"
@@ -85,7 +85,7 @@ TaskQueueThrottler::GetNextAllowedWakeUpImpl(
       // WakeUpResolution::kLow is always used for throttled tasks since those
       // tasks can tolerate having their execution being delayed.
       return base::sequence_manager::WakeUp{
-          allowed_run_time, base::GetTaskLeeway(),
+          allowed_run_time, base::GetTaskLeewayForCurrentThread(),
           base::sequence_manager::WakeUpResolution::kLow};
     }
   }

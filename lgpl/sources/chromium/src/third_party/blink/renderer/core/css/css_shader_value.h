@@ -9,6 +9,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -23,9 +24,11 @@ class GpuShaderResource;
 
 class CORE_EXPORT CSSShaderValue : public CSSValue {
  public:
+  CSSShaderValue();
   CSSShaderValue(const AtomicString& raw_value,
                  const KURL&,
                  const Referrer&,
+                 CSSValueList*,
                  float);
   ~CSSShaderValue();
 
@@ -37,8 +40,9 @@ class CORE_EXPORT CSSShaderValue : public CSSValue {
   bool Equals(const CSSShaderValue&) const;
 
   CSSShaderValue* ValueWithURLMadeAbsolute() const {
-    return MakeGarbageCollected<CSSShaderValue>(
-        absolute_url_, KURL(absolute_url_), Referrer(), animation_frame_);
+    return MakeGarbageCollected<CSSShaderValue>(absolute_url_,
+                                                KURL(absolute_url_), Referrer(),
+                                                args_, animation_frame_);
   }
 
   void TraceAfterDispatch(blink::Visitor*) const;
@@ -47,6 +51,7 @@ class CORE_EXPORT CSSShaderValue : public CSSValue {
   const AtomicString& AbsoluteUrl() const { return absolute_url_; }
   const AtomicString& RelativeUrl() const { return relative_url_; }
   GpuShaderResource* Resource() const { return resource_; }
+  const CSSValueList* Args() const { return args_; }
   float AnimationFrame() const { return animation_frame_; }
 
  private:
@@ -54,8 +59,10 @@ class CORE_EXPORT CSSShaderValue : public CSSValue {
   AtomicString relative_url_;
   mutable Member<GpuShaderResource> resource_;
   mutable AtomicString absolute_url_;
-  // This is dummy frame id using for driving the shader animations.
-  mutable float animation_frame_;
+  mutable Member<CSSValueList> args_;
+
+  // DEPRECATED.
+  mutable float animation_frame_ = 0;
 };
 
 template <>

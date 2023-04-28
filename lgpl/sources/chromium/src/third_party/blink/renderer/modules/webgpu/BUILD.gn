@@ -12,6 +12,8 @@ blink_modules_sources("webgpu") {
     "dawn_enum_conversions.h",
     "dawn_object.cc",
     "dawn_object.h",
+    "external_texture_helper.cc",
+    "external_texture_helper.h",
     "gpu.cc",
     "gpu.h",
     "gpu_adapter.cc",
@@ -53,6 +55,8 @@ blink_modules_sources("webgpu") {
     "gpu_map_mode.h",
     "gpu_out_of_memory_error.cc",
     "gpu_out_of_memory_error.h",
+    "gpu_pipeline_error.cc",
+    "gpu_pipeline_error.h",
     "gpu_pipeline_layout.cc",
     "gpu_pipeline_layout.h",
     "gpu_programmable_pass_encoder.cc",
@@ -94,12 +98,6 @@ blink_modules_sources("webgpu") {
     "texture_utils.cc",
     "texture_utils.h",
   ]
-
-  jumbo_excluded_sources = [
-    "dawn_enum_conversions.cc",
-    "gpu_supported_limits.cc",
-  ]
-
   deps = [
     "//gpu/command_buffer/client:webgpu_interface",
     "//services/metrics/public/cpp:ukm_builders",

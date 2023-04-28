@@ -519,8 +519,7 @@ VideoDecoder::MakeMediaVideoDecoderConfigInternal(
 VideoDecoder::VideoDecoder(ScriptState* script_state,
                            const VideoDecoderInit* init,
                            ExceptionState& exception_state)
-    : DecoderTemplate<VideoDecoderTraits>(script_state, init, exception_state),
-      chunk_metadata_(128) {
+    : DecoderTemplate<VideoDecoderTraits>(script_state, init, exception_state) {
   UseCounter::Count(ExecutionContext::From(script_state),
                     WebFeature::kWebCodecs);
 }
@@ -618,8 +617,8 @@ VideoDecoder::MakeInput(const InputType& chunk, bool verify_key_frame) {
     }
   }
 
-  chunk_metadata_.Put(chunk.buffer()->timestamp(),
-                      ChunkMetadata{chunk.buffer()->duration()});
+  chunk_metadata_[chunk.buffer()->timestamp()] =
+      ChunkMetadata{chunk.buffer()->duration()};
 
   return decoder_buffer;
 }
@@ -627,17 +626,22 @@ VideoDecoder::MakeInput(const InputType& chunk, bool verify_key_frame) {
 media::DecoderStatus::Or<VideoDecoder::OutputType*> VideoDecoder::MakeOutput(
     scoped_refptr<MediaOutputType> output,
     ExecutionContext* context) {
-  const auto it = chunk_metadata_.Get(output->timestamp());
+  const auto it = chunk_metadata_.find(output->timestamp());
   if (it != chunk_metadata_.end()) {
     const auto duration = it->second.duration;
     if (!duration.is_zero() && duration != media::kNoTimestamp) {
-      output = media::VideoFrame::WrapVideoFrame(output, output->format(),
-                                                 output->visible_rect(),
-                                                 output->natural_size());
-      output->metadata().frame_duration = duration;
+      auto wrapped_output = media::VideoFrame::WrapVideoFrame(
+          output, output->format(), output->visible_rect(),
+          output->natural_size());
+      wrapped_output->set_color_space(output->ColorSpace());
+      wrapped_output->metadata().frame_duration = duration;
+      output = wrapped_output;
     }
-  }
 
+    // We erase from the beginning onward to our target frame since frames
+    // should be returned in presentation order.
+    chunk_metadata_.erase(chunk_metadata_.begin(), it + 1);
+  }
   return MakeGarbageCollected<OutputType>(std::move(output), context);
 }
 

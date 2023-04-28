@@ -4,15 +4,13 @@
 
 import 'chrome://webui-test/mojo_webui_test_support.js';
 
-import {BookmarksApiProxyImpl} from 'chrome://read-later.top-chrome/bookmarks/bookmarks_api_proxy.js';
-import {BookmarksDragManager, DROP_POSITION_ATTR, DropPosition, overrideFolderOpenerTimeoutDelay} from 'chrome://read-later.top-chrome/bookmarks/bookmarks_drag_manager.js';
-import {BookmarksListElement, LOCAL_STORAGE_OPEN_FOLDERS_KEY} from 'chrome://read-later.top-chrome/bookmarks/bookmarks_list.js';
-import {ShoppingListApiProxyImpl} from 'chrome://read-later.top-chrome/bookmarks/commerce/shopping_list_api_proxy.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {PluralStringProxyImpl} from 'chrome://resources/js/plural_string_proxy.js';
+import {BookmarksApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_api_proxy.js';
+import {BookmarksDragManager, DROP_POSITION_ATTR, DropPosition, overrideFolderOpenerTimeoutDelay} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_drag_manager.js';
+import {BookmarksListElement, LOCAL_STORAGE_OPEN_FOLDERS_KEY} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_list.js';
+import {ShoppingListApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/commerce/shopping_list_api_proxy.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {assertDeepEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
-import {TestPluralStringProxy} from 'chrome://webui-test/test_plural_string_proxy.js';
 
 import {TestShoppingListApiProxy} from './commerce/test_shopping_list_api_proxy.js';
 import {TestBookmarksApiProxy} from './test_bookmarks_api_proxy.js';
@@ -83,11 +81,10 @@ suite('SidePanelBookmarkDragManagerTest', () => {
   }
 
   setup(async () => {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
     loadTimeData.overrideValues({
-      bookmarksDragAndDropEnabled: true,
+      editBookmarksEnabled: true,
     });
 
     const bookmarksApi = new TestBookmarksApiProxy();
@@ -96,9 +93,6 @@ suite('SidePanelBookmarkDragManagerTest', () => {
 
     const shoppingListApi = new TestShoppingListApiProxy();
     ShoppingListApiProxyImpl.setInstance(shoppingListApi);
-
-    const pluralString = new TestPluralStringProxy();
-    PluralStringProxyImpl.setInstance(pluralString);
 
     window.localStorage[LOCAL_STORAGE_OPEN_FOLDERS_KEY] =
         JSON.stringify(['1', '4']);
@@ -208,6 +202,7 @@ suite('SidePanelBookmarkDragManagerTest', () => {
     chrome.bookmarkManagerPrivate.drop = (id, index) => {
       calledId = id;
       calledIndex = index;
+      return Promise.resolve();
     };
 
     const draggableElements = getDraggableElements();
@@ -237,6 +232,7 @@ suite('SidePanelBookmarkDragManagerTest', () => {
     chrome.bookmarkManagerPrivate.drop = (id, index) => {
       calledId = id;
       calledIndex = index;
+      return Promise.resolve();
     };
 
     const draggableElements = getDraggableElements();

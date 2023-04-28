@@ -6,8 +6,10 @@
 
 #include "base/run_loop.h"
 #include "media/base/mock_filters.h"
+#include "media/video/video_encoder_info.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
@@ -23,6 +25,7 @@
 #include "third_party/blink/renderer/modules/webcodecs/codec_pressure_manager.h"
 #include "third_party/blink/renderer/modules/webcodecs/codec_pressure_manager_provider.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_encoder.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/openh264/openh264_buildflags.h"
 
@@ -56,13 +59,13 @@ class FakeVideoEncoder : public VideoEncoder {
 
  private:
   void SetupExpectations(base::RepeatingClosure quit_closure) {
-    EXPECT_CALL(*next_mock_encoder_, Initialize(_, _, _, _))
-        .WillOnce([quit_closure](Unused, Unused, Unused,
+    EXPECT_CALL(*next_mock_encoder_, Initialize(_, _, _, _, _))
+        .WillOnce([quit_closure](Unused, Unused, Unused, Unused,
                                  media::VideoEncoder::EncoderStatusCB done_cb) {
-          base::SequencedTaskRunnerHandle::Get()->PostTask(
-              FROM_HERE, base::BindOnce(std::move(done_cb),
-                                        media::EncoderStatus::Codes::kOk));
-          base::SequencedTaskRunnerHandle::Get()->PostTask(
+          scheduler::GetSequencedTaskRunnerForTesting()->PostTask(
+              FROM_HERE, WTF::BindOnce(std::move(done_cb),
+                                       media::EncoderStatus::Codes::kOk));
+          scheduler::GetSequencedTaskRunnerForTesting()->PostTask(
               FROM_HERE, std::move(quit_closure));
         });
   }
@@ -72,7 +75,12 @@ class FakeVideoEncoder : public VideoEncoder {
       media::GpuVideoAcceleratorFactories* external_software_factories,
       media::GpuVideoAcceleratorFactories* gpu_factories) override {
     EXPECT_TRUE(next_mock_encoder_);
-    OnMediaEncoderCreated("MockEncoderName", mock_encoder_is_hw_);
+
+    media::VideoEncoderInfo info;
+    info.implementation_name = "MockEncoderName";
+    info.is_hardware_accelerated = mock_encoder_is_hw_;
+    OnMediaEncoderInfoChanged(info);
+
     return std::move(next_mock_encoder_);
   }
 
@@ -184,8 +192,7 @@ TEST_P(VideoEncoderTest, RejectFlushAfterClose) {
       MakeVideoFrame(script_state, config->width(), config->height(), 1),
       MakeGarbageCollected<VideoEncoderEncodeOptions>(), es);
 
-  auto promise = encoder->flush(es);
-  ScriptPromiseTester tester(script_state, promise);
+  ScriptPromiseTester tester(script_state, encoder->flush(es));
   ASSERT_FALSE(es.HadException());
   ASSERT_FALSE(tester.IsFulfilled());
   ASSERT_FALSE(tester.IsRejected());

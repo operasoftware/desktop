@@ -4,9 +4,9 @@
 
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder_adapter.h"
 
-#include "base/bind.h"
-#include "base/callback_forward.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_forward.h"
+#include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/sequence_checker.h"
 #include "base/synchronization/waitable_event.h"
@@ -37,8 +37,11 @@ RTCVideoEncoderAdapter::RTCVideoEncoderAdapter(
     std::unique_ptr<media::VideoEncoder> encoder)
     : profile_(profile),
       encoder_(std::move(encoder)),
+      // The Windows platform SW encoder may need to load a system library,
+      // hence MayBlock(). This doesn't hurt since we wait for tasks to finish
+      // on this runner anyway.
       encoder_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
-          {base::TaskPriority::USER_BLOCKING})) {
+          {base::TaskPriority::USER_BLOCKING, base::MayBlock()})) {
   DVLOG(1) << __func__ << " " << profile_;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
@@ -53,13 +56,6 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
                                        const VideoEncoder::Settings& settings) {
   DVLOG(1) << __func__ << " encoder_initialized_=" << encoder_initialized_;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  auto init_task =
-      !encoder_initialized_
-          ? base::BindOnce(&media::VideoEncoder::Initialize,
-                           base::Unretained(encoder_.get()), profile_)
-          : base::BindOnce(&media::VideoEncoder::ChangeOptions,
-                           base::Unretained(encoder_.get()));
 
   encoder_options_.frame_size = {codec_settings->width, codec_settings->height};
 
@@ -98,9 +94,17 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
       base::BindRepeating(&RTCVideoEncoderAdapter::OnEncodedFrameReady,
                           weak_ptr_factory_.GetWeakPtr()));
 
+  const bool needs_initialization = !encoder_initialized_;
   encoder_initialized_ = false;
-  const media::EncoderStatus result = RunOnEncoderTaskRunnerSync(base::BindOnce(
-      std::move(init_task), encoder_options_, std::move(output_callback)));
+  const media::EncoderStatus result = RunOnEncoderTaskRunnerSync(
+      needs_initialization
+          ? base::BindOnce(&media::VideoEncoder::Initialize,
+                           base::Unretained(encoder_.get()), profile_,
+                           encoder_options_, base::DoNothing(),
+                           std::move(output_callback))
+          : base::BindOnce(&media::VideoEncoder::ChangeOptions,
+                           base::Unretained(encoder_.get()), encoder_options_,
+                           std::move(output_callback)));
 
   if (!result.is_ok())
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
@@ -273,7 +277,7 @@ void RTCVideoEncoderAdapter::OnEncodedFrameReady(
   DCHECK(encoded_image_callback_)
       << "Expected RegisterEncodeCompleteCallback() first";
 
-  const auto it = base::ranges::find(
+  auto* it = base::ranges::find(
       input_frames_, output.timestamp,
       [](const webrtc::VideoFrame& input_frame) {
         return base::Microseconds(input_frame.timestamp() * kUsPerRtpTick);

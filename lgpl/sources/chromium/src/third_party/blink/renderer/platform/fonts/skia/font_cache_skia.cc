@@ -229,8 +229,7 @@ sk_sp<SkTypeface> FontCache::CreateTypeface(
 #if BUILDFLAG(IS_WIN)
   // TODO(vmpstr): Deal with paint typeface here.
   if (sideloaded_fonts_) {
-    HashMap<String, sk_sp<SkTypeface>, CaseFoldingHash>::iterator
-        sideloaded_font = sideloaded_fonts_->find(name.c_str());
+    auto sideloaded_font = sideloaded_fonts_->find(name.c_str());
     if (sideloaded_font != sideloaded_fonts_->end())
       return sideloaded_font->value;
   }
@@ -304,7 +303,12 @@ std::unique_ptr<FontPlatformData> FontCache::CreateFontPlatformData(
            font_description.IsSyntheticItalic()) &&
               font_description.GetFontSynthesisStyle() ==
                   FontDescription::kAutoFontSynthesisStyle,
-          font_description.TextRendering(), font_description.Orientation());
+          font_description.TextRendering(),
+          font_description.GetFontVariantAlternates()
+              ? font_description.GetFontVariantAlternates()
+                    ->GetResolvedFontFeatures()
+              : ResolvedFontFeatures(),
+          font_description.Orientation());
 
   font_platform_data->SetAvoidEmbeddedBitmaps(
       BitmapGlyphsBlockList::ShouldAvoidEmbeddedBitmapsForTypeface(*typeface));

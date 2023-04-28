@@ -6,14 +6,14 @@ import 'chrome://os-settings/chromeos/os_settings.js';
 import 'chrome://os-settings/strings.m.js';
 
 import {FastPairSavedDevicesOptInStatus, OsBluetoothDevicesSubpageBrowserProxyImpl, Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
 import {DeviceConnectionState} from 'chrome://resources/mojo/chromeos/ash/services/bluetooth_config/public/mojom/cros_bluetooth_config.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {createDefaultBluetoothDevice} from 'chrome://test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
+import {createDefaultBluetoothDevice} from 'chrome://webui-test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 import {eventToPromise, isVisible} from 'chrome://webui-test/test_util.js';
 
-import {assertEquals, assertFalse, assertGT, assertTrue} from '../../../chai_assert.js';
+import {assertEquals, assertFalse, assertGT, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 import {TestOsBluetoothDevicesSubpageBrowserProxy} from './test_os_bluetooth_subpage_browser_proxy.js';
 
@@ -105,11 +105,13 @@ suite('OsSavedDevicesSubpageTest', function() {
 
     const ironResizePromise = eventToPromise('iron-resize', list);
 
-    listItem.$$('#dotsMenu').click();
+    listItem.shadowRoot.querySelector('#dotsMenu').click();
     await flushTasks();
-    listItem.$$('#removeButton').click();
+    listItem.shadowRoot.querySelector('#removeButton').click();
     await flushTasks();
-    listItem.$$('#removeDeviceDialog').$$('#remove').click();
+    const removeDialog =
+        listItem.shadowRoot.querySelector('#removeDeviceDialog');
+    removeDialog.shadowRoot.querySelector('#remove').click();
 
     await ironResizePromise;
     await flushTasks();

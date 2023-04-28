@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/modules/webgl/oes_draw_buffers_indexed.h"
 #include "third_party/blink/renderer/modules/webgl/oes_texture_float_linear.h"
 #include "third_party/blink/renderer/modules/webgl/ovr_multiview_2.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_clip_cull_distance.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_astc.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_etc.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_etc1.h"
@@ -41,6 +42,7 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_lose_context.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_multi_draw.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_multi_draw_instanced_base_vertex_base_instance.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_provoking_vertex.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_video_texture.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_webcodecs_video_frame.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
@@ -162,6 +164,8 @@ void WebGL2RenderingContext::RegisterContextExtensions() {
   RegisterExtension(khr_parallel_shader_compile_);
   RegisterExtension(oes_draw_buffers_indexed_);
   RegisterExtension(oes_texture_float_linear_);
+  RegisterExtension(ovr_multiview2_);
+  RegisterExtension(webgl_clip_cull_distance_, kDraftExtension);
   RegisterExtension(webgl_compressed_texture_astc_);
   RegisterExtension(webgl_compressed_texture_etc_);
   RegisterExtension(webgl_compressed_texture_etc1_);
@@ -176,9 +180,9 @@ void WebGL2RenderingContext::RegisterContextExtensions() {
   RegisterExtension(webgl_multi_draw_);
   RegisterExtension(webgl_multi_draw_instanced_base_vertex_base_instance_,
                     kDraftExtension);
+  RegisterExtension(webgl_provoking_vertex_);
   RegisterExtension(webgl_video_texture_, kDraftExtension);
   RegisterExtension(webgl_webcodecs_video_frame_, kDraftExtension);
-  RegisterExtension(ovr_multiview2_);
 }
 
 void WebGL2RenderingContext::Trace(Visitor* visitor) const {
@@ -194,6 +198,7 @@ void WebGL2RenderingContext::Trace(Visitor* visitor) const {
   visitor->Trace(oes_draw_buffers_indexed_);
   visitor->Trace(oes_texture_float_linear_);
   visitor->Trace(ovr_multiview2_);
+  visitor->Trace(webgl_clip_cull_distance_);
   visitor->Trace(webgl_compressed_texture_astc_);
   visitor->Trace(webgl_compressed_texture_etc_);
   visitor->Trace(webgl_compressed_texture_etc1_);
@@ -206,6 +211,7 @@ void WebGL2RenderingContext::Trace(Visitor* visitor) const {
   visitor->Trace(webgl_lose_context_);
   visitor->Trace(webgl_multi_draw_);
   visitor->Trace(webgl_multi_draw_instanced_base_vertex_base_instance_);
+  visitor->Trace(webgl_provoking_vertex_);
   visitor->Trace(webgl_video_texture_);
   visitor->Trace(webgl_webcodecs_video_frame_);
   WebGL2RenderingContextBase::Trace(visitor);

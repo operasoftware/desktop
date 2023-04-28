@@ -63,6 +63,7 @@ blink_core_sources("animation") {
     "css/css_keyframe_effect_model.h",
     "css/css_scroll_timeline.cc",
     "css/css_scroll_timeline.h",
+    "css/css_timeline_map.h",
     "css/css_timing_data.cc",
     "css/css_timing_data.h",
     "css/css_transition.cc",
@@ -95,6 +96,8 @@ blink_core_sources("animation") {
     "css_font_size_interpolation_type.h",
     "css_font_stretch_interpolation_type.cc",
     "css_font_stretch_interpolation_type.h",
+    "css_font_style_interpolation_type.cc",
+    "css_font_style_interpolation_type.h",
     "css_font_variation_settings_interpolation_type.cc",
     "css_font_variation_settings_interpolation_type.h",
     "css_font_weight_interpolation_type.cc",
@@ -177,6 +180,8 @@ blink_core_sources("animation") {
     "inert_effect.h",
     "interpolable_aspect_ratio.cc",
     "interpolable_aspect_ratio.h",
+    "interpolable_color.cc",
+    "interpolable_color.h",
     "interpolable_filter.cc",
     "interpolable_filter.h",
     "interpolable_grid_length.cc",
@@ -274,6 +279,8 @@ blink_core_sources("animation") {
     "svg_transform_list_interpolation_type.h",
     "svg_value_interpolation_type.cc",
     "svg_value_interpolation_type.h",
+    "timeline_offset.cc",
+    "timeline_offset.h",
     "timing.cc",
     "timing.h",
     "timing_calculations.h",
@@ -293,12 +300,6 @@ blink_core_sources("animation") {
     "worklet_animation_base.h",
     "worklet_animation_controller.cc",
     "worklet_animation_controller.h",
-  ]
-
-  jumbo_excluded_sources = [
-    "compositor_animations.cc",
-    "css_intrinsic_length_interpolation_type.cc",
-    "css_shadow_list_interpolation_type.cc",
   ]
 
   deps = [

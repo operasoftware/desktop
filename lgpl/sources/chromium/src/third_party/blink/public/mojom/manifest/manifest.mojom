@@ -62,6 +62,11 @@ struct Manifest {
   // https://github.com/WICG/pwa-url-handler/blob/main/explainer.md
   array<ManifestUrlHandler> url_handlers;
 
+  // TODO(crbug.com/1250011): This field is non-standard and part of an
+  // experiment. See:
+  // https://github.com/WICG/manifest-incubations/blob/gh-pages/scope_extensions-explainer.md
+  array<ManifestScopeExtension> scope_extensions;
+
   // TODO(crbug.com/1006642): This field is non-standard and part of an
   // experiment. See:
   // https://github.com/WICG/lock-screen/
@@ -95,20 +100,15 @@ struct Manifest {
 
   // TODO(crbug.com/1163398): This field is non-standard and part of a Chrome
   // experiment. See:
-  // https://github.com/WICG/sw-launch/blob/main/declarative_link_capturing.md#proposal
+  // https://github.com/WICG/web-app-launch/blob/main/declarative_link_capturing.md#proposal
   // As such, this field should not be exposed by default.
   CaptureLinks capture_links;
-
-  // TODO(crbug.com/1212263): This field is non-standard and part of a Chrome
-  // experiment. See:
-  // https://github.com/robbiemc/pwa-isolated-storage/blob/main/explainer.md
-  bool isolated_storage;
 
   array<ParsedPermissionsPolicyDeclaration> permissions_policy;
 
   // TODO(crbug.com/1231886): This field is non-standard and part of a Chrome
   // experiment. See:
-  // https://github.com/WICG/sw-launch/blob/main/launch_handler.md
+  // https://github.com/WICG/web-app-launch/blob/main/launch_handler.md
   ManifestLaunchHandler? launch_handler;
 
   // TODO(crbug.com/1259777): This field is non-standard and part of a Chrome
@@ -121,6 +121,13 @@ struct Manifest {
   // experiment. See:
   // https://github.com/WICG/manifest-incubations/blob/gh-pages/user-preferences-explainer.md
   ManifestUserPreferences? user_preferences;
+
+  // TODO(crbug.com/1318305): This field is non-standard and part of a Chrome
+  // experiment. See: https://github.com/w3c/manifest/issues/1045
+  bool has_dark_theme_color;
+  uint32 dark_theme_color;
+  bool has_dark_background_color;
+  uint32 dark_background_color;
 
   // TODO(crbug.com/897314): This field is non-standard and part of a Chrome
   // experiment. See:
@@ -210,6 +217,15 @@ struct ManifestUrlHandler {
   // A boolean that is used to show if a wildcard is present for the origin.
   // If true, the application indicates that it wants to handle all subdomains
   // of |origin|. If false, the application only wants to handle |origin|.
+  bool has_origin_wildcard;
+};
+
+struct ManifestScopeExtension {
+  url.mojom.Origin origin;
+  // A boolean that is used to show if a wildcard is present for the origin.
+  // If true, the application indicates that it wants to extend its scope to all
+  // subdomains of |origin|. If false, the application only wants to extend its
+  // scope to |origin|.
   bool has_origin_wildcard;
 };
 

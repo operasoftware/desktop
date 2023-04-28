@@ -97,7 +97,7 @@ class CORE_EXPORT ContainerNode : public Node {
   bool HasChildren() const { return first_child_; }
 
   bool HasOneChild() const {
-    return first_child_ && !first_child_->nextSibling();
+    return first_child_ && !first_child_->HasNextSibling();
   }
   bool HasOneTextChild() const {
     return HasOneChild() && first_child_->IsTextNode();
@@ -308,6 +308,7 @@ class CORE_EXPORT ContainerNode : public Node {
     kTextChanged
   };
   enum class ChildrenChangeSource : uint8_t { kAPI, kParser };
+  enum class ChildrenChangeAffectsElements : uint8_t { kNo, kYes };
   struct ChildrenChange {
     STACK_ALLOCATED();
 
@@ -316,15 +317,17 @@ class CORE_EXPORT ContainerNode : public Node {
                                        Node* unchanged_previous,
                                        Node* unchanged_next,
                                        ChildrenChangeSource by_parser) {
-      ChildrenChange change = {node.IsElementNode()
-                                   ? ChildrenChangeType::kElementInserted
-                                   : ChildrenChangeType::kNonElementInserted,
-                               by_parser,
-                               &node,
-                               unchanged_previous,
-                               unchanged_next,
-                               {},
-                               String()};
+      ChildrenChange change = {
+          node.IsElementNode() ? ChildrenChangeType::kElementInserted
+                               : ChildrenChangeType::kNonElementInserted,
+          by_parser,
+          node.IsElementNode() ? ChildrenChangeAffectsElements::kYes
+                               : ChildrenChangeAffectsElements::kNo,
+          &node,
+          unchanged_previous,
+          unchanged_next,
+          {},
+          String()};
       return change;
     }
 
@@ -332,15 +335,17 @@ class CORE_EXPORT ContainerNode : public Node {
                                      Node* previous_sibling,
                                      Node* next_sibling,
                                      ChildrenChangeSource by_parser) {
-      ChildrenChange change = {node.IsElementNode()
-                                   ? ChildrenChangeType::kElementRemoved
-                                   : ChildrenChangeType::kNonElementRemoved,
-                               by_parser,
-                               &node,
-                               previous_sibling,
-                               next_sibling,
-                               {},
-                               String()};
+      ChildrenChange change = {
+          node.IsElementNode() ? ChildrenChangeType::kElementRemoved
+                               : ChildrenChangeType::kNonElementRemoved,
+          by_parser,
+          node.IsElementNode() ? ChildrenChangeAffectsElements::kYes
+                               : ChildrenChangeAffectsElements::kNo,
+          &node,
+          previous_sibling,
+          next_sibling,
+          {},
+          String()};
       return change;
     }
 
@@ -361,6 +366,7 @@ class CORE_EXPORT ContainerNode : public Node {
 
     ChildrenChangeType type;
     ChildrenChangeSource by_parser;
+    ChildrenChangeAffectsElements affects_elements;
     Node* sibling_changed = nullptr;
     // |siblingBeforeChange| is
     //  - siblingChanged.previousSibling before node removal
@@ -398,6 +404,8 @@ class CORE_EXPORT ContainerNode : public Node {
   // scrollable. Some elements override this to delegate scroll operations to
   // a descendant LayoutBox.
   virtual LayoutBox* GetLayoutBoxForScrolling() const;
+
+  Element* GetAutofocusDelegate() const;
 
   void Trace(Visitor*) const override;
 
@@ -517,21 +525,21 @@ inline bool ContainerNode::NeedsAdjacentStyleRecalc() const {
 }
 
 inline unsigned Node::CountChildren() const {
-  auto* this_node = DynamicTo<ContainerNode>(this);
+  auto* this_node = DynamicTo<ContainerNode>(*this);
   if (!this_node)
     return 0;
   return this_node->CountChildren();
 }
 
 inline Node* Node::firstChild() const {
-  auto* this_node = DynamicTo<ContainerNode>(this);
+  auto* this_node = DynamicTo<ContainerNode>(*this);
   if (!this_node)
     return nullptr;
   return this_node->firstChild();
 }
 
 inline Node* Node::lastChild() const {
-  auto* this_node = DynamicTo<ContainerNode>(this);
+  auto* this_node = DynamicTo<ContainerNode>(*this);
   if (!this_node)
     return nullptr;
   return this_node->lastChild();

@@ -43,6 +43,7 @@
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/dom/id_target_observer.h"
@@ -168,8 +169,10 @@ bool HTMLInputElement::HasPendingActivity() const {
 }
 
 HTMLImageLoader& HTMLInputElement::EnsureImageLoader() {
-  if (!image_loader_)
+  if (!image_loader_) {
     image_loader_ = MakeGarbageCollected<HTMLImageLoader>(this);
+    RegisterActiveScriptWrappable();
+  }
   return *image_loader_;
 }
 
@@ -503,7 +506,7 @@ void HTMLInputElement::UpdateType() {
   if (old_value_mode == ValueMode::kValue &&
       (new_value_mode == ValueMode::kDefault ||
        new_value_mode == ValueMode::kDefaultOn)) {
-    if (HasDirtyValue())
+    if (HasDirtyValue() && !non_attribute_value_.empty())
       setAttribute(html_names::kValueAttr, AtomicString(non_attribute_value_));
     non_attribute_value_ = String();
     has_dirty_value_ = false;
@@ -554,7 +557,7 @@ void HTMLInputElement::UpdateType() {
 
   if (did_respect_height_and_width !=
       input_type_->ShouldRespectHeightAndWidthAttributes()) {
-    DCHECK(GetElementData());
+    DCHECK(HasElementData());
     AttributeCollection attributes = AttributesWithoutUpdate();
     if (const Attribute* height = attributes.Find(html_names::kHeightAttr)) {
       TextControlElement::AttributeChanged(AttributeModificationParams(
@@ -600,6 +603,8 @@ void HTMLInputElement::UpdateType() {
       formOwner() && isConnected())
     formOwner()->InvalidateDefaultButtonStyle();
   NotifyFormStateChanged();
+
+  CheckAndPossiblyClosePopoverStack();
 }
 
 void HTMLInputElement::SubtreeHasChanged() {
@@ -937,7 +942,7 @@ void HTMLInputElement::FinishParsingChildren() {
   }
 }
 
-bool HTMLInputElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
+bool HTMLInputElement::LayoutObjectIsNeeded(const DisplayStyle& style) const {
   return input_type_->LayoutObjectIsNeeded() &&
          TextControlElement::LayoutObjectIsNeeded(style);
 }
@@ -1184,21 +1189,21 @@ void HTMLInputElement::SetSuggestedValue(const String& value) {
   SetAutofillState(sanitized_value.empty() ? WebAutofillState::kNotFilled
                                            : WebAutofillState::kPreviewed);
   TextControlElement::SetSuggestedValue(sanitized_value);
+
+  // Update the suggested value revelation.
+  if (auto* placeholder = PlaceholderElement()) {
+    const AtomicString reveal("reveal-password");
+    if (should_reveal_password_) {
+      placeholder->classList().Add(reveal);
+    } else {
+      placeholder->classList().Remove(reveal);
+    }
+  }
+
   SetNeedsStyleRecalc(
       kSubtreeStyleChange,
       StyleChangeReasonForTracing::Create(style_change_reason::kControlValue));
   input_type_view_->UpdateView();
-}
-
-void HTMLInputElement::SetEditingValue(const String& value) {
-  if (!GetLayoutObject() || !IsTextField())
-    return;
-  SetInnerEditorValue(value);
-  SubtreeHasChanged();
-
-  unsigned max = value.length();
-  SetSelectionRange(max, max);
-  DispatchInputEvent();
 }
 
 void HTMLInputElement::SetInnerEditorValue(const String& value) {
@@ -1986,9 +1991,9 @@ bool HTMLInputElement::ShouldAppearIndeterminate() const {
   return input_type_->ShouldAppearIndeterminate();
 }
 
-HTMLFormControlElement::PopupTriggerSupport
-HTMLInputElement::SupportsPopupTriggering() const {
-  return input_type_->SupportsPopupTriggering();
+HTMLFormControlElement::PopoverTriggerSupport
+HTMLInputElement::SupportsPopoverTriggering() const {
+  return input_type_->SupportsPopoverTriggering();
 }
 
 RadioButtonGroupScope* HTMLInputElement::GetRadioButtonGroupScope() const {
@@ -2166,8 +2171,8 @@ bool HTMLInputElement::IsLastInputElementInForm() {
   return !GetDocument()
               .GetPage()
               ->GetFocusController()
-              .NextFocusableElementForIME(this,
-                                          mojom::blink::FocusType::kForward);
+              .NextFocusableElementForImeAndAutofill(
+                  this, mojom::blink::FocusType::kForward);
 }
 
 void HTMLInputElement::DispatchSimulatedEnter() {
@@ -2183,12 +2188,8 @@ bool HTMLInputElement::IsInteractiveContent() const {
   return input_type_->IsInteractiveContent();
 }
 
-scoped_refptr<ComputedStyle> HTMLInputElement::CustomStyleForLayoutObject(
-    const StyleRecalcContext& style_recalc_context) {
-  scoped_refptr<ComputedStyle> style =
-      OriginalStyleForLayoutObject(style_recalc_context);
-  input_type_view_->CustomStyleForLayoutObject(*style);
-  return style;
+void HTMLInputElement::AdjustStyle(ComputedStyleBuilder& builder) {
+  return input_type_view_->AdjustStyle(builder);
 }
 
 void HTMLInputElement::DidNotifySubtreeInsertionsToDocument() {

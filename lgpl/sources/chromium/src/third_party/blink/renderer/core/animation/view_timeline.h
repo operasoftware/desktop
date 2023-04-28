@@ -46,11 +46,14 @@ class CORE_EXPORT ViewTimeline : public ScrollTimeline {
 
   static ViewTimeline* Create(Document&, ViewTimelineOptions*, ExceptionState&);
 
-  ViewTimeline(Document*, Element* subject, ScrollDirection orientation, Inset);
+  ViewTimeline(Document*, Element* subject, ScrollAxis axis, Inset);
 
   bool IsViewTimeline() const override { return true; }
 
+  CSSNumericValue* getCurrentTime(const String& rangeName) override;
+
   AnimationTimeDelta CalculateIntrinsicIterationDuration(
+      const Animation*,
       const Timing&) override;
 
   // IDL API implementation.
@@ -58,10 +61,16 @@ class CORE_EXPORT ViewTimeline : public ScrollTimeline {
 
   // Converts a delay that is expressed as a (phase,percentage) pair to
   // a fractional offset.
-  absl::optional<double> ToFractionalOffset(const Timing::Delay& delay) const;
+  double ToFractionalOffset(const TimelineOffset& timeline_offset) const;
 
-  AnimationTimeline::TimeDelayPair TimelineOffsetsToTimeDelays(
+  AnimationTimeline::TimeDelayPair ComputeEffectiveAnimationDelays(
+      const Animation* animation,
       const Timing& timing) const override;
+
+  CSSNumericValue* startOffset() const;
+  CSSNumericValue* endOffset() const;
+
+  void Trace(Visitor*) const override;
 
  protected:
   const Inset& GetInset() const { return inset_; }
@@ -77,7 +86,13 @@ class CORE_EXPORT ViewTimeline : public ScrollTimeline {
   mutable double viewport_size_;
   mutable double start_side_inset_;
   mutable double end_side_inset_;
+  mutable double start_offset_ = 0;
+  mutable double end_offset_ = 0;
   Inset inset_;
+  // If either of the following elements are non-null, we need to update
+  // |inset_| on a style change.
+  Member<const CSSValue> style_dependant_start_inset_;
+  Member<const CSSValue> style_dependant_end_inset_;
 };
 
 template <>

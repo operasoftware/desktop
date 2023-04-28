@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_WEBGL_WEBCODECS_VIDEO_FRAME_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "media/base/video_frame.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_extension.h"
@@ -64,7 +65,7 @@ class WebGLWebCodecsVideoFrame final : public WebGLExtension {
 
   std::unique_ptr<media::GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool_;
   scoped_refptr<base::SequencedTaskRunner> worker_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> media_task_runner_;
   scoped_refptr<media::VideoFrame> hardware_video_frame_;
 };
 

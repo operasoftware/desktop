@@ -18,16 +18,18 @@ static_assert(
 namespace {}  // namespace
 
 CascadePriority CascadeMap::At(const CSSPropertyName& name) const {
-  if (const CascadePriority* find_result = Find(name))
+  if (const CascadePriority* find_result = Find(name)) {
     return *find_result;
+  }
   return CascadePriority();
 }
 
 const CascadePriority* CascadeMap::Find(const CSSPropertyName& name) const {
   if (name.IsCustomProperty()) {
     auto iter = custom_properties_.find(name);
-    if (iter != custom_properties_.end())
+    if (iter != custom_properties_.end()) {
       return &iter->value.Top(backing_vector_);
+    }
     return nullptr;
   }
   size_t index = static_cast<size_t>(name.Id());
@@ -48,8 +50,9 @@ const CascadePriority* CascadeMap::Find(const CSSPropertyName& name,
                             CascadeOrigin origin) -> const CascadePriority* {
     for (auto iter = list.Begin(backing_vector_);
          iter != list.End(backing_vector_); ++iter) {
-      if (origin >= iter->GetOrigin())
+      if (origin >= iter->GetOrigin()) {
         return &(*iter);
+      }
     }
     return nullptr;
   };
@@ -69,16 +72,16 @@ CascadePriority& CascadeMap::Top(CascadePriorityList& list) {
   return list.Top(backing_vector_);
 }
 
-const CascadePriority* CascadeMap::FindRevertLayer(
-    const CSSPropertyName& name,
-    CascadePriority revert_from) const {
-  auto find_revert_layer =
-      [this](const CascadeMap::CascadePriorityList& list,
-             CascadePriority revert_from) -> const CascadePriority* {
+const CascadePriority* CascadeMap::FindRevertLayer(const CSSPropertyName& name,
+                                                   uint64_t revert_from) const {
+  auto find_revert_layer = [this](
+                               const CascadeMap::CascadePriorityList& list,
+                               uint64_t revert_from) -> const CascadePriority* {
     for (auto iter = list.Begin(backing_vector_);
          iter != list.End(backing_vector_); ++iter) {
-      if (iter->ForLayerComparison() < revert_from)
+      if (iter->ForLayerComparison() < revert_from) {
         return &(*iter);
+      }
     }
     return nullptr;
   };
@@ -99,6 +102,10 @@ void CascadeMap::Add(const CSSPropertyName& name, CascadePriority priority) {
   if (name.IsCustomProperty()) {
     auto result = custom_properties_.insert(name, CascadePriorityList());
     list = &result.stored_value->value;
+    if (list->IsEmpty()) {
+      list->Push(backing_vector_, priority);
+      return;
+    }
   } else {
     DCHECK(!CSSProperty::Get(name.Id()).IsSurrogate());
 
@@ -109,21 +116,19 @@ void CascadeMap::Add(const CSSPropertyName& name, CascadePriority priority) {
     // Set bit in high_priority_, if appropriate.
     static_assert(static_cast<int>(kLastHighPriorityCSSProperty) < 64,
                   "CascadeMap supports at most 63 high-priority properties");
-    if (IsHighPriority(id))
+    if (IsHighPriority(id)) {
       high_priority_ |= (1ull << index);
+    }
     has_important_ |= priority.IsImportant();
 
     list = &native_properties_.Buffer()[index];
     if (!native_properties_.Bits().Has(id)) {
       native_properties_.Bits().Set(id);
-      new (list) CascadeMap::CascadePriorityList();
+      new (list) CascadeMap::CascadePriorityList(backing_vector_, priority);
+      return;
     }
   }
 
-  if (list->IsEmpty()) {
-    list->Push(backing_vector_, priority);
-    return;
-  }
   CascadePriority& top = list->Top(backing_vector_);
   DCHECK(priority.ForLayerComparison() >= top.ForLayerComparison());
   if (top >= priority) {
@@ -141,10 +146,11 @@ void CascadeMap::Add(const CSSPropertyName& name, CascadePriority priority) {
     // style computation), false positives are fine.
     inline_style_lost_ = true;
   }
-  if (top.ForLayerComparison() < priority.ForLayerComparison())
+  if (top.ForLayerComparison() < priority.ForLayerComparison()) {
     list->Push(backing_vector_, priority);
-  else
+  } else {
     top = priority;
+  }
 }
 
 void CascadeMap::Reset() {

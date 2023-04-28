@@ -9,6 +9,8 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/time/time.h"
 #include "media/audio/simple_sources.h"
@@ -124,7 +126,7 @@ class TestInterfaceFactory : public media::mojom::InterfaceFactory {
         nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     DCHECK(SUCCEEDED(hr));
     auto platform_audio_encoder = std::make_unique<media::MFAudioEncoder>(
-        base::SequencedTaskRunnerHandle::Get());
+        blink::scheduler::GetSequencedTaskRunnerForTesting());
 #else
 #error "Unknown platform encoder."
 #endif
@@ -363,20 +365,18 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
   }
 
   void InitializeRecorder() {
-    // We create the encoder thread and provide it to the recorder so we can
+    // We create the encoder sequence and provide it to the recorder so we can
     // hold onto a reference to the task runner. This allows us to post tasks to
     // the sequence and apply the necessary overrides, without friending the
     // class.
-    std::unique_ptr<NonMainThread> encoder_thread = NonMainThread::CreateThread(
-        ThreadCreationParams(ThreadType::kAudioEncoderThread));
-    encoder_task_runner_ = encoder_thread->GetTaskRunner();
+    encoder_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner({});
     audio_track_recorder_ = std::make_unique<AudioTrackRecorder>(
         codec_, media_stream_component_,
         WTF::BindRepeating(&AudioTrackRecorderTest::OnEncodedAudio,
                            WTF::Unretained(this)),
         ConvertToBaseOnceCallback(CrossThreadBindOnce([] {})),
         0u /* bits_per_second */, GetParam().bitrate_mode,
-        std::move(encoder_thread));
+        encoder_task_runner_);
 
 #if HAS_AAC_ENCODER
     if (codec_ == AudioTrackRecorder::CodecId::kAac) {
@@ -546,7 +546,7 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
     std::unique_ptr<media::AudioBus> bus(media::AudioBus::Create(
         first_params_.channels(),
         FramesPerInputBuffer(first_params_.sample_rate())));
-    first_source_.OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), 0,
+    first_source_.OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), {},
                              bus.get());
 
     // Save the samples that we read into the first_source_cache_ if we're using
@@ -571,7 +571,7 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
     std::unique_ptr<media::AudioBus> bus(media::AudioBus::Create(
         second_params_.channels(),
         FramesPerInputBuffer(second_params_.sample_rate())));
-    second_source_.OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), 0,
+    second_source_.OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), {},
                               bus.get());
     return bus;
   }
@@ -690,7 +690,7 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
 
   void InitializeAacDecoder(int channels, int sample_rate) {
     aac_decoder_ = std::make_unique<media::FFmpegAudioDecoder>(
-        base::SequencedTaskRunnerHandle::Get(), &media_log_);
+        scheduler::GetSequencedTaskRunnerForTesting(), &media_log_);
     media::ChannelLayout channel_layout = media::CHANNEL_LAYOUT_NONE;
     switch (channels) {
       case 1:
@@ -751,7 +751,7 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
   Persistent<MediaStreamComponent> media_stream_component_;
 
   // The task runner for the encoder thread, so we can post tasks to it.
-  scoped_refptr<base::SingleThreadTaskRunner> encoder_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> encoder_task_runner_;
 
   // The codec we'll use for compression the audio.
   const AudioTrackRecorder::CodecId codec_;

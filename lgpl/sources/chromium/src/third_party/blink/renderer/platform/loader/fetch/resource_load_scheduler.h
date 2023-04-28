@@ -11,6 +11,7 @@
 #include "base/time/time.h"
 #include "base/types/strong_alias.h"
 #include "net/http/http_response_info.h"
+#include "third_party/blink/renderer/platform/allow_discouraged_type.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
@@ -241,15 +242,6 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
   void SetConnectionInfo(ClientId id,
                          net::HttpResponseInfo::ConnectionInfo connection_info);
 
-  // Start accumulating delayable fetches as part of a batch operation. If
-  // multiple batch operations are nested, they will be ref-counted and only
-  // released once all of the batches have ended.
-  void StartBatch();
-
-  // End the collection of delayable fetches as part of a batch operation. This
-  // function may initiate new resources loading.
-  void EndBatch();
-
   // Sets the HTTP RTT for testing.
   void SetHttpRttForTesting(base::TimeDelta http_rtt) {
     http_rtt_for_testing_ = http_rtt;
@@ -380,11 +372,12 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
   // This tracks two sets of requests, throttleable and stoppable.
   std::map<ThrottleOption,
            std::set<ClientIdWithPriority, ClientIdWithPriority::Compare>>
-      pending_requests_;
+      pending_requests_ ALLOW_DISCOURAGED_TYPE("TODO(crbug.com/1404327)");
 
   // Remembers elapsed times in seconds when the top request in each queue is
   // processed.
-  std::map<ThrottleOption, base::Time> pending_queue_update_times_;
+  std::map<ThrottleOption, base::Time> pending_queue_update_times_
+      ALLOW_DISCOURAGED_TYPE("TODO(crbug.com/1404327)");
 
   // Handle to throttling observer.
   std::unique_ptr<FrameOrWorkerScheduler::LifecycleObserverHandle>
@@ -400,9 +393,6 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
 
   absl::optional<base::TimeDelta> http_rtt_ = absl::nullopt;
   absl::optional<base::TimeDelta> http_rtt_for_testing_ = absl::nullopt;
-
-  // The ref count of batch operations to accumulate fetches.
-  uint32_t pending_batch_operations_ = 0u;
 };
 
 }  // namespace blink

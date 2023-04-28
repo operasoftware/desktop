@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//build/config/opera_desktop.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
@@ -11,17 +10,22 @@ import("//third_party/blink/renderer/config.gni")
 import("//third_party/blink/renderer/core/core.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
 
+if (is_ios) {
+  import("//build/config/ios/bundle_data_from_filelist.gni")
+}
+
 visibility = [
   "//:gn_all",
   "//third_party/blink/*",
 ]
 
-jumbo_component("controller") {
+component("controller") {
   output_name = "blink_controller"
 
   deps = [
     "//components/performance_manager/public/mojom:mojom_blink",
     "//skia",
+    "//third_party/blink/public:buildflags",
     "//third_party/blink/renderer/core",
     "//third_party/blink/renderer/modules",
     "//third_party/blink/renderer/platform",
@@ -76,6 +80,8 @@ jumbo_component("controller") {
       "memory_usage_monitor_posix.h",
       "oom_intervention_impl.cc",
       "oom_intervention_impl.h",
+      "private_memory_footprint_provider.cc",
+      "private_memory_footprint_provider.h",
     ]
     public_deps = [ "//third_party/blink/public/mojom:memory_usage_monitor_linux_mojo_bindings_blink" ]
   }
@@ -141,10 +147,17 @@ group("webkit_unit_tests") {
 test("blink_unittests") {
   deps = [ ":blink_unittests_sources" ]
 
-  data_deps = [
-    ":blink_unittests_data",
-    "//content/shell:pak",
-  ]
+  if (is_ios) {
+    bundle_deps = [
+      ":blink_unittests_bundle_data",
+      ":blink_unittests_pak_bundle_data",
+    ]
+  } else {
+    data_deps = [
+      ":blink_unittests_data",
+      "//content/shell:pak",
+    ]
+  }
 
   if (is_android) {
     deps += [
@@ -178,7 +191,7 @@ test("blink_perf_tests") {
   deps = [ ":blink_perf_tests_sources" ]
 }
 
-jumbo_source_set("blink_perf_tests_sources") {
+source_set("blink_perf_tests_sources") {
   visibility = []  # Allow re-assignment of list.
   visibility = [ "*" ]
   testonly = true
@@ -201,15 +214,9 @@ jumbo_source_set("blink_perf_tests_sources") {
   ]
 }
 
-jumbo_source_set("blink_bindings_test_sources") {
+source_set("blink_bindings_test_sources") {
   testonly = true
   sources = bindings_unittest_files
-  jumbo_excluded_sources =
-      get_path_info([
-        "../bindings/core/v8/script_promise_test.cc",
-        "../bindings/modules/v8/v8_element_test.cc",
-      ],
-      "abspath")
   deps = [
     "//base/test:test_support",
     "//testing/gmock",
@@ -229,7 +236,7 @@ jumbo_source_set("blink_bindings_test_sources") {
   ]
 }
 
-jumbo_source_set("blink_unittests_sources") {
+source_set("blink_unittests_sources") {
   visibility = []  # Allow re-assignment of list.
   visibility = [ "*" ]
   testonly = true
@@ -240,8 +247,6 @@ jumbo_source_set("blink_unittests_sources") {
     "performance_manager/v8_worker_memory_reporter_test.cc",
     "tests/run_all_tests.cc",
   ]
-  jumbo_excluded_sources =
-      [ "performance_manager/v8_worker_memory_reporter_test.cc" ]
   if (is_linux || is_chromeos) {
     sources += [ "memory_usage_monitor_posix_test.cc" ]
   }
@@ -293,4 +298,18 @@ jumbo_source_set("blink_unittests_sources") {
     "//third_party/blink/renderer:inside_blink",
     "//third_party/blink/renderer/core:blink_core_pch",
   ]
+}
+
+if (is_ios) {
+  bundle_data("blink_unittests_pak_bundle_data") {
+    testonly = true
+    public_deps = [ "//content/shell:pak" ]
+    sources = [ "$root_out_dir/content_shell.pak" ]
+    outputs = [ "{{bundle_resources_dir}}/content_shell.pak" ]
+  }
+
+  bundle_data_from_filelist("blink_unittests_bundle_data") {
+    testonly = true
+    filelist_name = "blink_unittests_bundle_data.filelist"
+  }
 }

@@ -36,9 +36,10 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/functional/function_ref.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "cc/test/fake_layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_host.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
@@ -53,7 +54,6 @@
 #include "third_party/blink/public/mojom/widget/platform_widget.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/web_frame_owner_properties.h"
 #include "third_party/blink/public/web/web_history_item.h"
@@ -65,7 +65,6 @@
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/testing/scoped_mock_overlay_scrollbars.h"
-#include "third_party/blink/renderer/platform/loader/testing/web_url_loader_factory_with_mock.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -361,17 +360,36 @@ class WebViewHelper : public ScopedMockOverlayScrollbars {
       WebViewClient* = nullptr,
       void (*update_settings_func)(WebSettings*) = nullptr);
 
+  // Creates and initializes the WebView with a main WebRemoteFrame, but doesn't
+  // bind the RemoteFrame to anything, to simulate the "placeholder RemoteFrame"
+  // case, where a RemoteFrame is created explicitly without a browser-side
+  // counterpart. See the comments in `AgentSchedulingGroup::CreateWebView()`
+  // for more details.
+  WebViewImpl* InitializePlaceholderRemote();
+
   // Same as InitializeRemoteWithOpener(), but always sets the opener to null.
   WebViewImpl* InitializeRemote(scoped_refptr<SecurityOrigin> = nullptr,
                                 WebViewClient* = nullptr);
 
-  // Creates and initializes the WebView with a main WebRemoteFrame. Passing
-  // nullptr as the SecurityOrigin results in a frame with a unique security
-  // origin.
+  // Same as InitializeRemoteWithOpenerAndAssociatedRemoteAndReceivers(), but
+  // always sets the opener to null and sets the associated remote & receivers
+  // to a stub implementation (instead of not binding anything like
+  // `InitializePlaceholderRemote()`).
   WebViewImpl* InitializeRemoteWithOpener(
       WebFrame* opener,
       scoped_refptr<SecurityOrigin> = nullptr,
       WebViewClient* = nullptr);
+
+  // Creates and initializes the WebView with a main WebRemoteFrame. Passing
+  // nullptr as the SecurityOrigin results in a frame with a unique security
+  // origin.
+  WebViewImpl* InitializeRemoteWithOpenerAndAssociatedRemoteAndReceivers(
+      WebFrame* opener,
+      scoped_refptr<SecurityOrigin>,
+      WebViewClient*,
+      mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
+          remote_frame_host,
+      mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame> receiver);
 
   // Helper for creating a local child frame of a remote parent frame.
   WebLocalFrameImpl* CreateLocalChild(
@@ -494,15 +512,12 @@ class TestWebFrameClient : public WebLocalFrameClient {
       const WebFrameOwnerProperties&,
       FrameOwnerElementType,
       WebPolicyContainerBindParams policy_container_bind_params,
+      ukm::SourceId document_ukm_source_id,
       FinishChildFrameCreationFn finish_creation) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
   bool SwapIn(WebFrame* previous_frame) override;
-  std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory()
-      override {
-    return std::make_unique<WebURLLoaderFactoryWithMock>(
-        WebURLLoaderMockFactory::GetSingletonInstance());
-  }
+  std::unique_ptr<URLLoader> CreateURLLoaderForTesting() override;
   void BeginNavigation(std::unique_ptr<WebNavigationInfo> info) override;
   WebEffectiveConnectionType GetEffectiveConnectionType() override;
   void SetEffectiveConnectionTypeForTesting(

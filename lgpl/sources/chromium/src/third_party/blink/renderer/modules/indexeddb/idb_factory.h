@@ -31,15 +31,18 @@
 
 #include <memory>
 
+#include "base/task/single_thread_task_runner.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/feature_observer/feature_observer.mojom-blink.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_open_db_request.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/wtf/gc_plugin.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -78,9 +81,16 @@ class MODULES_EXPORT IDBFactory final : public ScriptWrappable {
                                                       ExceptionState&);
 
   ScriptPromise GetDatabaseInfo(ScriptState*, ExceptionState&);
+  void GetDatabaseInfoImpl(ExecutionContext* context,
+                           ScriptPromiseResolver* resolver);
+
   // This method is exposed specifically for DevTools.
   void GetDatabaseInfo(ScriptState*,
                        std::unique_ptr<mojom::blink::IDBCallbacks> callbacks);
+
+  void GetDatabaseInfoImplHelper(
+      ExecutionContext* context,
+      std::unique_ptr<mojom::blink::IDBCallbacks> callbacks);
 
   void SetFactoryForTesting(mojo::Remote<mojom::blink::IDBFactory> factory);
 
@@ -93,19 +103,41 @@ class MODULES_EXPORT IDBFactory final : public ScriptWrappable {
                                  const String& name,
                                  int64_t version,
                                  ExceptionState&);
+  void OpenInternalImpl(
+      IDBOpenDBRequest* request,
+      mojo::PendingAssociatedRemote<mojom::blink::IDBDatabaseCallbacks>
+          callbacks_remote,
+      mojo::PendingAssociatedReceiver<mojom::blink::IDBTransaction>
+          transaction_receiver,
+      mojo::Remote<mojom::blink::IDBFactory>& factory,
+      const String& name,
+      int64_t version,
+      int64_t transaction_id);
 
   IDBOpenDBRequest* DeleteDatabaseInternal(ScriptState*,
                                            const String& name,
                                            ExceptionState&,
                                            bool);
+  void DeleteDatabaseInternalImpl(
+      IDBOpenDBRequest* request,
+      mojo::Remote<mojom::blink::IDBFactory>& factory,
+      const String& name,
+      bool force_close);
 
-  bool AllowIndexedDB(ScriptState* script_state);
+  void AllowIndexedDB(ExecutionContext* context,
+                      base::OnceCallback<void()> callback);
+  void DidAllowIndexedDB(base::OnceCallback<void()> callback,
+                         bool allow_access);
+
+  absl::optional<bool> allowed_;
 
   mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks> GetCallbacksProxy(
       std::unique_ptr<WebIDBCallbacks> callbacks);
   mojo::PendingRemote<mojom::blink::ObservedFeature> GetObservedFeature();
 
+  GC_PLUGIN_IGNORE("https://crbug.com/1381979")
   mojo::Remote<mojom::blink::IDBFactory> factory_;
+  GC_PLUGIN_IGNORE("https://crbug.com/1381979")
   mojo::Remote<mojom::blink::FeatureObserver> feature_observer_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };

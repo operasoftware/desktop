@@ -5,7 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_ML_WEBNN_ML_GRAPH_BUILDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_ML_WEBNN_ML_GRAPH_BUILDER_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_ml_auto_pad.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/modules/ml/webnn/ml_operator.h"
@@ -22,9 +24,12 @@ class MLContext;
 class MLClampOptions;
 class MLConv2dOptions;
 class MLGemmOptions;
+class MLGraph;
 class MLPool2dOptions;
+class MLResample2dOptions;
 class MLOperand;
 class MLOperandDescriptor;
+class ScriptPromiseResolver;
 
 typedef HeapVector<std::pair<String, Member<MLOperand>>> MLNamedOperands;
 
@@ -44,6 +49,22 @@ class MODULES_EXPORT MLGraphBuilder final : public ScriptWrappable {
   void Trace(Visitor* visitor) const override;
 
   MLContext* GetContext() const;
+
+  struct PaddingSizes {
+    uint32_t begin;
+    uint32_t end;
+  };
+
+  // Calculate the effective padding based on WebNN auto padding rules.
+  //
+  // TODO(crbug.com/1273291): Add the link to WebNN spec's algorithm once it is
+  // defined, tracked by: https://github.com/webmachinelearning/webnn/issues/326
+  static absl::optional<PaddingSizes> CalculatePaddingForAutoPad(
+      V8MLAutoPad::Enum auto_pad,
+      const uint32_t input_size,
+      const uint32_t filter_size,
+      const uint32_t stride,
+      const uint32_t dilation);
 
   // ml_graph_builder.idl
   MLOperand* input(String name,
@@ -105,14 +126,39 @@ class MODULES_EXPORT MLGraphBuilder final : public ScriptWrappable {
   MLOperator* relu(ExceptionState& exception_state);
 
   MLOperand* reshape(const MLOperand* input,
-                     const Vector<int32_t>& new_shape,
+                     const Vector<absl::optional<uint32_t>>& new_shape,
                      ExceptionState& exception_state);
+
+  MLOperand* resample2d(const MLOperand* input,
+                        const MLResample2dOptions* options,
+                        ExceptionState& exception_state);
+
+  MLOperand* sigmoid(const MLOperand* input, ExceptionState& exception_state);
+  MLOperator* sigmoid(ExceptionState& exception_state);
 
   MLOperand* softmax(const MLOperand* input, ExceptionState& exception_state);
 
-  ScriptPromise buildAsync(ScriptState* script_state,
-                           const MLNamedOperands& outputs,
-                           ExceptionState& exception_state);
+  ScriptPromise build(ScriptState* script_state,
+                      const MLNamedOperands& outputs,
+                      ExceptionState& exception_state);
+
+  MLGraph* buildSync(const MLNamedOperands& named_outputs,
+                     ExceptionState& exception_state);
+
+  // The test cases can override the graph building behavior by implementing
+  // this class and setting its instance by SetBackendForTesting().
+  class BackendForTesting {
+   public:
+    virtual void BuildGraphAsyncImpl(MLContext* context,
+                                     const MLNamedOperands& named_outputs,
+                                     ScriptPromiseResolver* resolver) = 0;
+
+    virtual MLGraph* BuildGraphSyncImpl(MLContext* context,
+                                        const MLNamedOperands& named_outputs,
+                                        ExceptionState& exception_state) = 0;
+  };
+
+  static void SetBackendForTesting(BackendForTesting* backend_for_testing);
 
  private:
   Member<MLContext> ml_context_;

@@ -4,7 +4,7 @@
 """Custom data types for the web test stale expectation remover."""
 
 import fnmatch
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Union
 
 from unexpected_passes_common import data_types
 
@@ -38,6 +38,9 @@ class WebTestExpectation(data_types.BaseExpectation):
             result_test_name = _StripOffVirtualPrefix(result_test_name)
             success = result_test_name == self.test
         return success
+
+    def _ProcessTagsForFileUse(self) -> List[str]:
+        return [t.capitalize() for t in self.tags]
 
 
 class WebTestResult(data_types.BaseResult):
@@ -80,10 +83,11 @@ class WebTestBuildStats(data_types.BaseBuildStats):
 
     def AddSlowBuild(self, build_id: str) -> None:
         # Don't increment total builds since the corresponding build should
-        # already be added as a passed/failed build.
+        # already be added as a passed/failed build. Similarly, we don't take
+        # tags as an argument since those will already be passed to
+        # AddPassedBuild/AddFailedBuild.
         self.slow_builds += 1
-        build_link = data_types.BuildLinkFromBuildId(build_id)
-        self.failure_links = frozenset([build_link]) | self.failure_links
+        self.failure_links.add(data_types.BuildLinkFromBuildId(build_id))
 
     def GetStatsAsString(self) -> str:
         s = super(WebTestBuildStats, self).GetStatsAsString()

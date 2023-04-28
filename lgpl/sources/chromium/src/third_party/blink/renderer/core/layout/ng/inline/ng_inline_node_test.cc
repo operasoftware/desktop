@@ -8,6 +8,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/layout_ng_text_combine.h"
@@ -20,11 +21,12 @@
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/svg/layout_ng_svg_text.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/svg_names.h"
+#include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
 
@@ -78,7 +80,7 @@ class NGInlineNodeForTest : public NGInlineNode {
   void ShapeText() { NGInlineNode::ShapeText(MutableData()); }
 };
 
-class NGInlineNodeTest : public NGLayoutTest {
+class NGInlineNodeTest : public RenderingTest {
  protected:
   void SetupHtml(const char* id, String html) {
     SetBodyInnerHTML(html);
@@ -156,6 +158,13 @@ class NGInlineNodeTest : public NGLayoutTest {
       }
     }
     EXPECT_FALSE(expected);
+  }
+
+  // "Google Sans" has ligatures, e.g. "fi", "tt", etc.
+  void LoadGoogleSans() {
+    LoadFontFromFile(GetFrame(),
+                     test::CoreTestDataPath("GoogleSans-Regular.ttf"),
+                     "Google Sans");
   }
 
   Persistent<LayoutNGBlockFlow> layout_block_flow_;
@@ -315,7 +324,6 @@ TEST_F(NGInlineNodeTest, CollectInlinesMixedTextEndWithON) {
 }
 
 TEST_F(NGInlineNodeTest, CollectInlinesTextCombineBR) {
-  ScopedLayoutNGForTest enable_layout_ng(true);
   InsertStyleElement(
       "#t { text-combine-upright: all; writing-mode: vertical-rl; }");
   SetupHtml("t", u"<div id=t>a<br>z</div>");
@@ -332,7 +340,6 @@ TEST_F(NGInlineNodeTest, CollectInlinesTextCombineBR) {
 
 // http://crbug.com/1222633
 TEST_F(NGInlineNodeTest, CollectInlinesTextCombineListItemMarker) {
-  ScopedLayoutNGForTest enable_layout_ng(true);
   InsertStyleElement(
       "#t { text-combine-upright: all; writing-mode: vertical-rl; }");
   SetupHtml("t", u"<li id=t>ab</li>");
@@ -353,7 +360,6 @@ TEST_F(NGInlineNodeTest, CollectInlinesTextCombineListItemMarker) {
 }
 
 TEST_F(NGInlineNodeTest, CollectInlinesTextCombineNewline) {
-  ScopedLayoutNGForTest enable_layout_ng(true);
   InsertStyleElement(
       "#t { text-combine-upright: all; writing-mode: vertical-rl; }");
   SetupHtml("t", u"<pre id=t>a\nz</pre>");
@@ -369,7 +375,6 @@ TEST_F(NGInlineNodeTest, CollectInlinesTextCombineNewline) {
 }
 
 TEST_F(NGInlineNodeTest, CollectInlinesTextCombineWBR) {
-  ScopedLayoutNGForTest enable_layout_ng(true);
   InsertStyleElement(
       "#t { text-combine-upright: all; writing-mode: vertical-rl; }");
   SetupHtml("t", u"<div id=t>a<wbr>z</div>");
@@ -783,7 +788,7 @@ TEST_P(StyleChangeTest, NeedsCollectInlinesOnStyle) {
 }
 
 using CreateNode = Node* (*)(Document&);
-static CreateNode inline_node_creators[] = {
+static CreateNode node_creators[] = {
     [](Document& document) -> Node* { return document.createTextNode("new"); },
     [](Document& document) -> Node* {
       return document.CreateRawElement(html_names::kSpanTag);
@@ -804,7 +809,7 @@ class NodeInsertTest : public NGInlineNodeTest,
 
 INSTANTIATE_TEST_SUITE_P(NGInlineNodeTest,
                          NodeInsertTest,
-                         testing::ValuesIn(inline_node_creators));
+                         testing::ValuesIn(node_creators));
 
 TEST_P(NodeInsertTest, NeedsCollectInlinesOnInsert) {
   SetBodyInnerHTML(R"HTML(
@@ -1211,13 +1216,8 @@ TEST_F(NGInlineNodeTest, ClearFirstInlineFragmentOnSplitFlow) {
   // destroyed, and should not be accessible.
   GetDocument().UpdateStyleAndLayoutTree();
   const LayoutObject* layout_text = text->GetLayoutObject();
-  if (RuntimeEnabledFeatures::LayoutNGBlockInInlineEnabled()) {
-    EXPECT_TRUE(layout_text->IsInLayoutNGInlineFormattingContext());
-    EXPECT_TRUE(layout_text->HasInlineFragments());
-  } else {
-    EXPECT_FALSE(layout_text->IsInLayoutNGInlineFormattingContext());
-    EXPECT_FALSE(layout_text->HasInlineFragments());
-  }
+  EXPECT_TRUE(layout_text->IsInLayoutNGInlineFormattingContext());
+  EXPECT_TRUE(layout_text->HasInlineFragments());
 
   // Update layout. There should be a different instance of the text fragment.
   UpdateAllLifecyclePhasesForTest();
@@ -1228,23 +1228,13 @@ TEST_F(NGInlineNodeTest, ClearFirstInlineFragmentOnSplitFlow) {
   // Check it is the one owned by the new root inline formatting context.
   LayoutBlock* inner_span_cb = inner_span->GetLayoutObject()->ContainingBlock();
   LayoutObject* container = GetLayoutObjectByElementId("container");
-  if (RuntimeEnabledFeatures::LayoutNGBlockInInlineEnabled()) {
-    EXPECT_EQ(inner_span_cb, container);
-  } else {
-    EXPECT_TRUE(inner_span_cb->IsAnonymous());
-    EXPECT_EQ(inner_span_cb->Parent(), container);
-  }
+  EXPECT_EQ(inner_span_cb, container);
   NGInlineCursor inner_span_cb_cursor(*To<LayoutBlockFlow>(inner_span_cb));
   inner_span_cb_cursor.MoveToFirstLine();
   inner_span_cb_cursor.MoveToFirstChild();
   EXPECT_TRUE(inner_span_cb_cursor);
-  if (RuntimeEnabledFeatures::LayoutNGBlockInInlineEnabled()) {
-    EXPECT_EQ(inner_span_cb_cursor.Current().GetLayoutObject(),
-              outer_span->GetLayoutObject());
-  } else {
-    EXPECT_EQ(inner_span_cb_cursor.Current().GetLayoutObject(),
-              text->GetLayoutObject());
-  }
+  EXPECT_EQ(inner_span_cb_cursor.Current().GetLayoutObject(),
+            outer_span->GetLayoutObject());
 }
 
 TEST_F(NGInlineNodeTest, AddChildToSVGRoot) {
@@ -1553,8 +1543,58 @@ TEST_F(NGInlineNodeTest, ReuseFirstNonSafeRtl) {
   EXPECT_TRUE(NGInlineNode::NeedsShapingForTesting(item_v));
 }
 
+// http://crbug.com/1409702
+TEST_F(NGInlineNodeTest, ShouldNotResueLigature) {
+  LoadGoogleSans();
+  InsertStyleElement("#sample { font-family: 'Google Sans'; }");
+  SetBodyContent("<div id=sample>abf<span>i</span></div>");
+  Element& sample = *GetElementById("sample");
+
+  // `shape_result_before` has a ligature "fi".
+  const LayoutText& layout_text =
+      *To<Text>(sample.firstChild())->GetLayoutObject();
+  const ShapeResult& shape_result_before =
+      *layout_text.InlineItems().begin()->TextShapeResult();
+  ASSERT_EQ(3u, shape_result_before.NumGlyphs());
+
+  const LayoutText& layout_text_i =
+      *To<Text>(sample.lastChild()->firstChild())->GetLayoutObject();
+  const ShapeResult& shape_result_i =
+      *layout_text_i.InlineItems().begin()->TextShapeResult();
+  ASSERT_EQ(0u, shape_result_i.NumGlyphs());
+
+  // To <div id=sample>abf</div>
+  sample.lastChild()->remove();
+  UpdateAllLifecyclePhasesForTest();
+
+  const ShapeResult& shape_result_after =
+      *layout_text.InlineItems().begin()->TextShapeResult();
+  EXPECT_NE(&shape_result_before, &shape_result_after);
+}
+
+TEST_F(NGInlineNodeTest, InitialLetter) {
+  ScopedCSSInitialLetterForTest enable_initial_letter_scope(true);
+  LoadAhem();
+  InsertStyleElement(
+      "p { font: 20px/24px Ahem; }"
+      "p::first-letter { initial-letter: 3 }");
+  SetBodyContent("<p id=sample>This paragraph has an initial letter.</p>");
+  auto& sample = *GetElementById("sample");
+  auto& block_flow = *To<LayoutBlockFlow>(sample.GetLayoutObject());
+  auto& initial_letter_box = *To<LayoutBlockFlow>(
+      sample.GetPseudoElement(kPseudoIdFirstLetter)->GetLayoutObject());
+
+  EXPECT_TRUE(NGInlineNode(&block_flow).HasInitialLetterBox());
+  EXPECT_TRUE(NGBlockNode(&initial_letter_box).IsInitialLetterBox());
+  EXPECT_TRUE(NGInlineNode(&initial_letter_box).IsInitialLetterBox());
+  EXPECT_TRUE(initial_letter_box.GetPhysicalFragment(0)->IsInitialLetterBox());
+
+  const NGInlineNodeData& data = *block_flow.GetNGInlineNodeData();
+  const NGInlineItem& initial_letter_item = data.items[0];
+  EXPECT_EQ(NGInlineItem::kInitialLetterBox, initial_letter_item.Type());
+}
+
 TEST_F(NGInlineNodeTest, TextCombineUsesScalingX) {
-  ScopedLayoutNGForTest enable_layout_ng(true);
   LoadAhem();
   InsertStyleElement(
       "div {"
@@ -1576,7 +1616,6 @@ TEST_F(NGInlineNodeTest, TextCombineUsesScalingX) {
 
 // http://crbug.com/1226930
 TEST_F(NGInlineNodeTest, TextCombineWordSpacing) {
-  ScopedLayoutNGForTest enable_layout_ng(true);
   LoadAhem();
   InsertStyleElement(
       "div {"
@@ -1597,7 +1636,6 @@ TEST_F(NGInlineNodeTest, TextCombineWordSpacing) {
 
 // crbug.com/1034464 bad.svg
 TEST_F(NGInlineNodeTest, FindSvgTextChunksCrash1) {
-  ScopedSVGTextNGForTest enable_svg_text_ng(true);
   SetBodyInnerHTML(
       "<svg><text id='text' xml:space='preserve'>"
       "<tspan unicode-bidi='embed' x='0'>(</tspan>"
@@ -1614,7 +1652,6 @@ TEST_F(NGInlineNodeTest, FindSvgTextChunksCrash1) {
 
 // crbug.com/1034464 good.svg
 TEST_F(NGInlineNodeTest, FindSvgTextChunksCrash2) {
-  ScopedSVGTextNGForTest enable_svg_text_ng(true);
   SetBodyInnerHTML(
       "<svg><text id='text' xml:space='preserve'>\n"
       "<tspan unicode-bidi='embed' x='0'>(</tspan>\n"
@@ -1627,6 +1664,26 @@ TEST_F(NGInlineNodeTest, FindSvgTextChunksCrash2) {
   const NGInlineNodeData* data = block_flow->GetNGInlineNodeData();
   EXPECT_TRUE(data);
   // Pass if no DCHECK() failures.
+}
+
+// crbug.com/1403838
+TEST_F(NGInlineNodeTest, FindSvgTextChunksCrash3) {
+  SetBodyInnerHTML(R"SVG(
+      <svg><text id='text'>
+      <tspan x='0' id='target'>PA</tspan>
+      <tspan x='0' y='24'>PASS</tspan>
+      </text></svg>)SVG");
+  auto* tspan = GetElementById("target");
+  // A trail surrogate, then a lead surrogate.
+  constexpr UChar kText[2] = {0xDE48, 0xD864};
+  tspan->appendChild(GetDocument().createTextNode(String(kText, 2u)));
+  tspan->appendChild(GetDocument().createTextNode(String(kText, 2u)));
+  tspan->appendChild(GetDocument().createTextNode(String(kText, 2u)));
+  tspan->appendChild(GetDocument().createTextNode(String(kText, 2u)));
+  tspan->appendChild(GetDocument().createTextNode(String(kText, 2u)));
+  tspan->appendChild(GetDocument().createTextNode(String(kText, 2u)));
+  UpdateAllLifecyclePhasesForTest();
+  // Pass if no CHECK() failures in FindSvgTextChunks().
 }
 
 }  // namespace blink

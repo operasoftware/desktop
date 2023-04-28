@@ -5,6 +5,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_printer.h"
@@ -551,11 +552,6 @@ TEST_P(VisualRectMappingTest, ContainerFlippedWritingModeAndOverflowScroll) {
   // (222, 111).
 
   PhysicalRect expectation(262, 121, 50, 80);
-  if (!RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    // TODO(crbug.com/600039): rect.X() should be 262 (left + border-left), but
-    // is offset by extra horizontal border-widths because of layout error.
-    expectation = PhysicalRect(322, 121, 50, 80);
-  }
   CheckPaintInvalidationVisualRect(*target, GetLayoutView(), expectation);
 
   PhysicalRect container_local_visual_rect = container->LocalVisualRect();
@@ -570,11 +566,6 @@ TEST_P(VisualRectMappingTest, ContainerFlippedWritingModeAndOverflowScroll) {
   EXPECT_EQ(PhysicalRect(0, 0, 110, 120), rect);
 
   expectation = PhysicalRect(222, 111, 110, 120);
-  if (!RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    // TODO(crbug.com/600039): rect.x() should be 222 (left), but is offset by
-    // extra horizontal border-widths because of layout error.
-    expectation = PhysicalRect(282, 111, 110, 120);
-  }
   CheckPaintInvalidationVisualRect(*container, GetLayoutView(), expectation);
 }
 
@@ -816,21 +807,14 @@ TEST_P(VisualRectMappingTest, FloatUnderInline) {
 
   PhysicalRect rect = target_visual_rect;
   EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(&GetLayoutView(), rect));
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    // LayoutNG inline-level floats are children of their inline-level
-    // containers. As such they are positioned relative to their inline-level
-    // container, (and shifted by an additional 200,100 in this case).
-    EXPECT_EQ(PhysicalRect(266, 155, 33, 44), rect);
-  } else {
-    EXPECT_EQ(PhysicalRect(66, 55, 33, 44), rect);
-  }
+  // Inline-level floats are children of their inline-level containers. As such
+  // they are positioned relative to their inline-level container, (and shifted
+  // by an additional 200,100 in this case).
+  EXPECT_EQ(PhysicalRect(266, 155, 33, 44), rect);
 
   rect = target_visual_rect;
 
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    CheckVisualRect(*target, *span, rect, PhysicalRect(200, 100, 33, 44));
-  else
-    CheckVisualRect(*target, *span, rect, PhysicalRect(-200, -100, 33, 44));
+  CheckVisualRect(*target, *span, rect, PhysicalRect(200, 100, 33, 44));
 }
 
 TEST_P(VisualRectMappingTest, FloatUnderInlineVerticalRL) {
@@ -852,25 +836,16 @@ TEST_P(VisualRectMappingTest, FloatUnderInlineVerticalRL) {
 
   auto rect = target_visual_rect;
   EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(&GetLayoutView(), rect));
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    // LayoutNG inline-level floats are children of their inline-level
-    // containers. As such they are positioned relative to their inline-level
-    // container, (and shifted by an additional 200,100 in this case).
-    EXPECT_EQ(PhysicalRect(66 + 600 - 200 - 33, 55 + 100, 33, 44), rect);
-  } else {
-    EXPECT_EQ(PhysicalRect(66 + 600 - 33, 55, 33, 44), rect);
-  }
+  // Inline-level floats are children of their inline-level containers. As such
+  // they are positioned relative to their inline-level container, (and shifted
+  // by an additional 200,100 in this case).
+  EXPECT_EQ(PhysicalRect(66 + 600 - 200 - 33, 55 + 100, 33, 44), rect);
 
   // An inline object's coordinate space is its containing block's coordinate
   // space shifted by the inline's relative offset. |target|'s left is 100 from
   // the right edge of the coordinate space whose width is 600.
   rect = target_visual_rect;
-  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
-    CheckVisualRect(*target, *span, rect, PhysicalRect(367, 100, 33, 44));
-  } else {
-    CheckVisualRect(*target, *span, rect,
-                    PhysicalRect(600 + 200 - 33, -100, 33, 44));
-  }
+  CheckVisualRect(*target, *span, rect, PhysicalRect(367, 100, 33, 44));
 }
 
 TEST_P(VisualRectMappingTest, InlineBlock) {
@@ -895,10 +870,7 @@ TEST_P(VisualRectMappingTest, InlineBlock) {
   EXPECT_EQ(PhysicalRect(266, 155, 33, 44), rect);
 
   rect = target_visual_rect;
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    CheckVisualRect(*target, *span, rect, PhysicalRect(200, 100, 33, 44));
-  else
-    CheckVisualRect(*target, *span, rect, PhysicalRect(0, 0, 33, 44));
+  CheckVisualRect(*target, *span, rect, PhysicalRect(200, 100, 33, 44));
 }
 
 TEST_P(VisualRectMappingTest, InlineBlockVerticalRL) {
@@ -927,10 +899,7 @@ TEST_P(VisualRectMappingTest, InlineBlockVerticalRL) {
   // space shifted by the inline's relative offset. |target|'s left is -33 from
   // the right edge of the coordinate space whose width is 600.
   rect = target_visual_rect;
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    CheckVisualRect(*target, *span, rect, PhysicalRect(367, 100, 33, 44));
-  else
-    CheckVisualRect(*target, *span, rect, PhysicalRect(600 - 33, 0, 33, 44));
+  CheckVisualRect(*target, *span, rect, PhysicalRect(367, 100, 33, 44));
 }
 
 TEST_P(VisualRectMappingTest, AbsoluteUnderRelativeInline) {
@@ -955,10 +924,7 @@ TEST_P(VisualRectMappingTest, AbsoluteUnderRelativeInline) {
   EXPECT_EQ(PhysicalRect(66 + 200 + 100, 55 + 100 + 50, 33, 44), rect);
 
   rect = target_visual_rect;
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    CheckVisualRect(*target, *span, rect, PhysicalRect(300, 150, 33, 44));
-  else
-    CheckVisualRect(*target, *span, rect, PhysicalRect(100, 50, 33, 44));
+  CheckVisualRect(*target, *span, rect, PhysicalRect(300, 150, 33, 44));
 }
 
 TEST_P(VisualRectMappingTest, AbsoluteUnderRelativeInlineVerticalRL) {
@@ -987,10 +953,7 @@ TEST_P(VisualRectMappingTest, AbsoluteUnderRelativeInlineVerticalRL) {
   // space shifted by the inline's relative offset. |target|'s left is 100 from
   // the right edge of the coordinate space whose width is 600.
   rect = target_visual_rect;
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    CheckVisualRect(*target, *span, rect, PhysicalRect(500, 150, 33, 44));
-  else
-    CheckVisualRect(*target, *span, rect, PhysicalRect(600 + 100, 50, 33, 44));
+  CheckVisualRect(*target, *span, rect, PhysicalRect(500, 150, 33, 44));
 }
 
 TEST_P(VisualRectMappingTest, ShouldAccountForPreserve3d) {
@@ -1013,8 +976,8 @@ TEST_P(VisualRectMappingTest, ShouldAccountForPreserve3d) {
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
   PhysicalRect original_rect(0, 0, 100, 100);
   // Multiply both matrices together before flattening.
-  TransformationMatrix matrix = container->Layer()->CurrentTransform();
-  matrix.FlattenTo2d();
+  gfx::Transform matrix = container->Layer()->CurrentTransform();
+  matrix.Flatten();
   matrix *= target->Layer()->CurrentTransform();
   PhysicalRect output =
       PhysicalRect::EnclosingRect(matrix.MapRect(gfx::RectF(original_rect)));
@@ -1044,7 +1007,7 @@ TEST_P(VisualRectMappingTest, ShouldAccountForPreserve3dNested) {
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
   PhysicalRect original_rect(0, 0, 100, 100);
   // Multiply both matrices together before flattening.
-  TransformationMatrix matrix = container->Layer()->CurrentTransform();
+  gfx::Transform matrix = container->Layer()->CurrentTransform();
   matrix *= target->Layer()->CurrentTransform();
   PhysicalRect output =
       PhysicalRect::EnclosingRect(matrix.MapRect(gfx::RectF(original_rect)));
@@ -1071,10 +1034,10 @@ TEST_P(VisualRectMappingTest, ShouldAccountForPerspective) {
   auto* container = To<LayoutBlock>(GetLayoutObjectByElementId("container"));
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
   PhysicalRect original_rect(0, 0, 100, 100);
-  TransformationMatrix matrix = container->Layer()->CurrentTransform();
-  matrix.FlattenTo2d();
-  TransformationMatrix target_matrix;
-  // getTransformfromContainter includes transform and perspective matrix
+  gfx::Transform matrix = container->Layer()->CurrentTransform();
+  matrix.Flatten();
+  gfx::Transform target_matrix;
+  // GetTransformfromContainer includes transform and perspective matrix
   // of the container.
   target->GetTransformFromContainer(container, PhysicalOffset(), target_matrix);
   matrix *= target_matrix;
@@ -1105,9 +1068,9 @@ TEST_P(VisualRectMappingTest, ShouldAccountForPerspectiveNested) {
   auto* container = To<LayoutBlock>(GetLayoutObjectByElementId("container"));
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
   PhysicalRect original_rect(0, 0, 100, 100);
-  TransformationMatrix matrix = container->Layer()->CurrentTransform();
-  TransformationMatrix target_matrix;
-  // getTransformfromContainter includes transform and perspective matrix
+  gfx::Transform matrix = container->Layer()->CurrentTransform();
+  gfx::Transform target_matrix;
+  // GetTransformfromContainer includes transform and perspective matrix
   // of the container.
   target->GetTransformFromContainer(container, PhysicalOffset(), target_matrix);
   matrix *= target_matrix;
@@ -1146,10 +1109,10 @@ TEST_P(VisualRectMappingTest, PerspectivePlusScroll) {
 
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
   PhysicalRect originalRect(0, 0, 100, 100);
-  TransformationMatrix transform;
+  gfx::Transform transform;
   target->GetTransformFromContainer(
       container, target->OffsetFromContainer(container), transform);
-  transform.FlattenTo2d();
+  transform.Flatten();
 
   PhysicalRect output =
       PhysicalRect::EnclosingRect(transform.MapRect(gfx::RectF(originalRect)));
@@ -1327,10 +1290,6 @@ TEST_P(VisualRectMappingTest, PerspectiveWithAnonymousTable) {
 }
 
 TEST_P(VisualRectMappingTest, AnchorScroll) {
-  // CSS anchor positioning doesn't work with legacy layout
-  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
-    return;
-
   ScopedCSSAnchorPositioningForTest enabled_scope(true);
 
   GetDocument().SetBaseURLOverride(KURL("http://test.com"));
@@ -1385,6 +1344,10 @@ TEST_P(VisualRectMappingTest, AnchorScroll) {
   auto* scrollable_area =
       GetScrollableArea(To<LayoutBlock>(GetLayoutBoxByElementId("scroller")));
   scrollable_area->ScrollToAbsolutePosition(gfx::PointF(400, 0));
+
+  // Simulates a frame to update anchor-scroll snapshots.
+  GetPage().Animator().ServiceScriptedAnimations(
+      GetAnimationClock().CurrentTime() + base::Milliseconds(100));
   UpdateAllLifecyclePhasesForTest();
 
   // #anchored is moved into view and should have a non-empty visual rect

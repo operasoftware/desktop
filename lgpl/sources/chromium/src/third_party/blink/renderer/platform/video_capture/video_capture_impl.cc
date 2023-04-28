@@ -17,10 +17,10 @@
 #include <utility>
 
 #include <GLES2/gl2extchromium.h>
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/task/bind_post_task.h"
@@ -433,7 +433,10 @@ bool VideoCaptureImpl::VideoFrameBufferPreparer::Initialize() {
       CHECK(buffer_context_->GetGpuMemoryBuffer());
 
       auto buffer_handle = buffer_context_->GetGpuMemoryBuffer()->CloneHandle();
-
+#if BUILDFLAG(IS_CHROMEOS)
+      is_webgpu_compatible_ =
+          buffer_handle.native_pixmap_handle.supports_zero_copy_webgpu_import;
+#endif
       // No need to propagate shared memory region further as it's already
       // exposed by |buffer_context_->data()|.
       buffer_handle.region = base::UnsafeSharedMemoryRegion();
@@ -526,31 +529,12 @@ bool VideoCaptureImpl::VideoFrameBufferPreparer::BindVideoFrameOnMediaThread(
 #if BUILDFLAG(IS_MAC)
   usage |= gpu::SHARED_IMAGE_USAGE_MACOS_VIDEO_TOOLBOX;
 #endif
-
-  unsigned texture_target =
-      buffer_context_->gpu_factories()->ImageTextureTarget(
-          gpu_memory_buffer_->GetFormat());
-
-#if BUILDFLAG(IS_WIN)
-  // Explicitly set GL_TEXTURE_EXTERNAL_OES since ImageTextureTarget() will
-  // return GL_TEXTURE_2D due to GMB factory not supporting NV12 DXGI GMBs.
-  // See https://crbug.com/1253791#c17
-  // TODO(sunnyps): This shouldn't be needed after
-  // https://chromium-review.googlesource.com/c/angle/angle/+/3856660
-  texture_target = GL_TEXTURE_EXTERNAL_OES;
-#endif  // BUILDFLAG(IS_WIN)
-
-  // TODO(sunnyps): Get rid of NV12_DUAL_GMB format and instead rely on enabled
-  // by default multi plane shared images on Windows.
-
-  const bool use_multiplane =
-#if BUILDFLAG(IS_WIN)
-      output_format ==
-          media::GpuVideoAcceleratorFactories::OutputFormat::NV12_DUAL_GMB ||
+#if BUILDFLAG(IS_CHROMEOS)
+  usage |= gpu::SHARED_IMAGE_USAGE_WEBGPU;
 #endif
-      base::FeatureList::IsEnabled(media::kMultiPlaneVideoCaptureSharedImages);
 
-  if (use_multiplane) {
+  if (base::FeatureList::IsEnabled(
+          media::kMultiPlaneVideoCaptureSharedImages)) {
     planes.push_back(gfx::BufferPlane::Y);
     planes.push_back(gfx::BufferPlane::UV);
   } else {
@@ -571,6 +555,10 @@ bool VideoCaptureImpl::VideoFrameBufferPreparer::BindVideoFrameOnMediaThread(
           buffer_context_->gmb_resources()->mailboxes[plane]);
     }
   }
+
+  const unsigned texture_target =
+      buffer_context_->gpu_factories()->ImageTextureTarget(
+          gpu_memory_buffer_->GetFormat());
 
   const gpu::SyncToken sync_token = sii->GenVerifiedSyncToken();
 
@@ -595,6 +583,9 @@ bool VideoCaptureImpl::VideoFrameBufferPreparer::BindVideoFrameOnMediaThread(
   }
   frame_->metadata().allow_overlay = true;
   frame_->metadata().read_lock_fences_enabled = true;
+#if BUILDFLAG(IS_CHROMEOS)
+  frame_->metadata().is_webgpu_compatible = is_webgpu_compatible_;
+#endif
   return true;
 }
 
@@ -829,8 +820,7 @@ void VideoCaptureImpl::OnStateChanged(
     for (const auto& client : clients_)
       client.second.state_update_cb.Run(state_);
     clients_.clear();
-    RecordStartOutcomeUMA(start_timedout_ ? VideoCaptureStartOutcome::kTimedout
-                                          : VideoCaptureStartOutcome::kFailed);
+    RecordStartOutcomeUMA(result->get_error_code());
     return;
   }
 
@@ -846,7 +836,7 @@ void VideoCaptureImpl::OnStateChanged(
       // a frame refresh to start the video call with.
       // Capture device will make a decision if it should refresh a frame.
       RequestRefreshFrame();
-      RecordStartOutcomeUMA(VideoCaptureStartOutcome::kStarted);
+      RecordStartOutcomeUMA(media::VideoCaptureError::kNone);
       break;
     case media::mojom::VideoCaptureState::STOPPED:
       OnLog("VideoCaptureImpl changing state to VIDEO_CAPTURE_STATE_STOPPED");
@@ -1173,7 +1163,6 @@ void VideoCaptureImpl::StartCaptureInternal() {
                            base::BindOnce(&VideoCaptureImpl::OnStartTimedout,
                                           base::Unretained(this)));
   }
-  start_timedout_ = false;
   start_outcome_reported_ = false;
   base::UmaHistogramBoolean("Media.VideoCapture.Start", true);
 
@@ -1184,8 +1173,6 @@ void VideoCaptureImpl::StartCaptureInternal() {
 void VideoCaptureImpl::OnStartTimedout() {
   DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
   OnLog("VideoCaptureImpl timed out during starting");
-
-  start_timedout_ = true;
 
   OnStateChanged(media::mojom::blink::VideoCaptureResult::NewErrorCode(
       media::VideoCaptureError::kVideoCaptureImplTimedOutOnStart));
@@ -1227,11 +1214,26 @@ media::mojom::blink::VideoCaptureHost* VideoCaptureImpl::GetVideoCaptureHost() {
   return video_capture_host_.get();
 }
 
-void VideoCaptureImpl::RecordStartOutcomeUMA(VideoCaptureStartOutcome outcome) {
+void VideoCaptureImpl::RecordStartOutcomeUMA(
+    media::VideoCaptureError error_code) {
   // Record the success or failure of starting only the first time we transition
   // into such a state, not eg when resuming after pausing.
   if (!start_outcome_reported_) {
+    VideoCaptureStartOutcome outcome;
+    switch (error_code) {
+      case media::VideoCaptureError::kNone:
+        outcome = VideoCaptureStartOutcome::kStarted;
+        break;
+      case media::VideoCaptureError::kVideoCaptureImplTimedOutOnStart:
+        outcome = VideoCaptureStartOutcome::kTimedout;
+        break;
+      default:
+        outcome = VideoCaptureStartOutcome::kFailed;
+        break;
+    }
     base::UmaHistogramEnumeration("Media.VideoCapture.StartOutcome", outcome);
+    base::UmaHistogramEnumeration("Media.VideoCapture.StartErrorCode",
+                                  error_code);
     start_outcome_reported_ = true;
   }
 }

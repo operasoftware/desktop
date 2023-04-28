@@ -7,12 +7,13 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
 #include "media/audio/audio_source_parameters.h"
@@ -45,7 +46,7 @@ using EchoCancellationType =
 
 namespace {
 
-void SendLogMessage2(const std::string& message) {
+void SendLogMessage(const std::string& message) {
   blink::WebRtcLogMessage("PLAS::" + message);
 }
 
@@ -86,10 +87,7 @@ std::string GetAudioProcesingPropertiesLogString(
       "goog_experimental_echo_cancellation: %s, "
       "goog_noise_suppression: %s, "
       "goog_experimental_noise_suppression: %s, "
-      "goog_highpass_filter: %s, "
-      "goog_experimental_agc: %s, "
-      "hybrid_agc: %s"
-      "analog_agc_clipping_control: %s",
+      "goog_highpass_filter: %s, ",
       aec_to_string(properties.echo_cancellation_type),
       bool_to_string(properties.disable_hw_noise_suppression),
       bool_to_string(properties.goog_audio_mirroring),
@@ -97,12 +95,7 @@ std::string GetAudioProcesingPropertiesLogString(
       bool_to_string(properties.goog_experimental_echo_cancellation),
       bool_to_string(properties.goog_noise_suppression),
       bool_to_string(properties.goog_experimental_noise_suppression),
-      bool_to_string(properties.goog_highpass_filter),
-      bool_to_string(properties.goog_experimental_auto_gain_control),
-      bool_to_string(
-          base::FeatureList::IsEnabled(::features::kWebRtcHybridAgc)),
-      bool_to_string(base::FeatureList::IsEnabled(
-          ::features::kWebRtcAnalogAgcClippingControl)));
+      bool_to_string(properties.goog_highpass_filter));
   return str;
 }
 
@@ -172,7 +165,7 @@ ProcessedLocalAudioSource::ProcessedLocalAudioSource(
       allow_invalid_render_frame_id_for_testing_(false) {
   DCHECK(frame.DomWindow());
   SetDevice(device);
-  SendLogMessage2(
+  SendLogMessage(
       base::StringPrintf("ProcessedLocalAudioSource({session_id=%s}, {APM:%s})",
                          device.session_id().ToString().c_str(),
                          use_remote_apm_ ? "remote" : "local"));
@@ -194,7 +187,7 @@ ProcessedLocalAudioSource* ProcessedLocalAudioSource::From(
 
 void ProcessedLocalAudioSource::SendLogMessageWithSessionId(
     const std::string& message) const {
-  SendLogMessage2(message + " [session_id=" + device().session_id().ToString() +
+  SendLogMessage(message + " [session_id=" + device().session_id().ToString() +
                  "]");
 }
 
@@ -222,7 +215,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
     return false;
   }
 
-  SendLogMessage2(GetEnsureSourceIsStartedLogString(device()));
+  SendLogMessage(GetEnsureSourceIsStartedLogString(device()));
   SendLogMessageWithSessionId(base::StringPrintf(
       "EnsureSourceIsStarted() => (audio_processing_properties=[%s])",
       GetAudioProcesingPropertiesLogString(audio_processing_properties_)
@@ -364,7 +357,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
       input_device_params, audio_processing_settings);
 
   if (!maybe_audio_capture_params) {
-    SendLogMessage2(base::StringPrintf(
+    SendLogMessage(base::StringPrintf(
         "EnsureSourceIsStarted() => (ERROR: "
         "input device format (%s) is not supported.",
         input_device_params.AsHumanReadableString().c_str()));

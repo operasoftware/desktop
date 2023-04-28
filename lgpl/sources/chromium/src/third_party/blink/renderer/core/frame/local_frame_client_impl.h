@@ -73,7 +73,9 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   // Notifies the WebView delegate that the JS window object has been cleared,
   // giving it a chance to bind native objects to the window before script
   // parsing begins.
-  void DispatchDidClearWindowObjectInMainWorld() override;
+  void DispatchDidClearWindowObjectInMainWorld(
+      v8::Isolate* isolate,
+      v8::MicrotaskQueue* microtask_queue) override;
   void DocumentElementAvailable() override;
   void RunScriptsAtDocumentElementAvailable() override;
   void RunScriptsAtDocumentReady(bool document_is_empty) override;
@@ -116,12 +118,14 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   void BeginNavigation(
       const ResourceRequest&,
+      const KURL& requestor_base_url,
       mojom::RequestContextFrameType,
       LocalDOMWindow* origin_window,
       DocumentLoader*,
       WebNavigationType,
       NavigationPolicy,
       WebFrameLoadType,
+      mojom::blink::ForceHistoryPush,
       bool is_client_redirect,
       // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
       bool is_unfenced_top_navigation,
@@ -139,7 +143,10 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void DispatchWillSendSubmitEvent(HTMLFormElement*) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
-  bool NavigateBackForward(int offset) const override;
+  bool NavigateBackForward(
+      int offset,
+      absl::optional<scheduler::TaskAttributionId>
+          soft_navigation_heuristics_task_id) const override;
   void DidDispatchPingLoader(const KURL&) override;
   void DidChangePerformanceTiming() override;
   void DidObserveInputDelay(base::TimeDelta) override;
@@ -147,16 +154,18 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
                                  UserInteractionType interaction_type) override;
   void DidChangeCpuTiming(base::TimeDelta) override;
   void DidObserveLoadingBehavior(LoadingBehaviorFlag) override;
+  void DidObserveSubresourceLoad(
+      uint32_t number_of_subresources_loaded,
+      uint32_t number_of_subresource_loads_handled_by_service_worker,
+      bool pervasive_payload_requested,
+      int64_t pervasive_bytes_fetched,
+      int64_t total_bytes_fetched) override;
   void DidObserveNewFeatureUsage(const UseCounterFeature&) override;
   void DidObserveSoftNavigation(uint32_t count) override;
   void DidObserveLayoutShift(double score, bool after_input_or_scroll) override;
-  void DidObserveLayoutNg(uint32_t all_block_count,
-                          uint32_t ng_block_count,
-                          uint32_t all_call_count,
-                          uint32_t ng_call_count) override;
   void PreloadSubresourceOptimizationsForOrigins(
-      const WTF::HashSet<scoped_refptr<const SecurityOrigin>,
-                         SecurityOriginHash>& origins) override;
+      const WTF::HashSet<scoped_refptr<const SecurityOrigin>>& origins)
+      override;
   void SelectorMatchChanged(const Vector<String>& added_selectors,
                             const Vector<String>& removed_selectors) override;
 
@@ -221,7 +230,8 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   WebTextCheckClient* GetTextCheckerClient() const override;
 
-  std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
+  std::unique_ptr<URLLoader> CreateURLLoaderForTesting() override;
 
   blink::BrowserInterfaceBrokerProxy& GetBrowserInterfaceBroker() override;
 
@@ -250,6 +260,10 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   void OnMainFrameViewportRectangleChanged(
       const gfx::Rect& main_frame_viewport_rect) override;
+
+  void OnMainFrameImageAdRectangleChanged(
+      DOMNodeId element_id,
+      const gfx::Rect& image_ad_rect) override;
 
   void OnOverlayPopupAdDetected() override;
 
@@ -283,8 +297,6 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void UpdateSubresourceFactory(
       std::unique_ptr<blink::PendingURLLoaderFactoryBundle> pending_factory)
       override;
-
-  void DidChangeMobileFriendliness(const MobileFriendliness&) override;
 
  private:
   bool IsLocalFrameClientImpl() const override { return true; }

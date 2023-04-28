@@ -18,22 +18,24 @@ RTCEncodedAudioFrame::RTCEncodedAudioFrame(
     std::unique_ptr<webrtc::TransformableFrameInterface> webrtc_frame)
     : delegate_(base::MakeRefCounted<RTCEncodedAudioFrameDelegate>(
           std::move(webrtc_frame),
-          Vector<uint32_t>())) {}
+          Vector<uint32_t>(),
+          absl::nullopt)) {}
 
 RTCEncodedAudioFrame::RTCEncodedAudioFrame(
     std::unique_ptr<webrtc::TransformableAudioFrameInterface>
         webrtc_audio_frame) {
   Vector<uint32_t> contributing_sources;
+  absl::optional<uint16_t> sequence_number;
   if (webrtc_audio_frame) {
-    wtf_size_t num_csrcs = webrtc_audio_frame->GetHeader().numCSRCs;
-    contributing_sources.ReserveInitialCapacity(num_csrcs);
-    for (wtf_size_t i = 0; i < num_csrcs; i++) {
-      contributing_sources.push_back(
-          webrtc_audio_frame->GetHeader().arrOfCSRCs[i]);
+    contributing_sources.assign(webrtc_audio_frame->GetContributingSources());
+    if (webrtc_audio_frame->GetDirection() ==
+        webrtc::TransformableFrameInterface::Direction::kReceiver) {
+      sequence_number = webrtc_audio_frame->GetHeader().sequenceNumber;
     }
   }
   delegate_ = base::MakeRefCounted<RTCEncodedAudioFrameDelegate>(
-      std::move(webrtc_audio_frame), std::move(contributing_sources));
+      std::move(webrtc_audio_frame), std::move(contributing_sources),
+      sequence_number);
 }
 
 RTCEncodedAudioFrame::RTCEncodedAudioFrame(
@@ -60,6 +62,9 @@ RTCEncodedAudioFrameMetadata* RTCEncodedAudioFrame::getMetadata() const {
   metadata->setContributingSources(delegate_->ContributingSources());
   if (delegate_->PayloadType()) {
     metadata->setPayloadType(*delegate_->PayloadType());
+  }
+  if (delegate_->SequenceNumber()) {
+    metadata->setSequenceNumber(*delegate_->SequenceNumber());
   }
   return metadata;
 }

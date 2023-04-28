@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("credentialmanagement") {
@@ -25,6 +24,8 @@ blink_modules_sources("credentialmanagement") {
     "federated_credential.h",
     "identity_credential.cc",
     "identity_credential.h",
+    "identity_provider.cc",
+    "identity_provider.h",
     "otp_credential.cc",
     "otp_credential.h",
     "password_credential.cc",
@@ -33,11 +34,10 @@ blink_modules_sources("credentialmanagement") {
     "public_key_credential.h",
     "scoped_promise_resolver.cc",
     "scoped_promise_resolver.h",
-  ]
-  jumbo_excluded_sources = [
-    "credentials_container.cc",
-    "federated_credential.cc",
-    "identity_credential.cc",
+    "web_identity_requester.cc",
+    "web_identity_requester.h",
+    "web_identity_window_onload_event_listener.cc",
+    "web_identity_window_onload_event_listener.h",
   ]
   deps = [ "//services/metrics/public/cpp:ukm_builders" ]
 }

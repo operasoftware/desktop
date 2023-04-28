@@ -157,7 +157,7 @@ void ValidationMessageOverlayDelegate::CreatePage(const FrameOverlay& overlay) {
       nullptr, nullptr);
   frame->SetView(MakeGarbageCollected<LocalFrameView>(*frame, view_size));
   frame->Init(/*opener=*/nullptr, DocumentToken(), /*policy_container=*/nullptr,
-              StorageKey());
+              StorageKey(), /*document_ukm_source_id=*/ukm::kInvalidSourceId);
   frame->View()->SetCanHaveScrollbars(false);
   frame->View()->SetBaseBackgroundColor(Color::kTransparent);
   page_->GetVisualViewport().SetSize(view_size);
@@ -206,7 +206,8 @@ void ValidationMessageOverlayDelegate::CreatePage(const FrameOverlay& overlay) {
     sub_message.SetInlineStyleProperty(CSSPropertyID::kTransition, "none");
   }
   // Get the size to decide position later.
-  // TODO(schenney): This says get size, so we only need to update to layout.
+  // TODO(rendering-core): This gets a size, so we should only need to update
+  // to layout.
   FrameView().UpdateAllLifecyclePhases(DocumentUpdateReason::kOverlay);
   bubble_size_ = container.VisibleBoundsInLocalRoot().size();
   // Add one because the content sometimes exceeds the exact width due to

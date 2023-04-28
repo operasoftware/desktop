@@ -40,6 +40,11 @@ class MockWebAudioDeviceForAudioContext : public WebAudioDevice {
   void Resume() override { web_audio_device_paused_ = false; }
   double SampleRate() override { return sample_rate_; }
   int FramesPerBuffer() override { return frames_per_buffer_; }
+  int MaxChannelCount() override { return 2; }
+  media::OutputDeviceStatus CreateSinkAndGetDeviceStatus() override {
+    // In this test, we assume the sink creation always succeeds.
+    return media::OUTPUT_DEVICE_STATUS_OK;
+  }
 
  private:
   double sample_rate_;
@@ -52,7 +57,7 @@ class AudioContextTestPlatform : public TestingPlatformSupport {
       const WebAudioSinkDescriptor& sink_descriptor,
       unsigned number_of_output_channels,
       const WebAudioLatencyHint& latency_hint,
-      WebAudioDevice::RenderCallback*) override {
+      media::AudioRendererSink::RenderCallback*) override {
     double buffer_size = 0;
     const double interactive_size = AudioHardwareBufferSize();
     const double balanced_size = AudioHardwareBufferSize() * 2;
@@ -199,6 +204,20 @@ TEST_F(AudioContextTest, ExecutionContextPaused) {
   GetFrame().DomWindow()->SetLifecycleState(
       mojom::FrameLifecycleState::kRunning);
   EXPECT_FALSE(web_audio_device_paused_);
+}
+
+// Test initialization/uninitialization of MediaDeviceService.
+TEST_F(AudioContextTest, MediaDevicesService) {
+  AudioContextOptions* options = AudioContextOptions::Create();
+  AudioContext* audio_context =
+      AudioContext::Create(GetDocument(), options, ASSERT_NO_EXCEPTION);
+
+  EXPECT_FALSE(audio_context->is_media_device_service_initialized_);
+  audio_context->InitializeMediaDeviceService();
+  EXPECT_TRUE(audio_context->is_media_device_service_initialized_);
+  audio_context->UninitializeMediaDeviceService();
+  EXPECT_FALSE(audio_context->media_device_service_.is_bound());
+  EXPECT_FALSE(audio_context->media_device_service_receiver_.is_bound());
 }
 
 }  // namespace blink

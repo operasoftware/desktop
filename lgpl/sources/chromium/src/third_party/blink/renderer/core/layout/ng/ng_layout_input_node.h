@@ -122,6 +122,8 @@ class CORE_EXPORT NGLayoutInputNode {
   bool IsFieldsetContainer() const {
     return IsBlock() && box_->IsLayoutNGFieldset();
   }
+  bool IsInitialLetterBox() const { return box_->IsInitialLetterBox(); }
+  bool IsMedia() const { return box_->IsMedia(); }
   bool IsRubyRun() const { return IsBlock() && box_->IsRubyRun(); }
   bool IsRubyText() const { return box_->IsRubyText(); }
 
@@ -141,6 +143,7 @@ class CORE_EXPORT NGLayoutInputNode {
 
   bool IsTableCaption() const { return IsBlock() && box_->IsTableCaption(); }
   bool IsTableSection() const { return IsBlock() && box_->IsTableSection(); }
+  bool IsTableCell() const { return IsBlock() && box_->IsTableCell(); }
 
   // Section with empty rows is considered empty.
   bool IsEmptyTableSection() const;

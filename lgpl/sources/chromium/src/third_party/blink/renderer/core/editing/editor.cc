@@ -657,13 +657,12 @@ void Editor::SetBaseWritingDirection(
 
   auto* style =
       MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLQuirksMode);
-  style->SetProperty(
+  style->ParseAndSetProperty(
       CSSPropertyID::kDirection,
-      direction == mojo_base::mojom::blink::TextDirection::LEFT_TO_RIGHT
-          ? "ltr"
-          : direction == mojo_base::mojom::blink::TextDirection::RIGHT_TO_LEFT
-                ? "rtl"
-                : "inherit",
+      direction == mojo_base::mojom::blink::TextDirection::LEFT_TO_RIGHT ? "ltr"
+      : direction == mojo_base::mojom::blink::TextDirection::RIGHT_TO_LEFT
+          ? "rtl"
+          : "inherit",
       /* important */ false, GetFrame().DomWindow()->GetSecureContextMode());
   ApplyParagraphStyleToSelection(
       style, InputEvent::InputType::kFormatSetBlockTextDirection);
@@ -735,7 +734,9 @@ EphemeralRange Editor::RangeBetweenPoints(const gfx::Point& start_point,
       CreateVisiblePosition(end_position);
   if (end_visible_position.IsNull())
     return EphemeralRange();
-  return MakeRange(start_visible_position, end_visible_position);
+  return start_position.GetPosition() <= end_position.GetPosition()
+             ? MakeRange(start_visible_position, end_visible_position)
+             : MakeRange(end_visible_position, start_visible_position);
 }
 
 void Editor::ComputeAndSetTypingStyle(CSSPropertyValueSet* style,

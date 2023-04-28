@@ -48,6 +48,7 @@
 namespace blink {
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+class CSSValueList;
 class GpuShaderResource;
 class GpuShaderResourceClient;
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
@@ -532,6 +533,7 @@ class CORE_EXPORT GpuShaderFilterOperation : public FilterOperation {
                            const AtomicString&,
                            const Referrer&,
                            GpuShaderResource*,
+                           const CSSValueList*,
                            float animation_frame);
 
   bool AffectsOpacity() const override { return true; }
@@ -551,6 +553,7 @@ class CORE_EXPORT GpuShaderFilterOperation : public FilterOperation {
 
   GpuShaderResource* Resource() const { return resource_; }
   float AnimationFrame() const { return animation_frame_; }
+  const CSSValueList* Args() const { return args_; }
 
  protected:
   bool IsEqualAssumingSameType(const FilterOperation& o) const override;
@@ -560,6 +563,9 @@ class CORE_EXPORT GpuShaderFilterOperation : public FilterOperation {
   AtomicString absolute_url_;
   Referrer referrer_;
   Member<GpuShaderResource> resource_;
+  Member<const CSSValueList> args_;
+
+  // DEPRECATED
   float animation_frame_;
 };
 

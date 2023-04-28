@@ -102,9 +102,11 @@ NGContainingBlock<PhysicalOffset> PhysicalContainingBlock(
   return NGContainingBlock<PhysicalOffset>(
       containing_block.Offset().ConvertToPhysical(
           builder->Style().GetWritingDirection(), outer_size, inner_size),
-      containing_block.RelativeOffset().ConvertToPhysical(
-          builder->Style().GetWritingDirection(), outer_size, inner_size),
-      containing_block.Fragment(), containing_block.IsInsideColumnSpanner(),
+      RelativeInsetToPhysical(containing_block.RelativeOffset(),
+                              builder->Style().GetWritingDirection()),
+      containing_block.Fragment(),
+      containing_block.ClippedContainerBlockOffset(),
+      containing_block.IsInsideColumnSpanner(),
       containing_block.RequiresContentBeforeBreaking());
 }
 
@@ -157,7 +159,8 @@ const NGPhysicalBoxFragment* NGPhysicalBoxFragment::Create(
             writing_direction);
     NGLayoutOverflowCalculator calculator(
         To<NGBlockNode>(builder->node_),
-        /* is_css_box */ !builder->IsFragmentainerBoxType(), borders, scrollbar,
+        /* is_css_box */ !builder->IsFragmentainerBoxType(),
+        builder->ConstraintSpace().HasBlockFragmentation(), borders, scrollbar,
         padding, physical_size, writing_direction);
 
     if (NGFragmentItemsBuilder* items_builder = builder->ItemsBuilder()) {
@@ -695,8 +698,11 @@ const NGPhysicalBoxFragment* NGPhysicalBoxFragment::PostLayout() const {
 
   const auto* layout_object = GetSelfOrContainerLayoutObject();
   if (UNLIKELY(!layout_object)) {
-    NOTREACHED();
-    return nullptr;
+    // In some cases the layout object may have been removed. This can of course
+    // not happen if we have actually performed layout, but we may in some cases
+    // clone a fragment *before* layout, to ensure that the fragment tree spine
+    // is correctly rebuilt after a subtree layout.
+    return this;
   }
   const auto* box = DynamicTo<LayoutBox>(layout_object);
   if (UNLIKELY(!box)) {
@@ -1315,6 +1321,11 @@ void NGPhysicalBoxFragment::AddSelfOutlineRects(
       *info = LayoutObject::OutlineInfo::GetFromStyle(Style());
   }
 
+  if (ShouldIncludeBlockVisualOverflow(outline_type) &&
+      IsA<HTMLAnchorElement>(GetNode())) {
+    outline_type = NGOutlineType::kIncludeBlockVisualOverflowForAnchor;
+  }
+
   AddOutlineRects(additional_offset, outline_type,
                   /* container_relative */ false, outline_rects);
 }
@@ -1353,7 +1364,7 @@ void NGPhysicalBoxFragment::AddOutlineRects(
     }
   }
 
-  if (outline_type == NGOutlineType::kIncludeBlockVisualOverflow &&
+  if (ShouldIncludeBlockVisualOverflow(outline_type) &&
       !HasNonVisibleOverflow() && !HasControlClip(*this)) {
     // Tricky code ahead: we pass a 0,0 additional_offset to
     // AddOutlineRectsForNormalChildren, and add it in after the call.
@@ -1370,8 +1381,13 @@ void NGPhysicalBoxFragment::AddOutlineRects(
            base::make_span(*outline_rects).subspan(size_before))
         rect.offset += additional_offset;
     }
-    for (const auto& child : PostLayoutChildren()) {
-      if (child->IsOutOfFlowPositioned()) {
+
+    if (ShouldIncludeBlockVisualOverflowForAnchorOnly(outline_type)) {
+      for (const auto& child : PostLayoutChildren()) {
+        if (!child->IsOutOfFlowPositioned()) {
+          continue;
+        }
+
         AddOutlineRectsForDescendant(
             child, outline_rects, additional_offset, outline_type,
             To<LayoutBoxModelObject>(GetLayoutObject()));
@@ -1443,11 +1459,37 @@ void NGPhysicalBoxFragment::AddOutlineRectsForInlineBox(
   // Adjust the rectangles using |additional_offset| and |container_relative|.
   if (!container_relative)
     additional_offset -= this_offset_in_container;
-  if (additional_offset.IsZero())
-    return;
-  for (PhysicalRect& rect :
-       base::make_span(rects->begin() + initial_rects_size, rects->end()))
-    rect.offset += additional_offset;
+  if (!additional_offset.IsZero()) {
+    for (PhysicalRect& rect :
+         base::make_span(rects->begin() + initial_rects_size, rects->end())) {
+      rect.offset += additional_offset;
+    }
+  }
+
+  if (ShouldIncludeBlockVisualOverflowForAnchorOnly(outline_type) &&
+      !HasNonVisibleOverflow() && !HasControlClip(*this)) {
+    if (container->IsAnonymousBlock()) {
+      const auto* container_box = DynamicTo<LayoutBox>(
+          container->GetLayoutObject()->NonAnonymousAncestor());
+      if (!container_box)
+        return;
+      // TODO(crbug.com/1380673): Just picking the first fragment isn't right.
+      container = container_box->GetPhysicalFragment(0);
+      DCHECK(container);
+    }
+
+    for (const auto& child : container->PostLayoutChildren()) {
+      if (!child->IsOutOfFlowPositioned() ||
+          child->GetLayoutObject()->ContainerForAbsolutePosition() !=
+              layout_object) {
+        continue;
+      }
+
+      AddOutlineRectsForDescendant(child, rects, additional_offset,
+                                   outline_type,
+                                   To<LayoutBoxModelObject>(layout_object));
+    }
+  }
 }
 
 PositionWithAffinity NGPhysicalBoxFragment::PositionForPoint(
@@ -1831,21 +1873,24 @@ void NGPhysicalBoxFragment::CheckIntegrity() const {
       has_inflow_blocks = true;
   }
 
-  // If we have line boxes, |IsInlineFormattingContext()| is true, but the
-  // reverse is not always true.
-  if (has_line_boxes || has_inlines)
-    DCHECK(IsInlineFormattingContext());
+  // The below IFC check is skipped for LayoutMedia, which can have both of
+  // block children and inline children. See crbug.com/1379779.
+  if (RuntimeEnabledFeatures::LayoutMediaNoInlineChildrenEnabled() ||
+      !RuntimeEnabledFeatures::LayoutMediaNGContainerEnabled() ||
+      !layout_object_->IsMedia()) {
+    // If we have line boxes, |IsInlineFormattingContext()| is true, but the
+    // reverse is not always true.
+    if (has_line_boxes || has_inlines)
+      DCHECK(IsInlineFormattingContext());
+  }
 
   // If display-locked, we may not have any children.
   DCHECK(layout_object_);
   if (layout_object_ && layout_object_->ChildPaintBlockedByDisplayLock())
     return;
 
-  if (RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled()) {
-    if (has_line_boxes)
-      DCHECK(HasItems());
-  } else {
-    DCHECK_EQ(HasItems(), has_line_boxes);
+  if (has_line_boxes) {
+    DCHECK(HasItems());
   }
 
   if (has_line_boxes) {

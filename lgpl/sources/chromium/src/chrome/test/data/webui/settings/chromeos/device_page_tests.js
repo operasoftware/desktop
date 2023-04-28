@@ -4,18 +4,18 @@
 
 import 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 
-import {crosAudioConfigMojomWebui, DevicePageBrowserProxyImpl, IdleBehavior, LidClosedBehavior, NoteAppLockScreenSupport, Router, routes, setCrosAudioConfigForTesting, setDisplayApiForTesting, StorageSpaceState} from 'chrome://os-settings/chromeos/os_settings.js';
-import {assert} from 'chrome://resources/js/assert.js';
-import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {crosAudioConfigMojom, DevicePageBrowserProxyImpl, fakeCrosAudioConfig, FakeInputDeviceSettingsProvider, fakeKeyboards, fakeMice, fakePointingSticks, IdleBehavior, LidClosedBehavior, NoteAppLockScreenSupport, Router, routes, setCrosAudioConfigForTesting, setDisplayApiForTesting, setInputDeviceSettingsProviderForTesting, StorageSpaceState} from 'chrome://os-settings/chromeos/os_settings.js';
+import {assert} from 'chrome://resources/ash/common/assert.js';
+import {webUIListenerCallback} from 'chrome://resources/ash/common/cr.m.js';
+import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
+import {getDeepActiveElement} from 'chrome://resources/ash/common/util.js';
+import {pressAndReleaseKeyOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
+import {flush, microTask} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {assertDeepEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {MockController} from 'chrome://webui-test/mock_controller.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 import {isVisible} from 'chrome://webui-test/test_util.js';
 
-import {assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
-
-import {crosAudioConfigActiveFakeSpeaker, crosAudioConfigDefaultFakeMicJack, crosAudioConfigDefaultFakeSpeaker, crosAudioConfigInactiveFakeMicJack, defaultFakeAudioSystemProperties, FakeCrosAudioConfig} from './fake_cros_audio_config.js';
 import {FakeSystemDisplay} from './fake_system_display.js';
 import {TestDevicePageBrowserProxy} from './test_device_page_browser_proxy.js';
 
@@ -25,9 +25,12 @@ const TestNames = {
   Audio: 'audio',
   Display: 'display',
   Keyboard: 'keyboard',
+  PerDeviceMouse: 'per-device mouse',
+  PerDeviceTouchpad: 'per-device touchpad',
   NightLight: 'night light',
+  PerDeviceKeyboard: 'per-device keyboard',
   Pointers: 'pointers',
-  PointingStick: 'pointing stick',
+  PerDevicePointingStick: 'per-device pointing stick',
   Power: 'power',
   Storage: 'storage',
   Stylus: 'stylus',
@@ -277,8 +280,8 @@ suite('SettingsDevicePage', function() {
 
     DevicePageBrowserProxyImpl.setInstanceForTesting(
         new TestDevicePageBrowserProxy());
-
-    // Allow the light DOM to be distributed to settings-animated-pages.
+    setDeviceSplitEnabled(true);
+    // Allow the light DOM to be distributed to os-settings-animated-pages.
     setTimeout(done);
   });
 
@@ -288,7 +291,7 @@ suite('SettingsDevicePage', function() {
     devicePage = document.createElement('settings-device-page');
     devicePage.prefs = getFakePrefs();
 
-    // settings-animated-pages expects a parent with data-page set.
+    // os-settings-animated-pages expects a parent with data-page set.
     const basicPage = document.createElement('div');
     basicPage.dataset.page = 'basic';
     basicPage.appendChild(devicePage);
@@ -300,7 +303,7 @@ suite('SettingsDevicePage', function() {
     const row =
         assert(devicePage.shadowRoot.querySelector(`#main #${subpage}Row`));
     row.click();
-    assertEquals(expectedRoute, Router.getInstance().getCurrentRoute());
+    assertEquals(expectedRoute, Router.getInstance().currentRoute);
     const page = devicePage.shadowRoot.querySelector('settings-' + subpage);
     assert(page);
     return Promise.resolve(page);
@@ -398,11 +401,13 @@ suite('SettingsDevicePage', function() {
    * @param {boolean} lidClosedControlled
    * @param {boolean} hasLid
    * @param {boolean} adaptiveCharging
+   * @param {boolean} adaptiveChargingManaged
    */
   function sendPowerManagementSettings(
       possibleAcIdleBehaviors, possibleBatteryIdleBehaviors, currAcIdleBehavior,
       currBatteryIdleBehavior, acIdleManaged, batteryIdleManaged,
-      lidClosedBehavior, lidClosedControlled, hasLid, adaptiveCharging) {
+      lidClosedBehavior, lidClosedControlled, hasLid, adaptiveCharging,
+      adaptiveChargingManaged) {
     webUIListenerCallback('power-management-settings-changed', {
       possibleAcIdleBehaviors: possibleAcIdleBehaviors,
       possibleBatteryIdleBehaviors: possibleBatteryIdleBehaviors,
@@ -414,6 +419,7 @@ suite('SettingsDevicePage', function() {
       lidClosedControlled: lidClosedControlled,
       hasLid: hasLid,
       adaptiveCharging: adaptiveCharging,
+      adaptiveChargingManaged: adaptiveChargingManaged,
     });
     flush();
   }
@@ -460,6 +466,16 @@ suite('SettingsDevicePage', function() {
         `${elementDesc} should be focused for settingId=${settingId}.`);
   }
 
+  /**
+   * Set enableInputDeviceSettingsSplit feature flag to true for split tests.
+   * @param {!boolean} isEnabled
+   */
+  function setDeviceSplitEnabled(isEnabled) {
+    loadTimeData.overrideValues({
+      enableInputDeviceSettingsSplit: isEnabled,
+    });
+  }
+
   test(assert(TestNames.DevicePage), async function() {
     await init();
     assertTrue(isVisible(devicePage.shadowRoot.querySelector('#pointersRow')));
@@ -468,6 +484,16 @@ suite('SettingsDevicePage', function() {
 
     // enableAudioSettingsPage feature flag by default is turned on in tests.
     assertTrue(isVisible(devicePage.shadowRoot.querySelector('#audioRow')));
+
+    // enableInputDeviceSettingsSplit feature flag by default is turned on.
+    assertTrue(
+        isVisible(devicePage.shadowRoot.querySelector('#perDeviceMouseRow')));
+    assertTrue(isVisible(
+        devicePage.shadowRoot.querySelector('#perDeviceTouchpadRow')));
+    assertTrue(isVisible(
+        devicePage.shadowRoot.querySelector('#perDevicePointingStickRow')));
+    assertTrue(isVisible(
+        devicePage.shadowRoot.querySelector('#perDeviceKeyboardRow')));
 
     webUIListenerCallback('has-mouse-changed', false);
     assertTrue(isVisible(devicePage.shadowRoot.querySelector('#pointersRow')));
@@ -490,26 +516,173 @@ suite('SettingsDevicePage', function() {
     assertFalse(isVisible(devicePage.shadowRoot.querySelector('#audioRow')));
   });
 
-  suite(assert(TestNames.Audio), function() {
-    let audioPage;
+  test('per-device-mouse row visibility', async function() {
+    setDeviceSplitEnabled(false);
+    await init();
+    assertFalse(
+        isVisible(devicePage.shadowRoot.querySelector('#perDeviceMouseRow')));
+  });
 
-    setup(async function() {
-      loadTimeData.overrideValues({
-        enableAudioSettingsPage: true,
+  test(
+      'navigate back to device page when per-device-mouse is detached',
+      async function() {
+        // Tests with flag on.
+        setDeviceSplitEnabled(true);
+        webUIListenerCallback('has-mouse-changed', true);
+
+        await init();
+        assertTrue(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceMouseRow')));
+
+        webUIListenerCallback('has-mouse-changed', false);
+        await flushTasks();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceMouseRow')));
+
+        webUIListenerCallback('has-mouse-changed', true);
+        await flushTasks();
+        assertTrue(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceMouseRow')));
+
+        // Tests with flag off.
+        setDeviceSplitEnabled(false);
+        webUIListenerCallback('has-mouse-changed', true);
+
+        await init();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceMouseRow')));
+
+        webUIListenerCallback('has-mouse-changed', false);
+        await flushTasks();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceMouseRow')));
       });
-      await init();
-      return showAndGetDeviceSubpage('audio', routes.AUDIO)
-          .then(function(page) {
-            audioPage = page;
-          });
+
+  test('per-device-touchpad row visibility', async function() {
+    setDeviceSplitEnabled(false);
+    await init();
+    assertFalse(isVisible(
+        devicePage.shadowRoot.querySelector('#perDeviceTouchpadRow')));
+  });
+
+  test(
+      'navigate back to device page when per-device-touchpad is detached',
+      async function() {
+        // Tests with flag on.
+        setDeviceSplitEnabled(true);
+        webUIListenerCallback('has-touchpad-changed', true);
+
+        await init();
+        assertTrue(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceTouchpadRow')));
+
+        webUIListenerCallback('has-touchpad-changed', false);
+        await flushTasks();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceTouchpadRow')));
+
+        webUIListenerCallback('has-touchpad-changed', true);
+        await flushTasks();
+        assertTrue(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceTouchpadRow')));
+
+        // Tests with flag off.
+        setDeviceSplitEnabled(false);
+        webUIListenerCallback('has-touchpad-changed', true);
+
+        await init();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceTouchpadRow')));
+
+        webUIListenerCallback('has-touchpad-changed', false);
+        await flushTasks();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDeviceTouchpadRow')));
+      });
+
+  test('per-device-pointing-stick row visibility', async function() {
+    setDeviceSplitEnabled(false);
+    await init();
+    assertFalse(isVisible(
+        devicePage.shadowRoot.querySelector('#perDevicePointingStickRow')));
+  });
+
+  test(
+      'navigate back to device page when per-device-pointing-stick is detached',
+      async function() {
+        // Tests with flag on.
+        setDeviceSplitEnabled(true);
+        webUIListenerCallback('has-pointing-stick-changed', true);
+
+        await init();
+        assertTrue(isVisible(
+            devicePage.shadowRoot.querySelector('#perDevicePointingStickRow')));
+
+        webUIListenerCallback('has-pointing-stick-changed', false);
+        await flushTasks();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDevicePointingStickRow')));
+
+        webUIListenerCallback('has-pointing-stick-changed', true);
+        await flushTasks();
+        assertTrue(isVisible(
+            devicePage.shadowRoot.querySelector('#perDevicePointingStickRow')));
+
+        // Tests with flag off.
+        setDeviceSplitEnabled(false);
+        webUIListenerCallback('has-pointing-stick-stick-changed', true);
+
+        await init();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDevicePointingStickRow')));
+
+        webUIListenerCallback('has-pointing-stick-changed', false);
+        await flushTasks();
+        assertFalse(isVisible(
+            devicePage.shadowRoot.querySelector('#perDevicePointingStickRow')));
+      });
+
+  test('per-device-keyboard row visibility', async function() {
+    setDeviceSplitEnabled(false);
+    await init();
+    assertFalse(isVisible(
+        devicePage.shadowRoot.querySelector('#perDeviceKeyboardRow')));
+  });
+
+  suite(assert(TestNames.PerDeviceKeyboard), function() {
+    let perDeviceKeyboardPage;
+    let inputDeviceSettingsProvider;
+
+    suiteSetup(() => {
+      inputDeviceSettingsProvider = new FakeInputDeviceSettingsProvider();
+      inputDeviceSettingsProvider.setFakeKeyboards(fakeKeyboards);
+      setInputDeviceSettingsProviderForTesting(inputDeviceSettingsProvider);
     });
 
-    test('subpage visibility', function() {
-      assertEquals(routes.AUDIO, Router.getInstance().getCurrentRoute());
-      assertTrue(
-          isVisible(audioPage.shadowRoot.querySelector('#audioOutputTitle')));
-      assertTrue(isVisible(
-          audioPage.shadowRoot.querySelector('#audioOutputSubsection')));
+    setup(async function() {
+      await init();
+      const row = assert(
+          devicePage.shadowRoot.querySelector(`#main #perDeviceKeyboardRow`));
+      row.click();
+      assertEquals(
+          routes.PER_DEVICE_KEYBOARD, Router.getInstance().currentRoute);
+      const page =
+          devicePage.shadowRoot.querySelector('settings-per-device-keyboard');
+      assert(page);
+      return Promise.resolve(page).then(function(page) {
+        perDeviceKeyboardPage = page;
+      });
+    });
+
+    test('per-device keyboard subpage visibility', function() {
+      assertEquals(
+          routes.PER_DEVICE_KEYBOARD, Router.getInstance().currentRoute);
+    });
+
+    test('per-device keyboard page populated', function() {
+      const connectedKeyboards = perDeviceKeyboardPage.keyboards;
+      assertTrue(!!connectedKeyboards);
+      assertDeepEquals(connectedKeyboards, fakeKeyboards);
     });
   });
 
@@ -525,13 +698,16 @@ suite('SettingsDevicePage', function() {
       outputVolumePercent: 100,
 
       /** @type {!MuteState} */
-      outputMuteState: crosAudioConfigMojomWebui.MuteState.kNotMuted,
+      outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
 
       /** @type {!Array<!AudioDevice>} */
       outputDevices: [
-        crosAudioConfigDefaultFakeSpeaker,
-        crosAudioConfigDefaultFakeMicJack,
+        fakeCrosAudioConfig.defaultFakeSpeaker,
+        fakeCrosAudioConfig.defaultFakeMicJack,
       ],
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [],
     };
 
     /** @type {!AudioSystemProperties} */
@@ -539,13 +715,16 @@ suite('SettingsDevicePage', function() {
       outputVolumePercent: 0,
 
       /** @type {!MuteState} */
-      outputMuteState: crosAudioConfigMojomWebui.MuteState.kNotMuted,
+      outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
 
       /** @type {!Array<!AudioDevice>} */
       outputDevices: [
-        crosAudioConfigDefaultFakeSpeaker,
-        crosAudioConfigDefaultFakeMicJack,
+        fakeCrosAudioConfig.defaultFakeSpeaker,
+        fakeCrosAudioConfig.defaultFakeMicJack,
       ],
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [],
     };
 
     /** @type {!AudioSystemProperties} */
@@ -553,12 +732,20 @@ suite('SettingsDevicePage', function() {
       outputVolumePercent: 75,
 
       /** @type {!MuteState} */
-      outputMuteState: crosAudioConfigMojomWebui.MuteState.kMutedByUser,
+      outputMuteState: crosAudioConfigMojom.MuteState.kMutedByUser,
 
       /** @type {!Array<!AudioDevice>} */
       outputDevices: [
-        crosAudioConfigDefaultFakeSpeaker,
-        crosAudioConfigDefaultFakeMicJack,
+        fakeCrosAudioConfig.defaultFakeSpeaker,
+        fakeCrosAudioConfig.defaultFakeMicJack,
+      ],
+
+      /** @type {!MuteState} */
+      inputMuteState: crosAudioConfigMojom.MuteState.kMutedByUser,
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [
+        fakeCrosAudioConfig.fakeInternalMicActive,
       ],
     };
 
@@ -567,12 +754,42 @@ suite('SettingsDevicePage', function() {
       outputVolumePercent: 75,
 
       /** @type {!MuteState} */
-      outputMuteState: crosAudioConfigMojomWebui.MuteState.kMutedByPolicy,
+      outputMuteState: crosAudioConfigMojom.MuteState.kMutedByPolicy,
 
       /** @type {!Array<!AudioDevice>} */
       outputDevices: [
-        crosAudioConfigDefaultFakeSpeaker,
-        crosAudioConfigDefaultFakeMicJack,
+        fakeCrosAudioConfig.defaultFakeSpeaker,
+        fakeCrosAudioConfig.defaultFakeMicJack,
+      ],
+
+      /** @type {!MuteState} */
+      inputMuteState: crosAudioConfigMojom.MuteState.kMutedByPolicy,
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [
+        fakeCrosAudioConfig.fakeInternalMicActive,
+      ],
+    };
+
+    /** @type {!AudioSystemProperties} */
+    const mutedExternallyFakeAudioSystemProperties = {
+      outputVolumePercent: 75,
+
+      /** @type {!MuteState} */
+      outputMuteState: crosAudioConfigMojom.MuteState.kMutedExternally,
+
+      /** @type {!Array<!AudioDevice>} */
+      outputDevices: [
+        fakeCrosAudioConfig.defaultFakeSpeaker,
+        fakeCrosAudioConfig.defaultFakeMicJack,
+      ],
+
+      /** @type {!MuteState} */
+      inputMuteState: crosAudioConfigMojom.MuteState.kMutedExternally,
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [
+        fakeCrosAudioConfig.fakeInternalMicActive,
       ],
     };
 
@@ -581,10 +798,32 @@ suite('SettingsDevicePage', function() {
       outputVolumePercent: 75,
 
       /** @type {!MuteState} */
-      outputMuteState: crosAudioConfigMojomWebui.MuteState.kNotMuted,
+      outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
 
       /** @type {!Array<!AudioDevice>} */
       outputDevices: [],
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [
+        fakeCrosAudioConfig.fakeInternalMicActive,
+      ],
+    };
+
+    /** @type {!AudioSystemProperties} */
+    const emptyInputDevicesFakeAudioSystemProperties = {
+      outputVolumePercent: 75,
+
+      /** @type {!MuteState} */
+      outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+
+      /** @type {!Array<!AudioDevice>} */
+      outputDevices: [
+        fakeCrosAudioConfig.fakeSpeakerActive,
+        fakeCrosAudioConfig.fakeMicJackInactive,
+      ],
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [],
     };
 
     /** @type {!AudioSystemProperties} */
@@ -592,14 +831,87 @@ suite('SettingsDevicePage', function() {
       outputVolumePercent: 75,
 
       /** @type {!MuteState} */
-      outputMuteState: crosAudioConfigMojomWebui.MuteState.kNotMuted,
+      outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
 
       /** @type {!Array<!AudioDevice>} */
       outputDevices: [
-        crosAudioConfigActiveFakeSpeaker,
-        crosAudioConfigInactiveFakeMicJack,
+        fakeCrosAudioConfig.fakeSpeakerActive,
+        fakeCrosAudioConfig.fakeMicJackInactive,
+      ],
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [],
+    };
+
+    /** @type {!AudioSystemProperties} */
+    const noiseCancellationNotSupportedAudioSystemProperties = {
+      outputVolumePercent: 0,
+
+      /** @type {!MuteState} */
+      outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+
+      /** @type {!Array<!AudioDevice>} */
+      outputDevices: [],
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [
+        fakeCrosAudioConfig.fakeInternalMicActive,
       ],
     };
+
+    /** @type {!AudioSystemProperties} */
+    const muteByHardwareAudioSystemProperties = {
+      outputVolumePercent: 0,
+
+      /** @type {!MuteState} */
+      outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+
+      /** @type {!Array<!AudioDevice>} */
+      outputDevices: [],
+
+      /** @type {!Array<!AudioDevice>} */
+      inputDevices: [
+        fakeCrosAudioConfig.fakeInternalMicActive,
+      ],
+
+      inputMuteState: crosAudioConfigMojom.MuteState.kMutedExternally,
+    };
+
+    /**
+     * Simulates clicking at a given point on cr-slider element.
+     * @param {string} crSliderSelector
+     * @param {number} percent
+     * @return {Promise}
+     */
+    async function simulateSliderClicked(crSliderSelector, percent) {
+      /** @type {!CrSliderElement} */
+      const crSlider = audioPage.shadowRoot.querySelector(crSliderSelector);
+      assertTrue(isVisible(crSlider));
+      assertFalse(crSlider.disabled);
+      const rect = crSlider.$.container.getBoundingClientRect();
+      crSlider.dispatchEvent(new PointerEvent('pointerdown', {
+        buttons: 1,
+        pointerId: 1,
+        clientX: rect.left + ((percent / 100) * rect.width),
+      }));
+      return flushTasks();
+    }
+
+    /**
+     * Simulates pressing left arrow key while focused on cr-slider element.
+     * @param {!CrSliderElement} crSlider
+     */
+    function pressArrowRight(crSlider) {
+      pressAndReleaseKeyOn(crSlider, 39, [], 'ArrowRight');
+    }
+
+    /**
+     * Simulates pressing right arrow key while focused on cr-slider element.
+     * @param {!CrSliderElement} crSlider
+     */
+    function pressArrowLeft(crSlider) {
+      pressAndReleaseKeyOn(crSlider, 37, [], 'ArrowLeft');
+    }
 
     setup(async function() {
       loadTimeData.overrideValues({
@@ -608,13 +920,58 @@ suite('SettingsDevicePage', function() {
       await init();
 
       // FakeAudioConfig must be set before audio subpage is loaded.
-      crosAudioConfig = new FakeCrosAudioConfig();
+      crosAudioConfig = new fakeCrosAudioConfig.FakeCrosAudioConfig();
       setCrosAudioConfigForTesting(crosAudioConfig);
+      // Ensure data reset to fresh state.
+      crosAudioConfig.setAudioSystemProperties(
+          {...fakeCrosAudioConfig.defaultFakeAudioSystemProperties});
       return showAndGetDeviceSubpage('audio', routes.AUDIO)
           .then(function(page) {
             audioPage = page;
             return flushTasks();
           });
+    });
+
+    test('subpage visibility', function() {
+      assertEquals(routes.AUDIO, Router.getInstance().currentRoute);
+      assertTrue(
+          isVisible(audioPage.shadowRoot.querySelector('#audioOutputTitle')));
+      assertTrue(isVisible(
+          audioPage.shadowRoot.querySelector('#audioOutputSubsection')));
+      assertTrue(
+          isVisible(audioPage.shadowRoot.querySelector('#audioInputSection')));
+      const inputSectionHeader =
+          audioPage.shadowRoot.querySelector('#audioInputTitle');
+      assertTrue(isVisible(inputSectionHeader));
+      assertEquals('Input', inputSectionHeader.textContent.trim());
+      const inputDeviceSubsectionHeader =
+          audioPage.shadowRoot.querySelector('#audioInputDeviceLabel');
+      assertTrue(isVisible(inputDeviceSubsectionHeader));
+      assertEquals(
+          'Microphone', inputDeviceSubsectionHeader.textContent.trim());
+      const inputDeviceSubsectionDropdown =
+          audioPage.shadowRoot.querySelector('#audioInputDeviceDropdown');
+      assertTrue(isVisible(inputDeviceSubsectionDropdown));
+      const inputGainSubsectionHeader =
+          audioPage.shadowRoot.querySelector('#audioInputGainLabel');
+      assertTrue(isVisible(inputGainSubsectionHeader), 'audioInputGainLabel');
+      assertEquals('Gain', inputGainSubsectionHeader.textContent.trim());
+      const inputVolumeButton =
+          audioPage.shadowRoot.querySelector('#audioInputGainMuteButton');
+      assertTrue(isVisible(inputVolumeButton), 'audioInputGainMuteButton');
+      const inputVolumeSlider =
+          audioPage.shadowRoot.querySelector('#audioInputGainVolumeSlider');
+      assertTrue(isVisible(inputVolumeSlider), 'audioInputGainVolumeSlider');
+      const noiseCancellationSubsectionHeader =
+          audioPage.shadowRoot.querySelector(
+              '#audioInputNoiseCancellationLabel');
+      assertTrue(isVisible(noiseCancellationSubsectionHeader));
+      assertEquals(
+          'Noise Cancellation',
+          noiseCancellationSubsectionHeader.textContent.trim());
+      const noiseCancellationToggle = audioPage.shadowRoot.querySelector(
+          '#audioInputNoiseCancellationToggle');
+      assertTrue(isVisible(noiseCancellationToggle));
     });
 
     test('output volume mojo test', async function() {
@@ -623,7 +980,8 @@ suite('SettingsDevicePage', function() {
 
       // Test default properties.
       assertEquals(
-          defaultFakeAudioSystemProperties.outputVolumePercent,
+          fakeCrosAudioConfig.defaultFakeAudioSystemProperties
+              .outputVolumePercent,
           outputVolumeSlider.value);
 
       // Test min volume case.
@@ -644,44 +1002,70 @@ suite('SettingsDevicePage', function() {
     });
 
     test('simulate setting output volume slider mojo test', async function() {
-      async function simulateSliderClicked(value) {
-        const outputVolumeSlider =
-            audioPage.shadowRoot.querySelector('#outputVolumeSlider');
-        const rect = outputVolumeSlider.$.container.getBoundingClientRect();
-        outputVolumeSlider.dispatchEvent(new PointerEvent('pointerdown', {
-          buttons: 1,
-          pointerId: 1,
-          clientX: rect.left + (value * rect.width),
-        }));
-        return await flushTasks();
-      }
+      const sliderSelector = '#outputVolumeSlider';
+      const outputSlider = audioPage.shadowRoot.querySelector(sliderSelector);
+      const outputMuteButton =
+          audioPage.shadowRoot.querySelector('#audioOutputMuteButton');
 
       // Test clicking to min volume case.
       const minOutputVolumePercent = 0;
-      await simulateSliderClicked(minOutputVolumePercent / 100);
+      await simulateSliderClicked(sliderSelector, minOutputVolumePercent);
       assertEquals(
           minOutputVolumePercent,
           audioPage.audioSystemProperties_.outputVolumePercent,
       );
+      assertEquals('settings20:volume-zero', outputMuteButton.ironIcon);
 
       // Test clicking to max volume case.
       const maxOutputVolumePercent = 100;
-      await simulateSliderClicked(maxOutputVolumePercent / 100);
+      await simulateSliderClicked(sliderSelector, maxOutputVolumePercent);
       assertEquals(
           maxOutputVolumePercent,
           audioPage.audioSystemProperties_.outputVolumePercent,
       );
+      assertEquals('settings20:volume-up', outputMuteButton.ironIcon);
 
       // Test clicking to non-boundary volume case.
       const nonBoundaryOutputVolumePercent = 50;
-      await simulateSliderClicked(50 / 100);
+      await simulateSliderClicked(
+          sliderSelector, nonBoundaryOutputVolumePercent);
       assertEquals(
           nonBoundaryOutputVolumePercent,
           audioPage.audioSystemProperties_.outputVolumePercent,
       );
+      assertEquals('settings20:volume-up', outputMuteButton.ironIcon);
+
+      // Ensure value clamps to min.
+      outputSlider.value = -1;
+      outputSlider.dispatchEvent(new CustomEvent('cr-slider-value-changed'));
+      await flushTasks();
+
+      assertEquals(
+          minOutputVolumePercent,
+          audioPage.audioSystemProperties_.outputVolumePercent);
+      assertEquals('settings20:volume-zero', outputMuteButton.ironIcon);
+
+      // Ensure value clamps to max.
+      outputSlider.value = 101;
+      outputSlider.dispatchEvent(new CustomEvent('cr-slider-value-changed'));
+      await flushTasks();
+
+      assertEquals(
+          maxOutputVolumePercent,
+          audioPage.audioSystemProperties_.outputVolumePercent);
+      assertEquals('settings20:volume-up', outputMuteButton.ironIcon);
+
+      // Test clicking to a small icon volume case.
+      const smallIconOutputVolumePercent = 10;
+      await simulateSliderClicked(sliderSelector, smallIconOutputVolumePercent);
+      assertEquals(
+          smallIconOutputVolumePercent,
+          audioPage.audioSystemProperties_.outputVolumePercent,
+      );
+      assertEquals('settings20:volume-down', outputMuteButton.ironIcon);
     });
 
-    test('output mute mojo test', async function() {
+    test('output mute state changes slider disabled state', async function() {
       const outputVolumeSlider =
           audioPage.shadowRoot.querySelector('#outputVolumeSlider');
 
@@ -710,10 +1094,11 @@ suite('SettingsDevicePage', function() {
 
       // Test default properties.
       assertEquals(
-          crosAudioConfigDefaultFakeMicJack.id,
+          fakeCrosAudioConfig.defaultFakeMicJack.id,
           BigInt(outputDeviceDropdown.value));
       assertEquals(
-          defaultFakeAudioSystemProperties.outputDevices.length,
+          fakeCrosAudioConfig.defaultFakeAudioSystemProperties.outputDevices
+              .length,
           outputDeviceDropdown.length);
 
       // Test empty output devices case.
@@ -725,16 +1110,495 @@ suite('SettingsDevicePage', function() {
           emptyOutputDevicesFakeAudioSystemProperties.outputDevices.length,
           outputDeviceDropdown.length);
 
+      // If the output devices are empty, the output section should be hidden.
+      const outputDeviceSection = audioPage.shadowRoot.querySelector('#output');
+      assertFalse(isVisible(outputDeviceSection));
+      const inputDeviceSection = audioPage.shadowRoot.querySelector('#input');
+      assertTrue(isVisible(inputDeviceSection));
+
       // Test active speaker case.
       crosAudioConfig.setAudioSystemProperties(
           activeSpeakerFakeAudioSystemProperties);
       await flushTasks();
+
       assertEquals(
-          crosAudioConfigActiveFakeSpeaker.id,
+          fakeCrosAudioConfig.fakeSpeakerActive.id,
           BigInt(outputDeviceDropdown.value));
       assertEquals(
           activeSpeakerFakeAudioSystemProperties.outputDevices.length,
           outputDeviceDropdown.length);
+    });
+
+    test('simulate setting active output device', async function() {
+      // Get dropdown.
+      /** @type {!HTMLSelectElement}*/
+      const outputDeviceDropdown =
+          audioPage.shadowRoot.querySelector('#audioOutputDeviceDropdown');
+
+      // Verify selected is active device.
+      const expectedInitialSelectionId =
+          `${fakeCrosAudioConfig.defaultFakeMicJack.id}`;
+      assertEquals(expectedInitialSelectionId, outputDeviceDropdown.value);
+
+      // change active device.
+      outputDeviceDropdown.selectedIndex = 0;
+      outputDeviceDropdown.dispatchEvent(
+          new CustomEvent('change', {bubbles: true}));
+      await flushTasks();
+
+      // Verify selected updated to latest active device.
+      const expectedUpdatedSelectionId =
+          `${fakeCrosAudioConfig.defaultFakeSpeaker.id}`;
+      assertEquals(expectedUpdatedSelectionId, outputDeviceDropdown.value);
+      const nextActiveDevice =
+          audioPage.audioSystemProperties_.outputDevices.find(
+              device =>
+                  device.id === fakeCrosAudioConfig.defaultFakeSpeaker.id);
+      assertTrue(nextActiveDevice.isActive);
+    });
+
+    test('input device mojo test', async function() {
+      const inputDeviceDropdown =
+          audioPage.shadowRoot.querySelector('#audioInputDeviceDropdown');
+      assertTrue(!!inputDeviceDropdown);
+
+      // Test default properties.
+      assertEquals(
+          `${fakeCrosAudioConfig.fakeInternalFrontMic.id}`,
+          inputDeviceDropdown.value);
+      assertEquals(
+          fakeCrosAudioConfig.defaultFakeAudioSystemProperties.inputDevices
+              .length,
+          inputDeviceDropdown.length);
+
+      // Test empty input devices case.
+      crosAudioConfig.setAudioSystemProperties(
+          emptyInputDevicesFakeAudioSystemProperties);
+      await flushTasks();
+      assertTrue(!inputDeviceDropdown.value);
+      assertEquals(
+          emptyInputDevicesFakeAudioSystemProperties.inputDevices.length,
+          inputDeviceDropdown.length);
+
+      // If the input devices are empty, the input section should be hidden.
+      const inputDeviceSection = audioPage.shadowRoot.querySelector('#input');
+      assertFalse(isVisible(inputDeviceSection));
+      const outputDeviceSection = audioPage.shadowRoot.querySelector('#output');
+      assertTrue(isVisible(outputDeviceSection));
+    });
+
+    test('simulate setting active input device', async function() {
+      // Get dropdown.
+      /** @type {!HTMLSelectElement}*/
+      const inputDeviceDropdown =
+          audioPage.shadowRoot.querySelector('#audioInputDeviceDropdown');
+
+      // Verify selected is active device.
+      const expectedInitialSelectionId =
+          `${fakeCrosAudioConfig.fakeInternalFrontMic.id}`;
+      assertEquals(expectedInitialSelectionId, inputDeviceDropdown.value);
+
+      // change active device.
+      inputDeviceDropdown.selectedIndex = 1;
+      inputDeviceDropdown.dispatchEvent(
+          new CustomEvent('change', {bubbles: true}));
+      await flushTasks();
+
+      // Verify selected updated to latest active device.
+      const expectedUpdatedSelectionId =
+          `${fakeCrosAudioConfig.fakeBluetoothMic.id}`;
+      assertEquals(expectedUpdatedSelectionId, inputDeviceDropdown.value);
+      const nextActiveDevice =
+          audioPage.audioSystemProperties_.inputDevices.find(
+              device => device.id === fakeCrosAudioConfig.fakeBluetoothMic.id);
+      assertTrue(nextActiveDevice.isActive);
+    });
+
+    test('simulate mute output', async function() {
+      assertEquals(
+          crosAudioConfigMojom.MuteState.kNotMuted,
+          audioPage.audioSystemProperties_.outputMuteState);
+      assertFalse(audioPage.isOutputMuted_);
+
+      const outputMuteButton =
+          audioPage.shadowRoot.querySelector('#audioOutputMuteButton');
+      assertTrue(isVisible(outputMuteButton));
+      outputMuteButton.click();
+      await flushTasks();
+
+      assertEquals(
+          crosAudioConfigMojom.MuteState.kMutedByUser,
+          audioPage.audioSystemProperties_.outputMuteState);
+      assertTrue(audioPage.isOutputMuted_);
+      assertEquals('settings20:volume-up-off', outputMuteButton.ironIcon);
+
+      outputMuteButton.click();
+      await flushTasks();
+
+      assertEquals(
+          crosAudioConfigMojom.MuteState.kNotMuted,
+          audioPage.audioSystemProperties_.outputMuteState);
+      assertFalse(audioPage.isOutputMuted_);
+    });
+
+    test('simulate input mute button press test', async function() {
+      const inputMuteButton =
+          audioPage.shadowRoot.querySelector('#audioInputGainMuteButton');
+
+      assertFalse(audioPage.getIsInputMutedForTest());
+      assertEquals('cr:mic', inputMuteButton.ironIcon);
+
+      inputMuteButton.click();
+      await flushTasks();
+
+      assertTrue(audioPage.getIsInputMutedForTest());
+      assertEquals('settings:mic-off', inputMuteButton.ironIcon);
+    });
+
+    test('simulate setting input gain slider', async function() {
+      const sliderSelector = '#audioInputGainVolumeSlider';
+      const inputSlider = audioPage.shadowRoot.querySelector(sliderSelector);
+      assertTrue(isVisible(inputSlider));
+      assertEquals(
+          audioPage.audioSystemProperties_.inputGainPercent, inputSlider.value);
+
+      const minimumValue = 0;
+      await simulateSliderClicked(sliderSelector, minimumValue);
+
+      assertEquals(minimumValue, inputSlider.value);
+      assertEquals(
+          audioPage.audioSystemProperties_.inputGainPercent, inputSlider.value);
+      const maximumValue = 100;
+      await simulateSliderClicked(sliderSelector, maximumValue);
+
+      assertEquals(maximumValue, inputSlider.value);
+      assertEquals(
+          audioPage.audioSystemProperties_.inputGainPercent, inputSlider.value);
+      const middleValue = 50;
+      await simulateSliderClicked(sliderSelector, middleValue);
+
+      assertEquals(middleValue, inputSlider.value);
+      assertEquals(
+          audioPage.audioSystemProperties_.inputGainPercent, inputSlider.value);
+
+      // Ensure value clamps to min.
+      inputSlider.value = -1;
+      inputSlider.dispatchEvent(new CustomEvent('cr-slider-value-changed'));
+      await flushTasks();
+
+      assertEquals(
+          audioPage.audioSystemProperties_.inputGainPercent, minimumValue);
+
+      // Ensure value clamps to min.
+      inputSlider.value = 101;
+      inputSlider.dispatchEvent(new CustomEvent('cr-slider-value-changed'));
+      await flushTasks();
+
+      assertEquals(
+          audioPage.audioSystemProperties_.inputGainPercent, maximumValue);
+    });
+
+    test('simulate noise cancellation', async function() {
+      const noiseCancellationSubsection = audioPage.shadowRoot.querySelector(
+          '#audioInputNoiseCancellationSubsection');
+      const noiseCancellationToggle = audioPage.shadowRoot.querySelector(
+          '#audioInputNoiseCancellationToggle');
+
+      assertTrue(isVisible(noiseCancellationSubsection));
+      assertFalse(noiseCancellationToggle.checked);
+
+      await noiseCancellationToggle.click();
+      await flushTasks();
+
+      assertTrue(isVisible(noiseCancellationSubsection));
+      assertTrue(noiseCancellationToggle.checked);
+
+      crosAudioConfig.setAudioSystemProperties(
+          noiseCancellationNotSupportedAudioSystemProperties);
+      await flushTasks();
+
+      assertFalse(
+          isVisible(noiseCancellationSubsection),
+      );
+    });
+
+    test('simulate input muted by hardware', async function() {
+      const muteSelector = '#audioInputGainMuteButton';
+      const inputMuteButton = audioPage.shadowRoot.querySelector(muteSelector);
+      const sliderSelector = '#audioInputGainVolumeSlider';
+      const inputSlider = audioPage.shadowRoot.querySelector(sliderSelector);
+      assertFalse(inputMuteButton.disabled);
+      assertFalse(inputSlider.disabled);
+      assertFalse(audioPage.getIsInputMutedForTest());
+
+      crosAudioConfig.setAudioSystemProperties(
+          muteByHardwareAudioSystemProperties);
+      await flushTasks();
+
+      assertTrue(inputMuteButton.disabled);
+      assertTrue(inputSlider.disabled);
+      assertTrue(audioPage.getIsInputMutedForTest());
+    });
+
+    test('simulate output mute-by-policy', async function() {
+      const enterpriseIconSelector = '#audioOutputMuteByPolicyIndicator';
+      assertFalse(isVisible(
+          audioPage.shadowRoot.querySelector(enterpriseIconSelector)));
+      const outputMuteButtonSelector = '#audioOutputMuteButton';
+      const outputMuteButton =
+          audioPage.shadowRoot.querySelector(outputMuteButtonSelector);
+      assertFalse(outputMuteButton.disabled);
+      const outputSliderSelector = '#outputVolumeSlider';
+      const outputSlider =
+          audioPage.shadowRoot.querySelector(outputSliderSelector);
+      assertFalse(outputSlider.disabled);
+
+      crosAudioConfig.setAudioSystemProperties(
+          mutedByPolicyFakeAudioSystemProperties);
+      await flushTasks();
+
+      assertTrue(isVisible(
+          audioPage.shadowRoot.querySelector(enterpriseIconSelector)));
+      assertTrue(outputMuteButton.disabled);
+      assertTrue(outputSlider.disabled);
+    });
+
+    test('noise cancellation called twice with same value', async function() {
+      const mockController = new MockController();
+      const setNoiseCancellationEnabled = mockController.createFunctionMock(
+          crosAudioConfig, 'setNoiseCancellationEnabled');
+
+      assertEquals(
+          /* expected_call_count */ 0,
+          setNoiseCancellationEnabled.calls_.length);
+
+      crosAudioConfig.setAudioSystemProperties(
+          {...fakeCrosAudioConfig.defaultFakeAudioSystemProperties});
+      await flushTasks();
+
+      assertEquals(
+          /* expected_call_count */ 0,
+          setNoiseCancellationEnabled.calls_.length);
+
+      crosAudioConfig.setAudioSystemProperties(
+          noiseCancellationNotSupportedAudioSystemProperties);
+      await flushTasks();
+
+      assertEquals(
+          /* expected_call_count */ 1,
+          setNoiseCancellationEnabled.calls_.length);
+    });
+
+    test('slider keypress correct increments', async function() {
+      // The audio sliders are expected to increment in intervals of 10.
+      const outputVolumeSlider =
+          audioPage.shadowRoot.querySelector('#outputVolumeSlider');
+      assertEquals(75, outputVolumeSlider.value);
+      pressArrowRight(outputVolumeSlider);
+      assertEquals(85, outputVolumeSlider.value);
+      pressArrowRight(outputVolumeSlider);
+      assertEquals(95, outputVolumeSlider.value);
+      pressArrowRight(outputVolumeSlider);
+      assertEquals(100, outputVolumeSlider.value);
+      pressArrowRight(outputVolumeSlider);
+      assertEquals(100, outputVolumeSlider.value);
+      pressArrowLeft(outputVolumeSlider);
+      assertEquals(90, outputVolumeSlider.value);
+      pressArrowLeft(outputVolumeSlider);
+      assertEquals(80, outputVolumeSlider.value);
+
+      const inputVolumeSlider =
+          audioPage.shadowRoot.querySelector('#audioInputGainVolumeSlider');
+      assertEquals(87, inputVolumeSlider.value);
+      pressArrowRight(inputVolumeSlider);
+      assertEquals(97, inputVolumeSlider.value);
+      pressArrowRight(inputVolumeSlider);
+      assertEquals(100, inputVolumeSlider.value);
+      pressArrowRight(inputVolumeSlider);
+      assertEquals(100, inputVolumeSlider.value);
+      pressArrowLeft(inputVolumeSlider);
+      assertEquals(90, inputVolumeSlider.value);
+      pressArrowLeft(inputVolumeSlider);
+      assertEquals(80, inputVolumeSlider.value);
+    });
+
+    test('mute state updates tooltips', async function() {
+      const outputMuteTooltip =
+          audioPage.shadowRoot.querySelector('#audioOutputMuteButtonTooltip');
+      const inputMuteTooltip =
+          audioPage.shadowRoot.querySelector('#audioInputMuteButtonTooltip');
+
+      // Default state should be unmuted so show the toggle mute tooltip.
+      assertEquals(
+          loadTimeData.getString('audioToggleToMuteTooltip'),
+          outputMuteTooltip.textContent.trim());
+      assertEquals(
+          loadTimeData.getString('audioToggleToMuteTooltip'),
+          inputMuteTooltip.textContent.trim());
+
+      // Test muted by user case.
+      crosAudioConfig.setAudioSystemProperties(
+          mutedByUserFakeAudioSystemProperties);
+      await flushTasks();
+      assertEquals(
+          loadTimeData.getString('audioToggleToUnmuteTooltip'),
+          outputMuteTooltip.textContent.trim());
+      assertEquals(
+          loadTimeData.getString('audioToggleToUnmuteTooltip'),
+          inputMuteTooltip.textContent.trim());
+
+      // Test muted by policy case.
+      crosAudioConfig.setAudioSystemProperties(
+          mutedByPolicyFakeAudioSystemProperties);
+      await flushTasks();
+      assertEquals(
+          loadTimeData.getString('audioMutedByPolicyTooltip'),
+          outputMuteTooltip.textContent.trim());
+      assertEquals(
+          loadTimeData.getString('audioMutedByPolicyTooltip'),
+          inputMuteTooltip.textContent.trim());
+
+      // Test muted externally case.
+      crosAudioConfig.setAudioSystemProperties(
+          mutedExternallyFakeAudioSystemProperties);
+      await flushTasks();
+      assertEquals(
+          loadTimeData.getString('audioMutedExternallyTooltip'),
+          outputMuteTooltip.textContent.trim());
+      assertEquals(
+          loadTimeData.getString('audioMutedExternallyTooltip'),
+          inputMuteTooltip.textContent.trim());
+    });
+
+    test(
+        'mute state updates button aria-description and aria-pressed',
+        async function() {
+          const outputMuteButton =
+              audioPage.shadowRoot.querySelector('#audioOutputMuteButton');
+          const inputMuteButton =
+              audioPage.shadowRoot.querySelector('#audioInputGainMuteButton');
+
+          // Default state should be unmuted so show the toggle mute tooltip.
+          assertEquals(
+              loadTimeData.getString('audioOutputMuteButtonAriaLabelNotMuted'),
+              outputMuteButton.ariaDescription.trim());
+          assertEquals(
+              loadTimeData.getString('audioInputMuteButtonAriaLabelNotMuted'),
+              inputMuteButton.ariaDescription.trim());
+          const ariaNotPressedValue = 'false';
+          assertEquals(ariaNotPressedValue, outputMuteButton.ariaPressed);
+          assertEquals(ariaNotPressedValue, inputMuteButton.ariaPressed);
+
+          // Test muted by user case.
+          crosAudioConfig.setAudioSystemProperties(
+              mutedByUserFakeAudioSystemProperties);
+          await flushTasks();
+          assertEquals(
+              loadTimeData.getString('audioOutputMuteButtonAriaLabelMuted'),
+              outputMuteButton.ariaDescription.trim());
+          assertEquals(
+              loadTimeData.getString('audioInputMuteButtonAriaLabelMuted'),
+              inputMuteButton.ariaDescription.trim());
+          const ariaPressedValue = 'true';
+          assertEquals(ariaPressedValue, outputMuteButton.ariaPressed);
+          assertEquals(ariaPressedValue, inputMuteButton.ariaPressed);
+
+          // Test muted by policy case.
+          crosAudioConfig.setAudioSystemProperties(
+              mutedByPolicyFakeAudioSystemProperties);
+          await flushTasks();
+          assertEquals(
+              loadTimeData.getString('audioOutputMuteButtonAriaLabelMuted'),
+              outputMuteButton.ariaDescription.trim());
+          assertEquals(
+              loadTimeData.getString('audioInputMuteButtonAriaLabelMuted'),
+              inputMuteButton.ariaDescription.trim());
+          assertEquals(ariaPressedValue, outputMuteButton.ariaPressed);
+          assertEquals(ariaPressedValue, inputMuteButton.ariaPressed);
+
+          // Test muted externally case.
+          crosAudioConfig.setAudioSystemProperties(
+              mutedExternallyFakeAudioSystemProperties);
+          await flushTasks();
+          assertEquals(
+              loadTimeData.getString('audioOutputMuteButtonAriaLabelMuted'),
+              outputMuteButton.ariaDescription.trim());
+          assertEquals(
+              loadTimeData.getString(
+                  'audioInputMuteButtonAriaLabelMutedByHardwareSwitch'),
+              inputMuteButton.ariaDescription.trim());
+          assertEquals(ariaPressedValue, outputMuteButton.ariaPressed);
+          assertEquals(ariaPressedValue, inputMuteButton.ariaPressed);
+        });
+  });
+
+  suite(assert(TestNames.PerDeviceMouse), function() {
+    let perDeviceMousePage;
+
+    setup(async function() {
+      await init();
+      const row = assert(
+          devicePage.shadowRoot.querySelector(`#main #perDeviceMouseRow`));
+      row.click();
+      assertEquals(routes.PER_DEVICE_MOUSE, Router.getInstance().currentRoute);
+      const page =
+          devicePage.shadowRoot.querySelector('settings-per-device-mouse');
+      assert(page);
+      return Promise.resolve(page).then(function(page) {
+        perDeviceMousePage = page;
+      });
+    });
+
+    test('per-device mouse subpage visibility', function() {
+      assertEquals(routes.PER_DEVICE_MOUSE, Router.getInstance().currentRoute);
+    });
+  });
+
+  suite(assert(TestNames.PerDeviceTouchpad), function() {
+    let perDeviceTouchpadPage;
+
+    setup(async function() {
+      await init();
+      const row = assert(
+          devicePage.shadowRoot.querySelector(`#main #perDeviceTouchpadRow`));
+      row.click();
+      assertEquals(
+          routes.PER_DEVICE_TOUCHPAD, Router.getInstance().currentRoute);
+      const page =
+          devicePage.shadowRoot.querySelector('settings-per-device-touchpad');
+      assert(page);
+      return Promise.resolve(page).then(function(page) {
+        perDeviceTouchpadPage = page;
+      });
+    });
+
+    test('per-device touchpad subpage visibility', function() {
+      assertEquals(
+          routes.PER_DEVICE_TOUCHPAD, Router.getInstance().currentRoute);
+    });
+  });
+
+  suite(assert(TestNames.PerDevicePointingStick), function() {
+    let perDevicePointingStickPage;
+
+    setup(async function() {
+      await init();
+      const row = assert(devicePage.shadowRoot.querySelector(
+          `#main #perDevicePointingStickRow`));
+      row.click();
+      assertEquals(
+          routes.PER_DEVICE_POINTING_STICK, Router.getInstance().currentRoute);
+      const page = devicePage.shadowRoot.querySelector(
+          'settings-per-device-pointing-stick');
+      assert(page);
+      return Promise.resolve(page).then(function(page) {
+        perDevicePointingStickPage = page;
+      });
+    });
+
+    test('per-device pointing stick subpage visibility', function() {
+      assertEquals(
+          routes.PER_DEVICE_POINTING_STICK, Router.getInstance().currentRoute);
     });
   });
 
@@ -750,7 +1614,7 @@ suite('SettingsDevicePage', function() {
     });
 
     test('subpage responds to pointer attach/detach', function() {
-      assertEquals(routes.POINTERS, Router.getInstance().getCurrentRoute());
+      assertEquals(routes.POINTERS, Router.getInstance().currentRoute);
       assertTrue(isVisible(pointersPage.shadowRoot.querySelector('#mouse')));
       assertTrue(isVisible(pointersPage.shadowRoot.querySelector('#mouse h2')));
       assertTrue(
@@ -762,7 +1626,7 @@ suite('SettingsDevicePage', function() {
           isVisible(pointersPage.shadowRoot.querySelector('#touchpad h2')));
 
       webUIListenerCallback('has-touchpad-changed', false);
-      assertEquals(routes.POINTERS, Router.getInstance().getCurrentRoute());
+      assertEquals(routes.POINTERS, Router.getInstance().currentRoute);
       assertTrue(isVisible(pointersPage.shadowRoot.querySelector('#mouse')));
       assertTrue(isVisible(pointersPage.shadowRoot.querySelector('#mouse h2')));
       assertTrue(
@@ -775,7 +1639,7 @@ suite('SettingsDevicePage', function() {
           isVisible(pointersPage.shadowRoot.querySelector('#touchpad h2')));
 
       webUIListenerCallback('has-pointing-stick-changed', false);
-      assertEquals(routes.POINTERS, Router.getInstance().getCurrentRoute());
+      assertEquals(routes.POINTERS, Router.getInstance().currentRoute);
       assertTrue(isVisible(pointersPage.shadowRoot.querySelector('#mouse')));
       assertFalse(
           isVisible(pointersPage.shadowRoot.querySelector('#mouse h2')));
@@ -789,7 +1653,7 @@ suite('SettingsDevicePage', function() {
           isVisible(pointersPage.shadowRoot.querySelector('#touchpad h2')));
 
       webUIListenerCallback('has-mouse-changed', false);
-      assertEquals(routes.DEVICE, Router.getInstance().getCurrentRoute());
+      assertEquals(routes.DEVICE, Router.getInstance().currentRoute);
       assertFalse(
           isVisible(devicePage.shadowRoot.querySelector('#main #pointersRow')));
 
@@ -813,8 +1677,7 @@ suite('SettingsDevicePage', function() {
                 pointersPage.shadowRoot.querySelector('#touchpad h2')));
 
             webUIListenerCallback('has-mouse-changed', true);
-            assertEquals(
-                routes.POINTERS, Router.getInstance().getCurrentRoute());
+            assertEquals(routes.POINTERS, Router.getInstance().currentRoute);
             assertTrue(
                 isVisible(pointersPage.shadowRoot.querySelector('#mouse')));
             assertTrue(
@@ -1276,9 +2139,22 @@ suite('SettingsDevicePage', function() {
             displayDiv.click();
             assertEquals(
                 displayPage.displays[1].id, displayPage.selectedDisplay.id);
+            flush();
 
-            displayPage.updatePrimaryDisplay_({target: {value: '0'}});
-            displayPage.onOrientationChange_({target: {value: '90'}});
+            const primaryDisplaySelect =
+                displayPage.shadowRoot.getElementById('primaryDisplaySelect');
+            assertTrue(!!primaryDisplaySelect);
+            primaryDisplaySelect.value = '0';
+            primaryDisplaySelect.dispatchEvent(new CustomEvent('change'));
+            flush();
+
+            const orientationSelect =
+                displayPage.shadowRoot.getElementById('orientationSelect');
+            assertTrue(!!orientationSelect);
+            orientationSelect.value = '90';
+            orientationSelect.dispatchEvent(new CustomEvent('change'));
+            flush();
+
             fakeSystemDisplay.onDisplayChanged.callListeners();
 
             return Promise.all([
@@ -1301,7 +2177,12 @@ suite('SettingsDevicePage', function() {
             assertEquals(90, displayPage.displays[1].rotation);
 
             // Mirror the displays.
-            displayPage.onMirroredTap_({target: {blur: function() {}}});
+            const displayMirrorCheckbox =
+                displayPage.shadowRoot.getElementById('displayMirrorCheckbox');
+            assertTrue(!!displayMirrorCheckbox);
+            displayMirrorCheckbox.click();
+            flush();
+
             fakeSystemDisplay.onDisplayChanged.callListeners();
 
             return Promise.all([
@@ -1414,7 +2295,7 @@ suite('SettingsDevicePage', function() {
 
               flush();
 
-              displayPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(() => {
@@ -1557,7 +2438,8 @@ suite('SettingsDevicePage', function() {
                   IdleBehavior.DISPLAY_OFF_SLEEP, false /* acIdleManaged */,
                   false /* batteryIdleManaged */, LidClosedBehavior.SUSPEND,
                   false /* lidClosedControlled */, true /* hasLid */,
-                  false /* adaptiveCharging */);
+                  false /* adaptiveCharging */,
+                  false /* adaptiveChargingManaged */);
             });
       });
 
@@ -1702,7 +2584,7 @@ suite('SettingsDevicePage', function() {
                  webUIListenerCallback(
                      'battery-status-changed',
                      Object.assign({}, batteryStatus));
-                 powerPage.async(resolve);
+                 microTask.run(resolve);
                })
             .then(function() {
               const batteryIdleSelect = assert(
@@ -1731,7 +2613,8 @@ suite('SettingsDevicePage', function() {
               IdleBehavior.DISPLAY_OFF, IdleBehavior.DISPLAY_OFF,
               false /* acIdleManaged */, false /* batteryIdleManaged */,
               lidBehavior, false /* lidClosedControlled */, true /* hasLid */,
-              false /* adaptiveCharging */);
+              false /* adaptiveCharging */,
+              false /* adaptiveChargingManaged */);
         };
 
         sendLid(LidClosedBehavior.SUSPEND);
@@ -1773,8 +2656,9 @@ suite('SettingsDevicePage', function() {
                      true /* acIdleManaged */, true /* batteryIdleManaged */,
                      LidClosedBehavior.DO_NOTHING,
                      false /* lidClosedControlled */, true /* hasLid */,
-                     false /* adaptiveCharging */);
-                 powerPage.async(resolve);
+                     false /* adaptiveCharging */,
+                     false /* adaptiveChargingManaged */);
+                 microTask.run(resolve);
                })
             .then(function() {
               // Indicate battery presence so that battery idle settings
@@ -1791,7 +2675,7 @@ suite('SettingsDevicePage', function() {
               webUIListenerCallback(
                   'battery-status-changed', Object.assign({}, batteryStatus));
               return new Promise(function(resolve) {
-                powerPage.async(resolve);
+                microTask.run(resolve);
               });
             })
             .then(function() {
@@ -1830,9 +2714,10 @@ suite('SettingsDevicePage', function() {
                   IdleBehavior.SHUT_DOWN, IdleBehavior.SHUT_DOWN,
                   true /* acIdleManaged */, true /* batteryIdleManaged */,
                   LidClosedBehavior.DO_NOTHING, false /* lidClosedControlled */,
-                  true /* hasLid */, false /* adaptiveCharging */);
+                  true /* hasLid */, false /* adaptiveCharging */,
+                  false /* adaptiveChargingManaged */);
               return new Promise(function(resolve) {
-                powerPage.async(resolve);
+                microTask.run(resolve);
               });
             })
             .then(function() {
@@ -1871,8 +2756,9 @@ suite('SettingsDevicePage', function() {
                      false /* acIdleManaged */, false /* batteryIdleManaged */,
                      LidClosedBehavior.DO_NOTHING,
                      false /* lidClosedControlled */, true /* hasLid */,
-                     false /* adaptiveCharging */);
-                 powerPage.async(resolve);
+                     false /* adaptiveCharging */,
+                     false /* adaptiveChargingManaged */);
+                 microTask.run(resolve);
                })
             .then(function() {
               // Indicate battery presence so that battery idle settings
@@ -1889,7 +2775,7 @@ suite('SettingsDevicePage', function() {
               webUIListenerCallback(
                   'battery-status-changed', Object.assign({}, batteryStatus));
               return new Promise(function(resolve) {
-                powerPage.async(resolve);
+                microTask.run(resolve);
               });
             })
             .then(function() {
@@ -1927,9 +2813,10 @@ suite('SettingsDevicePage', function() {
                   IdleBehavior.DISPLAY_OFF, IdleBehavior.DISPLAY_ON,
                   false /* acIdleManaged */, false /* batteryIdleManaged */,
                   LidClosedBehavior.SUSPEND, false /* lidClosedControlled */,
-                  true /* hasLid */, false /* adaptiveCharging */);
+                  true /* hasLid */, false /* adaptiveCharging */,
+                  false /* adaptiveChargingManaged */);
               return new Promise(function(resolve) {
-                powerPage.async(resolve);
+                microTask.run(resolve);
               });
             })
             .then(function() {
@@ -1979,8 +2866,9 @@ suite('SettingsDevicePage', function() {
                      true /* acIdleManaged */, true /* batteryIdleManaged */,
                      LidClosedBehavior.SHUT_DOWN,
                      true /* lidClosedControlled */, true /* hasLid */,
-                     false /* adaptiveCharging */);
-                 powerPage.async(resolve);
+                     false /* adaptiveCharging */,
+                     false /* adaptiveChargingManaged */);
+                 microTask.run(resolve);
                })
             .then(function() {
               acIdleSelect =
@@ -2014,9 +2902,10 @@ suite('SettingsDevicePage', function() {
                   false /* acIdleManaged */, false /* batteryIdleManaged */,
                   LidClosedBehavior.STOP_SESSION,
                   true /* lidClosedControlled */, true /* hasLid */,
-                  false /* adaptiveCharging */);
+                  false /* adaptiveCharging */,
+                  false /* adaptiveChargingManaged */);
               return new Promise(function(resolve) {
-                powerPage.async(resolve);
+                microTask.run(resolve);
               });
             })
             .then(function() {
@@ -2064,8 +2953,9 @@ suite('SettingsDevicePage', function() {
                      IdleBehavior.DISPLAY_OFF_SLEEP, false /* acIdleManaged */,
                      false /* batteryIdleManaged */, LidClosedBehavior.SUSPEND,
                      false /* lidClosedControlled */, false /* hasLid */,
-                     false /* adaptiveCharging */);
-                 powerPage.async(resolve);
+                     false /* adaptiveCharging */,
+                     false /* adaptiveChargingManaged */);
+                 microTask.run(resolve);
                })
             .then(function() {
               assertTrue(powerPage.shadowRoot.querySelector('#lidClosedToggle')
@@ -2088,7 +2978,7 @@ suite('SettingsDevicePage', function() {
                          'battery-status-changed',
                          Object.assign({}, batteryStatus));
                      flush();
-                     powerPage.async(resolve);
+                     microTask.run(resolve);
                    })
                 .then(function() {
                   assertEquals(
@@ -2103,6 +2993,36 @@ suite('SettingsDevicePage', function() {
             routes.POWER, '424',
             lidClosedToggle.shadowRoot.querySelector('cr-toggle'),
             'Sleep when closed toggle');
+      });
+
+      test('Adaptive charging controlled by policy', async () => {
+        sendPowerManagementSettings(
+            [
+              IdleBehavior.DISPLAY_OFF_SLEEP,
+              IdleBehavior.DISPLAY_OFF,
+              IdleBehavior.DISPLAY_ON,
+            ],
+            [
+              IdleBehavior.DISPLAY_OFF_SLEEP,
+              IdleBehavior.DISPLAY_OFF,
+              IdleBehavior.DISPLAY_ON,
+            ],
+            IdleBehavior.DISPLAY_OFF_SLEEP, IdleBehavior.DISPLAY_OFF_SLEEP,
+            false /* acIdleManaged */, false /* batteryIdleManaged */,
+            LidClosedBehavior.SUSPEND, false /* lidClosedControlled */,
+            true /* hasLid */, true /* adaptiveCharging */,
+            true /* adaptiveCharingManaged */);
+
+        assertTrue(adaptiveChargingToggle.shadowRoot.querySelector('cr-toggle')
+                       .checked);
+
+        // Must have policy icon.
+        assertTrue(isVisible(adaptiveChargingToggle.shadowRoot.querySelector(
+            'cr-policy-pref-indicator')));
+
+        // Must have toggle locked.
+        assertTrue(adaptiveChargingToggle.shadowRoot.querySelector('cr-toggle')
+                       .disabled);
       });
 
       test('Deep link to adaptive charging', async () => {
@@ -2333,7 +3253,7 @@ suite('SettingsDevicePage', function() {
       return new Promise(function(resolve) {
                // No apps available.
                browserProxy.setNoteTakingApps([]);
-               stylusPage.async(resolve);
+               microTask.run(resolve);
              })
           .then(function() {
             flush();
@@ -2345,7 +3265,7 @@ suite('SettingsDevicePage', function() {
             browserProxy.addNoteTakingApp(
                 entry('n1', 'v1', true, LockScreenSupport.NOT_SUPPORTED));
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2358,7 +3278,7 @@ suite('SettingsDevicePage', function() {
             browserProxy.addNoteTakingApp(
                 entry('n2', 'v2', false, LockScreenSupport.SUPPORTED));
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2374,7 +3294,7 @@ suite('SettingsDevicePage', function() {
             assertEquals('v2', browserProxy.getPreferredNoteTakingAppId());
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2390,7 +3310,7 @@ suite('SettingsDevicePage', function() {
               entry('n2', 'v2', true, LockScreenSupport.ENABLED),
             ]);
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2407,7 +3327,7 @@ suite('SettingsDevicePage', function() {
             assertEquals('v1', browserProxy.getPreferredNoteTakingAppId());
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2422,7 +3342,7 @@ suite('SettingsDevicePage', function() {
       return new Promise(function(resolve) {
                browserProxy.setNoteTakingApps(
                    [entry('n1', 'v1', true, LockScreenSupport.SUPPORTED)]);
-               stylusPage.async(resolve);
+               microTask.run(resolve);
              })
           .then(function() {
             flush();
@@ -2436,7 +3356,7 @@ suite('SettingsDevicePage', function() {
                 [entry('n1', 'v1', true, LockScreenSupport.ENABLED)]);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2450,7 +3370,7 @@ suite('SettingsDevicePage', function() {
                 [entry('n1', 'v1', true, LockScreenSupport.SUPPORTED)]);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2462,7 +3382,7 @@ suite('SettingsDevicePage', function() {
 
             browserProxy.setNoteTakingApps([]);
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2475,7 +3395,7 @@ suite('SettingsDevicePage', function() {
       return new Promise(function(resolve) {
                browserProxy.setNoteTakingApps(
                    [entry('n1', 'v1', true, LockScreenSupport.SUPPORTED)]);
-               stylusPage.async(resolve);
+               microTask.run(resolve);
              })
           .then(function() {
             flush();
@@ -2488,7 +3408,7 @@ suite('SettingsDevicePage', function() {
             assertEquals(1, browserProxy.setAppOnLockScreenCount_);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2504,7 +3424,7 @@ suite('SettingsDevicePage', function() {
             assertEquals(2, browserProxy.setAppOnLockScreenCount_);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2521,7 +3441,7 @@ suite('SettingsDevicePage', function() {
       return new Promise(function(resolve) {
                browserProxy.setNoteTakingApps(
                    [entry('n1', 'v1', true, LockScreenSupport.SUPPORTED)]);
-               stylusPage.async(resolve);
+               microTask.run(resolve);
              })
           .then(function() {
             flush();
@@ -2533,7 +3453,7 @@ suite('SettingsDevicePage', function() {
             assertEquals(1, browserProxy.setAppOnLockScreenCount_);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2549,7 +3469,7 @@ suite('SettingsDevicePage', function() {
             assertEquals(2, browserProxy.setAppOnLockScreenCount_);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2569,7 +3489,7 @@ suite('SettingsDevicePage', function() {
                // Add an app with lock screen support.
                browserProxy.addNoteTakingApp(entry(
                    'n2', 'v2', true, LockScreenSupport.NOT_ALLOWED_BY_POLICY));
-               stylusPage.async(resolve);
+               microTask.run(resolve);
              })
           .then(function() {
             flush();
@@ -2584,7 +3504,7 @@ suite('SettingsDevicePage', function() {
             assertEquals(0, browserProxy.setAppOnLockScreenCount_);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2595,7 +3515,7 @@ suite('SettingsDevicePage', function() {
             assertEquals(0, browserProxy.setAppOnLockScreenCount_);
 
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2617,7 +3537,7 @@ suite('SettingsDevicePage', function() {
                  entry('n1', 'v1', true, LockScreenSupport.NOT_SUPPORTED),
                  entry('n2', 'v2', false, LockScreenSupport.SUPPORTED),
                ]);
-               stylusPage.async(resolve);
+               microTask.run(resolve);
              })
           .then(function() {
             flush();
@@ -2629,7 +3549,7 @@ suite('SettingsDevicePage', function() {
               entry('n2', 'v2', true, LockScreenSupport.SUPPORTED),
             ]);
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {
@@ -2641,7 +3561,7 @@ suite('SettingsDevicePage', function() {
               entry('n2', 'v2', true, LockScreenSupport.ENABLED),
             ]);
             return new Promise(function(resolve) {
-              stylusPage.async(resolve);
+              microTask.run(resolve);
             });
           })
           .then(function() {

@@ -171,7 +171,9 @@ TEST_F(FontCacheTest, Locale) {
                     /* options */ 0, /* device_scale_factor */ 1.0f,
                     /* variation_settings */ nullptr,
                     /* palette */ nullptr,
-                    /* is_unique_match */ false);
+                    /* variant_alternates */ nullptr,
+                    /* is_unique_match */ false,
+                    /* is_generic_family */ false);
   FontCacheKey key2 = key1;
   EXPECT_EQ(key1.GetHash(), key2.GetHash());
   EXPECT_EQ(key1, key2);

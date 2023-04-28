@@ -37,14 +37,15 @@
 #include "third_party/blink/renderer/core/animation/compositor_animations.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_equality.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace blink {
 
@@ -139,7 +140,7 @@ bool KeyframeEffectModelBase::SnapshotAllCompositorKeyframesIfNecessary(
 
   bool has_neutral_compositable_keyframe = false;
   auto should_snapshot_property = [](const PropertyHandle& property) {
-    return true;
+    return CompositorAnimations::CompositedPropertyRequiresSnapshot(property);
   };
   auto should_snapshot_keyframe =
       [&has_neutral_compositable_keyframe](

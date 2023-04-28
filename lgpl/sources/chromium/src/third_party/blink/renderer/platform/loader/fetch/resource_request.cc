@@ -29,6 +29,7 @@
 #include <memory>
 
 #include "base/unguessable_token.h"
+#include "net/base/request_priority.h"
 #include "services/network/public/mojom/ip_address_space.mojom-blink.h"
 #include "services/network/public/mojom/web_bundle_handle.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
@@ -94,12 +95,14 @@ ResourceRequestHead::ResourceRequestHead(const KURL& url)
       download_to_blob_(false),
       use_stream_on_response_(false),
       keepalive_(false),
+      browsing_topics_(false),
       allow_stale_response_(false),
       cache_mode_(mojom::blink::FetchCacheMode::kDefault),
       skip_service_worker_(false),
       download_to_cache_only_(false),
       site_for_cookies_set_(false),
       is_form_submission_(false),
+      priority_incremental_(net::kDefaultPriorityIncremental),
       initial_priority_(ResourceLoadPriority::kUnresolved),
       priority_(ResourceLoadPriority::kUnresolved),
       intra_priority_value_(0),
@@ -201,7 +204,9 @@ std::unique_ptr<ResourceRequest> ResourceRequestHead::CreateRedirectRequest(
   request->SetTargetAddressSpace(GetTargetAddressSpace());
   request->SetCredentialsMode(GetCredentialsMode());
   request->SetKeepalive(GetKeepalive());
+  request->SetBrowsingTopics(GetBrowsingTopics());
   request->SetPriority(Priority());
+  request->SetPriorityIncremental(PriorityIncremental());
 
   request->SetCorsPreflightPolicy(CorsPreflightPolicy());
   if (IsAdResource())
@@ -366,6 +371,14 @@ void ResourceRequestHead::SetPriority(ResourceLoadPriority priority,
     initial_priority_ = priority;
   priority_ = priority;
   intra_priority_value_ = intra_priority_value;
+}
+
+bool ResourceRequestHead::PriorityIncremental() const {
+  return priority_incremental_;
+}
+
+void ResourceRequestHead::SetPriorityIncremental(bool priority_incremental) {
+  priority_incremental_ = priority_incremental;
 }
 
 void ResourceRequestHead::AddHttpHeaderField(const AtomicString& name,

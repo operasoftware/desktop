@@ -200,12 +200,12 @@ class TestImporter(object):
 
         return 0
 
-    def update_expectations_for_cl(self):
+    def update_expectations_for_cl(self) -> bool:
         """Performs the expectation-updating part of an auto-import job.
 
         This includes triggering try jobs and waiting; then, if applicable,
-        writing new baselines and TestExpectation lines, committing, and
-        uploading a new patchset.
+        writing new baselines, metadata, and TestExpectation lines, committing,
+        and uploading a new patchset.
 
         This assumes that there is CL associated with the current branch.
 
@@ -230,6 +230,10 @@ class TestImporter(object):
 
         if try_results and self.git_cl.some_failed(try_results):
             self.fetch_new_expectations_and_baselines()
+            # Update metadata after baselines so that `rebaseline-cl` does not
+            # complain about uncommitted files. `update-metadata` has a similar
+            # but more fine-grained check.
+            self._expectations_updater.update_metadata()
             if self.chromium_git.has_working_directory_changes():
                 # Skip slow and timeout tests so that presubmit check passes
                 port = self.host.port_factory.get()
@@ -245,13 +249,12 @@ class TestImporter(object):
 
     def _trigger_try_jobs(self):
         _log.info('Triggering try jobs for updating expectations.')
-        try_bots = set(self.blink_try_bots())
+        rebaselining_builders = self.host.builders.builders_for_rebaselining()
         wptrunner_builders = {
             builder
-            for builder in try_bots
-            if self.host.builders.is_wpt_builder(builder)
+            for builder in self.host.builders.all_try_builder_names()
+            if self.host.builders.uses_wptrunner(builder)
         }
-        rebaselining_builders = try_bots - wptrunner_builders
         if rebaselining_builders:
             _log.info('For rebaselining:')
             for builder in sorted(rebaselining_builders):
@@ -260,7 +263,8 @@ class TestImporter(object):
             _log.info('For updating WPT metadata:')
             for builder in sorted(wptrunner_builders):
                 _log.info('  %s', builder)
-        self.git_cl.trigger_try_jobs(try_bots)
+        self.git_cl.trigger_try_jobs(rebaselining_builders
+                                     | wptrunner_builders)
 
     def run_commit_queue_for_cl(self):
         """Triggers CQ and either commits or aborts; returns True on success."""
@@ -333,10 +337,6 @@ class TestImporter(object):
             else:
                 raise e
         return False
-
-    def blink_try_bots(self):
-        """Returns the collection of builders used for updating expectations."""
-        return self.host.builders.filter_builders(is_try=True)
 
     def parse_args(self, argv):
         parser = argparse.ArgumentParser()
@@ -480,10 +480,13 @@ class TestImporter(object):
 
     def _has_wpt_changes(self):
         changed_files = self.chromium_git.changed_files()
-        rel_dest_path = self.fs.relpath(self.dest_path,
-                                        self.finder.chromium_base())
-        for cf in changed_files:
-            if cf.startswith(rel_dest_path):
+        test_roots = [
+            self.fs.relpath(self.finder.path_from_web_tests(subdir),
+                            self.finder.chromium_base())
+            for subdir in Port.WPT_DIRS
+        ]
+        for changed_file in changed_files:
+            if any(changed_file.startswith(root) for root in test_roots):
                 return True
         return False
 
@@ -567,15 +570,12 @@ class TestImporter(object):
         temp_file.write(description)
         temp_file.close()
 
-        self.git_cl.run([
-            'upload',
-            '--bypass-hooks',
-            '-f',
-            '--message-file',
-            temp_path
-        ])
-
-        self.fs.remove(temp_path)
+        try:
+            self.git_cl.run([
+                'upload', '--bypass-hooks', '-f', '--message-file', temp_path
+            ])
+        finally:
+            self.fs.remove(temp_path)
 
     def get_directory_owners(self):
         """Returns a mapping of email addresses to owners of changed tests."""
@@ -665,8 +665,6 @@ class TestImporter(object):
         Assuming that there are some try job results available, this
         adds new expectation lines to TestExpectations and downloads new
         baselines based on the try job results.
-
-        This is the same as invoking the `wpt-update-expectations` script.
         """
         _log.info('Adding test expectations lines to TestExpectations.')
         tests_to_rebaseline = set()
@@ -675,17 +673,12 @@ class TestImporter(object):
             self._expectations_updater.update_expectations())
         tests_to_rebaseline.update(to_rebaseline)
 
-        _log.info('Adding test expectations lines for disable-layout-ng')
-        to_rebaseline, _ = (
-            self._expectations_updater.update_expectations_for_flag_specific(
-                'disable-layout-ng'))
-        tests_to_rebaseline.update(to_rebaseline)
-
-        _log.info('Adding test expectations lines for disable-site-isolation-trials')
-        to_rebaseline, _ = (
-            self._expectations_updater.update_expectations_for_flag_specific(
-                'disable-site-isolation-trials'))
-        tests_to_rebaseline.update(to_rebaseline)
+        flag_spec_options = self.host.builders.all_flag_specific_options()
+        for flag_specific in sorted(flag_spec_options):
+            _log.info('Adding test expectations lines for %s', flag_specific)
+            to_rebaseline, _ = self._expectations_updater.update_expectations(
+                flag_specific)
+            tests_to_rebaseline.update(to_rebaseline)
 
         # commit local changes so that rebaseline tool will be happy
         if self.chromium_git.has_working_directory_changes():

@@ -2,11 +2,10 @@
 #
 # This file is an original work developed by Opera Software AS
 
-import("//build/config/jumbo.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 
-jumbo_source_set("libcurl") {
+source_set("libcurl") {
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
 
@@ -313,14 +312,6 @@ jumbo_source_set("libcurl") {
     "lib/warnless.h",
     "lib/wildcard.c",
     "lib/wildcard.h",
-  ]
-
-  jumbo_excluded_sources = [
-    "lib/mprintf.c",
-    "lib/version.c",
-    "lib/vtls/schannel.c",
-    "lib/vtls/schannel_verify.c",
-    "lib/warnless.c",
   ]
 
   if (is_win) {

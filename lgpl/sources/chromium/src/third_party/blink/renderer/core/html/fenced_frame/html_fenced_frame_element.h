@@ -10,6 +10,7 @@
 #include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/node.h"
+#include "third_party/blink/renderer/core/html/fenced_frame/fenced_frame_config.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -27,6 +28,7 @@ class KURL;
 // - Passing --enable-features=FencedFrames
 class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   DEFINE_WRAPPERTYPEINFO();
+  using PassKey = base::PassKey<HTMLFencedFrameElement>;
 
  public:
   // For a while there will be two underlying implementations of Fenced Frames:
@@ -56,7 +58,8 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
 
     virtual void AttachLayoutTree() {}
     virtual bool SupportsFocus() { return false; }
-    virtual void FreezeFrameSize() {}
+    virtual void MarkFrozenFrameSizeStale() {}
+    virtual void DidChangeFramePolicy(const FramePolicy& frame_policy) {}
 
    protected:
     HTMLFencedFrameElement& GetElement() const { return *outer_element_; }
@@ -74,11 +77,9 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   FrameOwnerElementType OwnerType() const override {
     return FrameOwnerElementType::kFencedframe;
   }
-  ParsedPermissionsPolicy ConstructContainerPolicy() const override {
-    NOTREACHED();
-    return ParsedPermissionsPolicy();
-  }
+  ParsedPermissionsPolicy ConstructContainerPolicy() const override;
   void SetCollapsed(bool) override;
+  void DidChangeContainerPolicy() override;
 
   // HTMLElement overrides.
   bool IsHTMLFencedFrameElement() const final { return true; }
@@ -104,6 +105,8 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   // while keeping the inner frame size unchanged.
   HTMLIFrameElement* InnerIFrameElement() const;
 
+  FencedFrameConfig* config() const { return config_; }
+  void setConfig(FencedFrameConfig* config);
   // Web-exposed API that returns whether an opaque-ads fenced frame would be
   // allowed to be created in the current active document of this node.
   // Checks the following criteria:
@@ -117,7 +120,17 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
  private:
   // This method will only navigate the underlying frame if the element
   // `isConnected()`. It will be deferred if the page is currently prerendering.
-  void Navigate();
+  void Navigate(const KURL& url,
+                absl::optional<bool> deprecated_should_freeze_initial_size =
+                    absl::nullopt,
+                absl::optional<gfx::Size> content_size = absl::nullopt);
+
+  // This method delegates to `Navigate()` above only if `this` has a non-null
+  // `config_`. If that's the case, this method pulls the appropriate URL off of
+  // the config (either supplied by script, or the internal urn uuid that maps
+  // to a resource in the browser process's `FencedFrameURLMapping`), and
+  // navigates to it.
+  void NavigateToConfig();
 
   // Delegate creation will be deferred if the page is currently prerendering.
   void CreateDelegateAndNavigate();
@@ -135,13 +148,23 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
       const QualifiedName&,
       const AtomicString&,
       MutableCSSPropertyValueSet*) override;
-  bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
+  bool LayoutObjectIsNeeded(const DisplayStyle&) const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   void AttachLayoutTree(AttachContext& context) override;
   bool SupportsFocus() const override;
 
-  void FreezeFrameSize();
-  void FreezeFrameSize(const PhysicalSize&);
+  // Make sure that the fenced frame size is not frozen. (If it is already
+  // unfrozen, this is a no-op.)
+  void UnfreezeFrameSize();
+
+  // Freeze the fenced frame to its (best-effort) "current" size, coerced to the
+  // nearest size in the allow-list. This behavior is deprecated and will be
+  // removed in the future.
+  void FreezeCurrentFrameSize();
+
+  // Freeze the fenced frame to the specified size, optionally coercing the size
+  // to the nearest size in the allow-list (used by `FreezeCurrentFrameSize`).
+  void FreezeFrameSize(const PhysicalSize&, bool should_coerce_size = false);
 
   // Given a size `requested_size`, return the nearest allowed fenced frame
   // size. Note that size restrictions only apply to top-level opaque-ads
@@ -154,7 +177,6 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   void StartResizeObserver();
   void StopResizeObserver();
   void OnResize(const PhysicalRect& content_box);
-  void UpdateInnerStyleOnFrozenInternalFrame();
 
   class ResizeObserverDelegate final : public ResizeObserver::Delegate {
    public:
@@ -167,6 +189,7 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   // `kFencedFrameMandatoryUnsandboxedFlags`.
   Member<FencedFrameDelegate> frame_delegate_;
   Member<ResizeObserver> resize_observer_;
+  Member<FencedFrameConfig> config_;
   // See |FrozenFrameSize| above. Stored in CSS pixel (without DSF multiplied.)
   absl::optional<PhysicalSize> frozen_frame_size_;
   absl::optional<PhysicalRect> content_rect_;
@@ -184,6 +207,8 @@ class CORE_EXPORT HTMLFencedFrameElement : public HTMLFrameOwnerElement {
   // set after being frozen. This ensures that multiple logs don't happen
   // for one fenced frame if it's constantly being resized.
   bool size_set_after_freeze_ = false;
+  // Attributes that are modeled off of their iframe equivalents
+  AtomicString allow_;
 
   friend class FencedFrameMPArchDelegate;
   friend class FencedFrameShadowDOMDelegate;

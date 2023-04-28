@@ -15,17 +15,17 @@
 namespace blink {
 
 namespace {
-viz::ResourceFormat WGPUFormatToViz(WGPUTextureFormat format) {
+viz::SharedImageFormat WGPUFormatToViz(WGPUTextureFormat format) {
   switch (format) {
     case WGPUTextureFormat_BGRA8Unorm:
-      return viz::BGRA_8888;
+      return viz::SinglePlaneFormat::kBGRA_8888;
     case WGPUTextureFormat_RGBA8Unorm:
-      return viz::RGBA_8888;
+      return viz::SinglePlaneFormat::kRGBA_8888;
     case WGPUTextureFormat_RGBA16Float:
-      return viz::RGBA_F16;
+      return viz::SinglePlaneFormat::kRGBA_F16;
     default:
       NOTREACHED();
-      return viz::RGBA_8888;
+      return viz::SinglePlaneFormat::kRGBA_8888;
   }
 }
 
@@ -36,12 +36,14 @@ WebGPUSwapBufferProvider::WebGPUSwapBufferProvider(
     scoped_refptr<DawnControlClientHolder> dawn_control_client,
     WGPUDevice device,
     WGPUTextureUsage usage,
-    WGPUTextureFormat format)
+    WGPUTextureFormat format,
+    PredefinedColorSpace color_space)
     : dawn_control_client_(dawn_control_client),
       client_(client),
       device_(device),
       format_(WGPUFormatToViz(format)),
-      usage_(usage) {
+      usage_(usage),
+      color_space_(color_space) {
   // Create a layer that will be used by the canvas and will ask for a
   // SharedImage each frame.
   layer_ = cc::TextureLayer::CreateForMailbox(this);
@@ -65,7 +67,7 @@ WebGPUSwapBufferProvider::~WebGPUSwapBufferProvider() {
   device_ = nullptr;
 }
 
-viz::ResourceFormat WebGPUSwapBufferProvider::Format() const {
+viz::SharedImageFormat WebGPUSwapBufferProvider::Format() const {
   return format_;
 }
 
@@ -120,8 +122,11 @@ void WebGPUSwapBufferProvider::ReleaseWGPUTextureAccessIfNeeded() {
     return;
   }
 
-  DCHECK(client_);
-  client_->OnTextureTransferred();
+  // The client's lifetime is independent of the swap buffers that can be kept
+  // alive longer due to pending shared image callbacks.
+  if (client_) {
+    client_->OnTextureTransferred();
+  }
 
   current_swap_buffer_->mailbox_texture->Dissociate();
   current_swap_buffer_->mailbox_texture = nullptr;
@@ -164,8 +169,8 @@ WebGPUSwapBufferProvider::NewOrRecycledSwapBuffer(
 
   if (unused_swap_buffers_.empty()) {
     gpu::Mailbox mailbox = sii->CreateSharedImage(
-        Format(), size, gfx::ColorSpace::CreateSRGB(), kTopLeft_GrSurfaceOrigin,
-        alpha_mode,
+        Format(), size, PredefinedColorSpaceToGfxColorSpace(color_space_),
+        kTopLeft_GrSurfaceOrigin, alpha_mode,
         gpu::SHARED_IMAGE_USAGE_WEBGPU |
             gpu::SHARED_IMAGE_USAGE_WEBGPU_SWAP_CHAIN_TEXTURE |
             gpu::SHARED_IMAGE_USAGE_DISPLAY_READ,
@@ -205,7 +210,6 @@ scoped_refptr<WebGPUMailboxTexture> WebGPUSwapBufferProvider::GetNewTexture(
   DCHECK_EQ(desc.size.depthOrArrayLayers, 1u);
   DCHECK_EQ(desc.mipLevelCount, 1u);
   DCHECK_EQ(desc.sampleCount, 1u);
-  DCHECK_EQ(desc.viewFormatCount, 0u);
 
   auto context_provider = GetContextProviderWeakPtr();
   if (!context_provider) {
@@ -283,7 +287,7 @@ bool WebGPUSwapBufferProvider::PrepareTransferableResource(
       current_swap_buffer_->mailbox, GL_LINEAR, GetTextureTarget(),
       current_swap_buffer_->access_finished_token, current_swap_buffer_->size,
       Format(), IsOverlayCandidate());
-  out_resource->color_space = gfx::ColorSpace::CreateSRGB();
+  out_resource->color_space = PredefinedColorSpaceToGfxColorSpace(color_space_);
 
   // This holds a ref on the SwapBuffers that will keep it alive until the
   // mailbox is released (and while the release callback is running).
@@ -323,7 +327,8 @@ bool WebGPUSwapBufferProvider::CopyToVideoFrame(
                                     GetTextureTarget());
 
   auto success = frame_pool->CopyRGBATextureToVideoFrame(
-      Format(), current_swap_buffer_->size, gfx::ColorSpace::CreateSRGB(),
+      Format().resource_format(), current_swap_buffer_->size,
+      PredefinedColorSpaceToGfxColorSpace(color_space_),
       kTopLeft_GrSurfaceOrigin, mailbox_holder, dst_color_space,
       std::move(callback));
 

@@ -15,13 +15,9 @@ blink_modules_sources("hid") {
     "hid_input_report_event.cc",
     "hid_input_report_event.h",
   ]
-
-  jumbo_excluded_sources = [
-    "hid_device.cc",
-  ]
 }
 
-jumbo_source_set("unit_tests") {
+source_set("unit_tests") {
   testonly = true
   sources = [ "hid_device_test.cc" ]
 

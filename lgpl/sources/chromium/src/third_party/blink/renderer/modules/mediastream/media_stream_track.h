@@ -105,12 +105,14 @@ class MODULES_EXPORT MediaStreamTrack
 
   virtual void applyConstraints(ScriptPromiseResolver*,
                                 const MediaTrackConstraints*) = 0;
-  virtual void SetConstraints(const MediaConstraints&) = 0;
+  virtual void SetInitialConstraints(const MediaConstraints& constraints) = 0;
+  virtual void SetConstraints(const MediaConstraints& constraints) = 0;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(mute, kMute)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(unmute, kUnmute)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(ended, kEnded)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(capturehandlechange, kCapturehandlechange)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(configurationchange, kConfigurationchange)
 
   virtual MediaStreamSource::ReadyState GetReadyState() = 0;
 
@@ -139,15 +141,10 @@ class MODULES_EXPORT MediaStreamTrack
   // Prepares the track for a potentially cross-renderer transfer. After this
   // is called, the track will be in an ended state and no longer usable.
   virtual void BeingTransferred(const base::UnguessableToken& transfer_id) = 0;
-
-#if !BUILDFLAG(IS_ANDROID)
-  // Only relevant for focusable streams (FocusableMediaStreamTrack).
-  // When called on one of these, it signals that Conditional Focus
-  // no longer applies - the browser will now decide whether
-  // the captured display surface should be captured. Later calls to
-  // FocusableMediaStreamTrack.focus() will now raise an exception.
-  virtual void CloseFocusWindowOfOpportunity() = 0;
-#endif
+  // Returns true if this track is allowed to be transferred. If a transfer is
+  //  not allowed, message will contain an explanatory text that can be
+  //  surfaced to the caller.
+  virtual bool TransferAllowed(String& message) const = 0;
 
   virtual void AddObserver(Observer*) = 0;
 

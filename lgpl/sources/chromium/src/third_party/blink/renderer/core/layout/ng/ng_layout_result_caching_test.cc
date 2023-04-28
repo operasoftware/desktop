@@ -5,8 +5,8 @@
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_fragment_geometry.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_break_token.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_utils.h"
+#include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 
 namespace blink {
 namespace {
@@ -17,7 +17,7 @@ namespace {
 // Both have layout initially performed on them, however the "src" will have a
 // different |NGConstraintSpace| which is then used to test either a cache hit
 // or miss.
-class NGLayoutResultCachingTest : public NGLayoutTest {
+class NGLayoutResultCachingTest : public RenderingTest {
  protected:
   NGLayoutResultCachingTest() {}
 
@@ -115,30 +115,21 @@ TEST_F(NGLayoutResultCachingTest, HitDifferentBFCOffset) {
           /* offset */ {LayoutUnit(), LayoutUnit()},
           /* available_inline_size */ LayoutUnit(100));
 
-  EXPECT_EQ(opportunities.size(), 4u);
+  EXPECT_EQ(opportunities.size(), 3u);
 
-  // This first opportunity is superfluous, but harmless. It isn't needed for
-  // correct positioning, but having it in the opportunity list shouldn't
-  // trigger any bad behaviour (if something doesn't fit, in this case it'll
-  // proceed to the next layout opportunity).
   EXPECT_EQ(opportunities[0].rect.start_offset,
             NGBfcOffset(LayoutUnit(50), LayoutUnit()));
   EXPECT_EQ(opportunities[0].rect.end_offset,
-            NGBfcOffset(LayoutUnit(100), LayoutUnit(45)));
-
-  EXPECT_EQ(opportunities[1].rect.start_offset,
-            NGBfcOffset(LayoutUnit(50), LayoutUnit()));
-  EXPECT_EQ(opportunities[1].rect.end_offset,
             NGBfcOffset(LayoutUnit(100), LayoutUnit::Max()));
 
-  EXPECT_EQ(opportunities[2].rect.start_offset,
+  EXPECT_EQ(opportunities[1].rect.start_offset,
             NGBfcOffset(LayoutUnit(), LayoutUnit(20)));
-  EXPECT_EQ(opportunities[2].rect.end_offset,
+  EXPECT_EQ(opportunities[1].rect.end_offset,
             NGBfcOffset(LayoutUnit(100), LayoutUnit(45)));
 
-  EXPECT_EQ(opportunities[3].rect.start_offset,
+  EXPECT_EQ(opportunities[2].rect.start_offset,
             NGBfcOffset(LayoutUnit(), LayoutUnit(65)));
-  EXPECT_EQ(opportunities[3].rect.end_offset,
+  EXPECT_EQ(opportunities[2].rect.end_offset,
             NGBfcOffset(LayoutUnit(100), LayoutUnit::Max()));
 }
 
@@ -2049,8 +2040,6 @@ TEST_F(NGLayoutResultCachingTest, HitTableSectionRemove) {
 }
 
 TEST_F(NGLayoutResultCachingTest, FragmentainerSizeChange) {
-  ScopedLayoutNGBlockFragmentationForTest block_frag(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       .multicol { columns:2; column-fill:auto; }
@@ -2124,8 +2113,6 @@ TEST_F(NGLayoutResultCachingTest, FragmentainerSizeChange) {
 }
 
 TEST_F(NGLayoutResultCachingTest, BlockOffsetChangeInFragmentainer) {
-  ScopedLayoutNGBlockFragmentationForTest block_frag(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       .multicol { columns:2; column-fill:auto; height:100px; }
@@ -2175,8 +2162,6 @@ TEST_F(NGLayoutResultCachingTest, BlockOffsetChangeInFragmentainer) {
 }
 
 TEST_F(NGLayoutResultCachingTest, BfcRootBlockOffsetChangeInFragmentainer) {
-  ScopedLayoutNGBlockFragmentationForTest block_frag(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       .multicol { columns:2; column-fill:auto; height:100px; }
@@ -2226,8 +2211,6 @@ TEST_F(NGLayoutResultCachingTest, BfcRootBlockOffsetChangeInFragmentainer) {
 }
 
 TEST_F(NGLayoutResultCachingTest, HitBlockOffsetUnchangedInFragmentainer) {
-  ScopedLayoutNGBlockFragmentationForTest block_frag(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       .multicol { columns:2; column-fill:auto; height:100px; }
@@ -2262,8 +2245,6 @@ TEST_F(NGLayoutResultCachingTest, HitBlockOffsetUnchangedInFragmentainer) {
 }
 
 TEST_F(NGLayoutResultCachingTest, HitNewFormattingContextInFragmentainer) {
-  ScopedLayoutNGBlockFragmentationForTest block_frag(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       .multicol { columns:2; }
@@ -2297,8 +2278,6 @@ TEST_F(NGLayoutResultCachingTest, HitNewFormattingContextInFragmentainer) {
 }
 
 TEST_F(NGLayoutResultCachingTest, MissMonolithicChangeInFragmentainer) {
-  ScopedLayoutNGBlockFragmentationForTest block_frag(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       .multicol { columns:2; column-fill:auto; height:100px; }

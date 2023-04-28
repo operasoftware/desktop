@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/core/animation/string_keyframe.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -128,10 +129,9 @@ StringKeyframeVector KeyframesAtZeroAndOne(CSSPropertyID property,
   return keyframes;
 }
 
-StringKeyframeVector KeyframesAtZeroAndOne(
-    AtomicString property_name,
-    const String& zero_value,
-    const String& one_value) {
+StringKeyframeVector KeyframesAtZeroAndOne(AtomicString property_name,
+                                           const String& zero_value,
+                                           const String& one_value) {
   StringKeyframeVector keyframes(2);
   keyframes[0] = MakeGarbageCollected<StringKeyframe>();
   keyframes[0]->SetOffset(0.0);
@@ -515,7 +515,7 @@ TEST_F(AnimationKeyframeEffectModel, MultipleProperties) {
   keyframes[0]->SetCSSPropertyValue(CSSPropertyID::kFontFamily, "serif",
                                     SecureContextMode::kInsecureContext,
                                     nullptr);
-  keyframes[0]->SetCSSPropertyValue(CSSPropertyID::kFontStyle, "normal",
+  keyframes[0]->SetCSSPropertyValue(CSSPropertyID::kFontSynthesisWeight, "auto",
                                     SecureContextMode::kInsecureContext,
                                     nullptr);
   keyframes[1] = MakeGarbageCollected<StringKeyframe>();
@@ -523,7 +523,7 @@ TEST_F(AnimationKeyframeEffectModel, MultipleProperties) {
   keyframes[1]->SetCSSPropertyValue(CSSPropertyID::kFontFamily, "cursive",
                                     SecureContextMode::kInsecureContext,
                                     nullptr);
-  keyframes[1]->SetCSSPropertyValue(CSSPropertyID::kFontStyle, "oblique",
+  keyframes[1]->SetCSSPropertyValue(CSSPropertyID::kFontSynthesisWeight, "none",
                                     SecureContextMode::kInsecureContext,
                                     nullptr);
 
@@ -534,9 +534,10 @@ TEST_F(AnimationKeyframeEffectModel, MultipleProperties) {
   Interpolation* left_value = FindValue(values, CSSPropertyID::kFontFamily);
   ASSERT_TRUE(left_value);
   ExpectNonInterpolableValue("cursive", left_value);
-  Interpolation* right_value = FindValue(values, CSSPropertyID::kFontStyle);
+  Interpolation* right_value =
+      FindValue(values, CSSPropertyID::kFontSynthesisWeight);
   ASSERT_TRUE(right_value);
-  ExpectNonInterpolableValue("oblique", right_value);
+  ExpectNonInterpolableValue("none", right_value);
 }
 
 // FIXME: Re-enable this test once compositing of CompositeAdd is supported.
@@ -800,9 +801,6 @@ TEST_F(AnimationKeyframeEffectModel, CompositorUpdateColorProperty) {
 }
 
 TEST_F(AnimationKeyframeEffectModel, CompositorSnapshotContainerRelative) {
-  ScopedCSSContainerQueriesForTest container_queries(true);
-  ScopedLayoutNGForTest layout_ng(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       #container {

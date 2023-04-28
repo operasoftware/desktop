@@ -7,8 +7,8 @@
 
 #include <stdint.h>
 
-#include "base/callback.h"
 #include "base/containers/circular_deque.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
@@ -78,6 +78,7 @@ class PLATFORM_EXPORT LayerTreeView
       cc::PaintHoldingReason reason,
       absl::optional<cc::PaintHoldingCommitTrigger> trigger) override;
   void OnPauseRenderingChanged(bool) override;
+  void OnCommitRequested() override;
   void BeginMainFrameNotExpectedSoon() override;
   void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override;
   void UpdateLayerTreeHost() override;
@@ -110,8 +111,6 @@ class PLATFORM_EXPORT LayerTreeView
       base::TimeTicks first_scroll_timestamp) override;
   void RunPaintBenchmark(int repeat_count,
                          cc::PaintBenchmarkResult& result) override;
-  void ReportEventLatency(
-      std::vector<cc::EventLatencyTracker::LatencyData> latencies) override;
 
   // cc::LayerTreeHostSingleThreadClient implementation.
   void DidSubmitCompositorFrame() override;
@@ -127,7 +126,7 @@ class PLATFORM_EXPORT LayerTreeView
       uint32_t frame_token,
       base::OnceCallback<void(base::TimeTicks)> callback);
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
   void AddCoreAnimationErrorCodeCallback(
       uint32_t frame_token,
       base::OnceCallback<void(gfx::CALayerResult)> callback);
@@ -173,7 +172,7 @@ class PLATFORM_EXPORT LayerTreeView
                 std::vector<base::OnceCallback<void(base::TimeTicks)>>>>
       presentation_callbacks_;
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
   base::circular_deque<std::pair<
       uint32_t,
       std::vector<base::OnceCallback<void(gfx::CALayerResult error_code)>>>>

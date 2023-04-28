@@ -30,7 +30,6 @@
 
 #include "third_party/blink/renderer/core/core_initializer.h"
 
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
@@ -40,7 +39,6 @@
 #include "third_party/blink/renderer/core/css/media_query_evaluator.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
-#include "third_party/blink/renderer/core/delivery_type_names.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/event_interface_names.h"
 #include "third_party/blink/renderer/core/event_target_names.h"
@@ -65,6 +63,7 @@
 #include "third_party/blink/renderer/core/xml_names.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_global_context.h"
+#include "third_party/blink/renderer/platform/loader/fetch/delivery_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
@@ -165,8 +164,7 @@ void CoreInitializer::Initialize() {
 
   FontGlobalContext::Init();
 
-  if (base::FeatureList::IsEnabled(features::kDefaultStyleSheetsEarlyInit))
-    CSSDefaultStyleSheets::Init();
+  CSSDefaultStyleSheets::Init();
 }
 
 }  // namespace blink

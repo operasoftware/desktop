@@ -19,7 +19,7 @@ namespace blink {
 // too much memory is used.
 
 class PLATFORM_EXPORT MemoryManagedPaintCanvas final
-    : public cc::RecordPaintCanvas {
+    : public cc::InspectableRecordPaintCanvas {
  public:
   // Base class for clients that receive callbacks from
   // MemoryManagedPaintCanvas.
@@ -28,11 +28,11 @@ class PLATFORM_EXPORT MemoryManagedPaintCanvas final
     virtual void DidPinImage(size_t bytes) = 0;
   };
 
-  MemoryManagedPaintCanvas(cc::DisplayItemList* list,
-                           const SkRect& bounds,
-                           Client* client);
+  MemoryManagedPaintCanvas(const gfx::Size& size, Client* client);
   explicit MemoryManagedPaintCanvas(const cc::RecordPaintCanvas&) = delete;
   ~MemoryManagedPaintCanvas() override;
+
+  cc::PaintRecord ReleaseAsRecord() override;
 
   void drawImage(const cc::PaintImage& image,
                  SkScalar left,
@@ -52,8 +52,7 @@ class PLATFORM_EXPORT MemoryManagedPaintCanvas final
   void UpdateMemoryUsage(const cc::PaintImage& image);
 
   HashSet<cc::PaintImage::ContentId,
-          DefaultHash<cc::PaintImage::ContentId>::Hash,
-          WTF::UnsignedWithZeroKeyHashTraits<cc::PaintImage::ContentId>>
+          IntWithZeroKeyHashTraits<cc::PaintImage::ContentId>>
       cached_image_ids_;
 
   Client* client_;

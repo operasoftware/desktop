@@ -32,7 +32,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -61,7 +61,6 @@
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/web_drag_data.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/public_buildflags.h"
 #include "third_party/blink/public/test/test_web_frame_content_dumper.h"
 #include "third_party/blink/public/web/web_autofill_client.h"
@@ -84,6 +83,7 @@
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/css/media_query_list_listener.h"
 #include "third_party/blink/renderer/core/css/media_query_matcher.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/focus_params.h"
@@ -149,8 +149,10 @@
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/cursor/cursor.h"
@@ -536,7 +538,7 @@ TEST_F(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent) {
   PaintLayerPainter(*root_layer).Paint(builder->Context());
   view->GetLayoutView()->GetDocument().Lifecycle().AdvanceTo(
       DocumentLifecycle::kPaintClean);
-  builder->EndRecording()->Playback(&canvas);
+  builder->EndRecording().Playback(&canvas);
 
   // The result should be a blend of red and green.
   SkColor color = bitmap.getColor(kWidth / 2, kHeight / 2);
@@ -1866,7 +1868,7 @@ TEST_F(WebViewTest, IsSelectionAnchorFirst) {
 
 TEST_F(
     WebViewTest,
-    MoveFocusToNextFocusableElementForIMEWithKeyEventListenersAndNonEditableElements) {
+    MoveFocusToNextFocusableElementForImeAndAutofillWithKeyEventListenersAndNonEditableElements) {
   const std::string test_file =
       "advance_focus_in_form_with_key_event_listeners.html";
   RegisterMockedHttpURLLoad(test_file);
@@ -1913,9 +1915,10 @@ TEST_F(
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kForward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kForward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i + 1].element_id);
@@ -1934,9 +1937,10 @@ TEST_F(
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kBackward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kBackward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i - 1].element_id);
@@ -1957,18 +1961,20 @@ TEST_F(
   EXPECT_EQ(kWebTextInputFlagHaveNextFocusableElement |
                 kWebTextInputFlagHavePreviousFocusableElement,
             next_previous_flags);
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          button1, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       button1, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next_focus->GetIdAttribute(), "contenteditable1");
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kForward);
   Element* content_editable1 = document->getElementById("contenteditable1");
   EXPECT_EQ(content_editable1, document->FocusedElement());
   button1->Focus();
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          button1, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       button1, mojom::blink::FocusType::kBackward);
   EXPECT_EQ(next_focus->GetIdAttribute(), "input1");
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kBackward);
@@ -1980,9 +1986,10 @@ TEST_F(
       active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
   // No Next/Previous element for elements outside form.
   EXPECT_EQ(0, next_previous_flags);
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          anchor1, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       anchor1, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next_focus, nullptr);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kForward);
@@ -1990,9 +1997,10 @@ TEST_F(
   // be null, hence focus will stay same as it is.
   EXPECT_EQ(anchor1, document->FocusedElement());
 
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          anchor1, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       anchor1, mojom::blink::FocusType::kBackward);
   EXPECT_EQ(next_focus, nullptr);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kBackward);
@@ -2007,9 +2015,10 @@ TEST_F(
   // Next/Previous elements for an element outside of a form are other
   // <form>less elements.
   EXPECT_EQ(kWebTextInputFlagHaveNextFocusableElement, next_previous_flags);
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          text_area3, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       text_area3, mojom::blink::FocusType::kForward);
   Element* text_area4 = document->getElementById("textarea4");
   Element* content_editable2 = document->getElementById("contenteditable2");
   EXPECT_EQ(next_focus, content_editable2);
@@ -2018,9 +2027,10 @@ TEST_F(
   EXPECT_EQ(content_editable2, document->FocusedElement());
   // No previous element to this <form>less element because there is no other
   // formless element before. Hence focus won't change wrt PREVIOUS.
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          text_area3, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       text_area3, mojom::blink::FocusType::kBackward);
   EXPECT_EQ(next_focus, nullptr);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kBackward);
@@ -2034,9 +2044,10 @@ TEST_F(
       active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
   // No Next element for this element, due to last element outside the form.
   EXPECT_EQ(kWebTextInputFlagHavePreviousFocusableElement, next_previous_flags);
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          button2, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       button2, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next_focus, nullptr);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kForward);
@@ -2044,9 +2055,10 @@ TEST_F(
   // NEXT.
   EXPECT_EQ(button2, document->FocusedElement());
   Element* text_area2 = document->getElementById("textarea2");
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          button2, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       button2, mojom::blink::FocusType::kBackward);
   EXPECT_EQ(next_focus, text_area2);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kBackward);
@@ -2064,16 +2076,18 @@ TEST_F(
   EXPECT_EQ(kWebTextInputFlagHaveNextFocusableElement |
                 kWebTextInputFlagHavePreviousFocusableElement,
             next_previous_flags);
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          content_editable2, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       content_editable2, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next_focus, text_area4);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kForward);
   EXPECT_EQ(text_area4, document->FocusedElement());
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          content_editable2, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       content_editable2, mojom::blink::FocusType::kBackward);
   document->SetFocusedElement(
       content_editable2, FocusParams(SelectionBehaviorOnFocus::kNone,
                                      mojom::blink::FocusType::kNone, nullptr));
@@ -2090,17 +2104,19 @@ TEST_F(
   // No next element for an element outside of a form because it is the last
   // <form>less element.
   EXPECT_EQ(kWebTextInputFlagHavePreviousFocusableElement, next_previous_flags);
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          text_area4, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       text_area4, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next_focus, nullptr);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kForward);
   // No next element. Hence focus won't change wrt NEXT.
   EXPECT_EQ(text_area4, document->FocusedElement());
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          text_area4, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       text_area4, mojom::blink::FocusType::kBackward);
   // The previous element of a formless element is the previous formless
   // element.
   EXPECT_EQ(next_focus, content_editable2);
@@ -2113,7 +2129,7 @@ TEST_F(
 
 TEST_F(
     WebViewTest,
-    MoveFocusToNextFocusableElementForIMEWithNonEditableNonFormControlElements) {
+    MoveFocusToNextFocusableElementForImeAndAutofillWithNonEditableNonFormControlElements) {
   const std::string test_file =
       "advance_focus_in_form_with_key_event_listeners.html";
   RegisterMockedHttpURLLoad(test_file);
@@ -2153,9 +2169,10 @@ TEST_F(
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kForward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kForward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i + 1].element_id);
@@ -2174,9 +2191,10 @@ TEST_F(
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kBackward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kBackward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i - 1].element_id);
@@ -2196,18 +2214,20 @@ TEST_F(
       active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
   // No Next/Previous element for non-form control elements inside form.
   EXPECT_EQ(0, next_previous_flags);
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          anchor2, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       anchor2, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next_focus, nullptr);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kForward);
   // Since anchor is not a form control element, next/previous element will
   // be null, hence focus will stay same as it is.
   EXPECT_EQ(anchor2, document->FocusedElement());
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          anchor2, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       anchor2, mojom::blink::FocusType::kBackward);
   EXPECT_EQ(next_focus, nullptr);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kBackward);
@@ -2216,7 +2236,8 @@ TEST_F(
   web_view_helper_.Reset();
 }
 
-TEST_F(WebViewTest, MoveFocusToNextFocusableElementForIMEWithTabIndexElements) {
+TEST_F(WebViewTest,
+       MoveFocusToNextFocusableElementForImeAndAutofillWithTabIndexElements) {
   const std::string test_file =
       "advance_focus_in_form_with_tabindex_elements.html";
   RegisterMockedHttpURLLoad(test_file);
@@ -2258,9 +2279,10 @@ TEST_F(WebViewTest, MoveFocusToNextFocusableElementForIMEWithTabIndexElements) {
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kForward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kForward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i + 1].element_id);
@@ -2280,9 +2302,10 @@ TEST_F(WebViewTest, MoveFocusToNextFocusableElementForIMEWithTabIndexElements) {
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kBackward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kBackward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i - 1].element_id);
@@ -2299,17 +2322,19 @@ TEST_F(WebViewTest, MoveFocusToNextFocusableElementForIMEWithTabIndexElements) {
   Element* content_editable5 = document->getElementById("contenteditable5");
   content_editable5->Focus();
   Element* input6 = document->getElementById("input6");
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          content_editable5, mojom::blink::FocusType::kForward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       content_editable5, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next_focus, input6);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kForward);
   EXPECT_EQ(input6, document->FocusedElement());
   content_editable5->Focus();
-  next_focus =
-      document->GetPage()->GetFocusController().NextFocusableElementForIME(
-          content_editable5, mojom::blink::FocusType::kBackward);
+  next_focus = document->GetPage()
+                   ->GetFocusController()
+                   .NextFocusableElementForImeAndAutofill(
+                       content_editable5, mojom::blink::FocusType::kBackward);
   EXPECT_EQ(next_focus, text_area6);
   web_view->MainFrameImpl()->GetFrame()->AdvanceFocusForIME(
       mojom::blink::FocusType::kBackward);
@@ -2318,8 +2343,9 @@ TEST_F(WebViewTest, MoveFocusToNextFocusableElementForIMEWithTabIndexElements) {
   web_view_helper_.Reset();
 }
 
-TEST_F(WebViewTest,
-       MoveFocusToNextFocusableElementForIMEWithDisabledAndReadonlyElements) {
+TEST_F(
+    WebViewTest,
+    MoveFocusToNextFocusableElementForImeAndAutofillWithDisabledAndReadonlyElements) {
   const std::string test_file =
       "advance_focus_in_form_with_disabled_and_readonly_elements.html";
   RegisterMockedHttpURLLoad(test_file);
@@ -2352,9 +2378,10 @@ TEST_F(WebViewTest,
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kForward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kForward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i + 1].element_id);
@@ -2374,9 +2401,10 @@ TEST_F(WebViewTest,
     next_previous_flags =
         active_input_method_controller->ComputeWebTextInputNextPreviousFlags();
     EXPECT_EQ(focused_elements[i].next_previous_flags, next_previous_flags);
-    next_focus =
-        document->GetPage()->GetFocusController().NextFocusableElementForIME(
-            current_focus, mojom::blink::FocusType::kBackward);
+    next_focus = document->GetPage()
+                     ->GetFocusController()
+                     .NextFocusableElementForImeAndAutofill(
+                         current_focus, mojom::blink::FocusType::kBackward);
     if (next_focus) {
       EXPECT_EQ(next_focus->GetIdAttribute(),
                 focused_elements[i - 1].element_id);
@@ -2484,24 +2512,27 @@ TEST_F(WebViewTest, BackForwardRestoreScroll) {
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item1->Url(), WebFrameLoadType::kBackForward, item1.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
-      false /* is_synchronously_committed */,
+      /*has_transient_user_activation=*/false, /*initiator_origin=*/nullptr,
+      /*is_synchronously_committed=*/false,
       mojom::blink::TriggeringEventInfo::kNotFromEvent,
-      true /* is_browser_initiated */);
+      /*is_browser_initiated=*/true,
+      /*soft_navigation_heuristics_task_id=*/absl::nullopt);
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item2->Url(), WebFrameLoadType::kBackForward, item2.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
-      false /* is_synchronously_committed */,
+      /*has_transient_user_activation=*/false, /*initiator_origin=*/nullptr,
+      /*is_synchronously_committed=*/false,
       mojom::blink::TriggeringEventInfo::kNotFromEvent,
-      true /* is_browser_initiated */);
+      /*is_browser_initiated=*/true,
+      /*soft_navigation_heuristics_task_id=*/absl::nullopt);
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item1->Url(), WebFrameLoadType::kBackForward, item1.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
-      false /* is_synchronously_committed */,
+      /*has_transient_user_activation=*/false, /*initiator_origin=*/nullptr,
+      /*is_synchronously_committed=*/false,
       mojom::blink::TriggeringEventInfo::kNotFromEvent,
-      true /* is_browser_initiated */);
+      /*is_browser_initiated=*/true,
+      /*soft_navigation_heuristics_task_id=*/absl::nullopt);
   web_view_impl->MainFrameWidget()->UpdateAllLifecyclePhases(
       DocumentUpdateReason::kTest);
 
@@ -2520,18 +2551,20 @@ TEST_F(WebViewTest, BackForwardRestoreScroll) {
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item1->Url(), WebFrameLoadType::kBackForward, item1.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
-      false /* is_synchronously_committed */,
+      /*has_transient_user_activation=*/false, /*initiator_origin=*/nullptr,
+      /*is_synchronously_committed=*/false,
       mojom::blink::TriggeringEventInfo::kNotFromEvent,
-      true /* is_browser_initiated */);
+      /*is_browser_initiated=*/true,
+      /*soft_navigation_heuristics_task_id=*/absl::nullopt);
 
   main_frame_local->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
       item3->Url(), WebFrameLoadType::kBackForward, item3.Get(),
       ClientRedirectPolicy::kNotClientRedirect,
-      false /* has_transient_user_activation */, nullptr /* initiator_origin */,
-      false /* is_synchronously_committed */,
+      /*has_transient_user_activation=*/false, /*initiator_origin=*/nullptr,
+      /*is_synchronously_committed=*/false,
       mojom::blink::TriggeringEventInfo::kNotFromEvent,
-      true /* is_browser_initiated */);
+      /*is_browser_initiated=*/true,
+      /*soft_navigation_heuristics_task_id=*/absl::nullopt);
   // The scroll offset is only applied via invoking the anchor via the main
   // lifecycle, or a forced layout.
   // TODO(chrishtr): At the moment, WebLocalFrameImpl::GetScrollOffset() does
@@ -2596,6 +2629,39 @@ TEST_F(WebViewTest, FullscreenBackgroundColor) {
   EXPECT_EQ(SK_ColorYELLOW, web_view_impl->BackgroundColor());
 }
 
+static void ExitFullscreen(Document& document) {
+  Fullscreen::FullyExitFullscreen(document);
+  Fullscreen::DidExitFullscreen(document);
+  EXPECT_EQ(Fullscreen::FullscreenElementFrom(document), nullptr);
+}
+
+// Tests that the removal from the top layer is scheduled.
+TEST_F(WebViewTest, FullscreenRemovalTiming) {
+  RegisterMockedHttpURLLoad("fullscreen_style.html");
+  WebViewImpl* web_view_impl =
+      web_view_helper_.InitializeAndLoad(base_url_ + "fullscreen_style.html");
+  web_view_impl->MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  UpdateAllLifecyclePhases();
+
+  // Enter fullscreen.
+  LocalFrame* frame = web_view_impl->MainFrameImpl()->GetFrame();
+  Document* document = frame->GetDocument();
+  ASSERT_TRUE(document);
+  Element* element = document->getElementById("fullscreenElement");
+  ASSERT_TRUE(element);
+  LocalFrame::NotifyUserActivation(
+      frame, mojom::UserActivationNotificationType::kTest);
+  Fullscreen::RequestFullscreen(*element);
+  web_view_impl->DidEnterFullscreen();
+  UpdateAllLifecyclePhases();
+  EXPECT_TRUE(element->IsInTopLayer());
+
+  ExitFullscreen(*document);
+  EXPECT_TRUE(element->IsInTopLayer());
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(element->IsInTopLayer());
+}
+
 class PrintWebFrameClient : public frame_test_helpers::TestWebFrameClient {
  public:
   PrintWebFrameClient() = default;
@@ -2624,10 +2690,9 @@ TEST_F(WebViewTest, PrintWithXHRInFlight) {
 
 static void DragAndDropURL(WebViewImpl* web_view, const std::string& url) {
   WebDragData drag_data;
-  WebDragData::Item item;
-  item.storage_type = WebDragData::Item::kStorageTypeString;
-  item.string_type = "text/uri-list";
-  item.string_data = WebString::FromUTF8(url);
+  WebDragData::StringItem item;
+  item.type = "text/uri-list";
+  item.data = WebString::FromUTF8(url);
   drag_data.AddItem(item);
 
   const gfx::PointF client_point;
@@ -3081,6 +3146,7 @@ TEST_F(WebViewTest, ContextMenuAndDragOnImageLongPress) {
       base_url_ + "long_press_links_and_images.html");
 
   web_view->SettingsImpl()->SetTouchDragDropEnabled(true);
+  web_view->SettingsImpl()->SetModalContextMenu(false);
   web_view->MainFrameViewWidget()->Resize(gfx::Size(500, 300));
   UpdateAllLifecyclePhases();
   RunPendingTasks();
@@ -3109,6 +3175,7 @@ TEST_F(WebViewTest, ContextMenuAndDragOnLinkLongPress) {
       base_url_ + "long_press_links_and_images.html");
 
   web_view->SettingsImpl()->SetTouchDragDropEnabled(true);
+  web_view->SettingsImpl()->SetModalContextMenu(false);
   web_view->MainFrameViewWidget()->Resize(gfx::Size(500, 300));
   UpdateAllLifecyclePhases();
   RunPendingTasks();
@@ -3506,7 +3573,7 @@ class MiddleClickAutoscrollWebFrameWidget
 class MiddleClickWebViewTest : public WebViewTest {
  public:
   MiddleClickWebViewTest()
-      : WebViewTest(base::BindRepeating(
+      : WebViewTest(WTF::BindRepeating(
             &frame_test_helpers::WebViewHelper::CreateTestWebFrameWidget<
                 MiddleClickAutoscrollWebFrameWidget>)) {}
 };
@@ -4090,6 +4157,7 @@ class CreateChildCounterFrameClient
       const WebFrameOwnerProperties&,
       FrameOwnerElementType,
       WebPolicyContainerBindParams policy_container_bind_params,
+      ukm::SourceId document_ukm_source_id,
       base::FunctionRef<void(WebLocalFrame*, const DocumentToken&)>
           complete_initialization) override;
 
@@ -4107,13 +4175,14 @@ WebLocalFrame* CreateChildCounterFrameClient::CreateChildFrame(
     const WebFrameOwnerProperties& frame_owner_properties,
     FrameOwnerElementType frame_owner_element_type,
     WebPolicyContainerBindParams policy_container_bind_params,
+    ukm::SourceId document_ukm_source_id,
     base::FunctionRef<void(WebLocalFrame*, const DocumentToken&)>
         complete_initialization) {
   ++count_;
   return TestWebFrameClient::CreateChildFrame(
       scope, name, fallback_name, frame_policy, frame_owner_properties,
       frame_owner_element_type, std::move(policy_container_bind_params),
-      complete_initialization);
+      document_ukm_source_id, complete_initialization);
 }
 
 TEST_F(WebViewTest, ChangeDisplayMode) {
@@ -4270,7 +4339,7 @@ class TouchEventConsumersWebFrameWidget
 class TouchEventConsumersWebViewTest : public WebViewTest {
  public:
   TouchEventConsumersWebViewTest()
-      : WebViewTest(base::BindRepeating(
+      : WebViewTest(WTF::BindRepeating(
             &frame_test_helpers::WebViewHelper::CreateTestWebFrameWidget<
                 TouchEventConsumersWebFrameWidget>)) {}
 };
@@ -4733,11 +4802,7 @@ TEST_F(WebViewTest, PreferredSizeWithGrid) {
                                      base_url);
 
   gfx::Size size = web_view->ContentsPreferredMinimumSize();
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    EXPECT_EQ(0, size.width());
-  else
-    EXPECT_EQ(100, size.width());
-
+  EXPECT_EQ(0, size.width());
   EXPECT_EQ(100, size.height());
 }
 
@@ -5176,22 +5241,22 @@ TEST_F(WebViewTest, ForceAndResetViewport) {
   SetViewportSize(gfx::Size(100, 150));
   DevToolsEmulator* dev_tools_emulator = web_view_impl->GetDevToolsEmulator();
 
-  TransformationMatrix expected_matrix;
+  gfx::Transform expected_matrix;
   expected_matrix.MakeIdentity();
   EXPECT_EQ(expected_matrix, web_view_impl->GetDeviceEmulationTransform());
 
   // Override applies transform, sets visible rect, and disables
   // visual viewport clipping.
-  TransformationMatrix matrix =
+  gfx::Transform matrix =
       dev_tools_emulator->ForceViewportForTesting(gfx::PointF(50, 55), 2.f);
-  expected_matrix = TransformationMatrix::MakeScale(2.f);
+  expected_matrix = gfx::Transform::MakeScale(2.f);
   expected_matrix.Translate(-50, -55);
   EXPECT_EQ(expected_matrix, matrix);
 
   // Setting new override discards previous one.
   matrix = dev_tools_emulator->ForceViewportForTesting(gfx::PointF(5.4f, 10.5f),
                                                        1.5f);
-  expected_matrix = TransformationMatrix::MakeScale(1.5f);
+  expected_matrix = gfx::Transform::MakeScale(1.5f);
   expected_matrix.Translate(-5.4f, -10.5f);
   EXPECT_EQ(expected_matrix, matrix);
 
@@ -5208,21 +5273,21 @@ TEST_F(WebViewTest, ViewportOverrideIntegratesDeviceMetricsOffsetAndScale) {
       web_view_helper_.InitializeAndLoad(base_url_ + "200-by-300.html");
   web_view_impl->MainFrameViewWidget()->Resize(gfx::Size(100, 150));
 
-  TransformationMatrix expected_matrix;
+  gfx::Transform expected_matrix;
   expected_matrix.MakeIdentity();
   EXPECT_EQ(expected_matrix, web_view_impl->GetDeviceEmulationTransform());
 
   DeviceEmulationParams emulation_params;
   emulation_params.scale = 2.f;
   web_view_impl->EnableDeviceEmulation(emulation_params);
-  expected_matrix = TransformationMatrix::MakeScale(2.f);
+  expected_matrix = gfx::Transform::MakeScale(2.f);
   EXPECT_EQ(expected_matrix, web_view_impl->GetDeviceEmulationTransform());
 
   // Device metrics offset and scale are applied before viewport override.
   emulation_params.viewport_offset = gfx::PointF(5, 10);
   emulation_params.viewport_scale = 1.5f;
   web_view_impl->EnableDeviceEmulation(emulation_params);
-  expected_matrix = TransformationMatrix::MakeScale(1.5f);
+  expected_matrix = gfx::Transform::MakeScale(1.5f);
   expected_matrix.Translate(-5, -10);
   expected_matrix.Scale(2.f);
   EXPECT_EQ(expected_matrix, web_view_impl->GetDeviceEmulationTransform());
@@ -5237,7 +5302,7 @@ TEST_F(WebViewTest, ViewportOverrideAdaptsToScaleAndScroll) {
   LocalFrameView* frame_view =
       web_view_impl->MainFrameImpl()->GetFrame()->View();
 
-  TransformationMatrix expected_matrix;
+  gfx::Transform expected_matrix;
   expected_matrix.MakeIdentity();
   EXPECT_EQ(expected_matrix, web_view_impl->GetDeviceEmulationTransform());
 
@@ -5252,7 +5317,7 @@ TEST_F(WebViewTest, ViewportOverrideAdaptsToScaleAndScroll) {
   emulation_params.viewport_offset = gfx::PointF(50, 55);
   emulation_params.viewport_scale = 2.f;
   web_view_impl->EnableDeviceEmulation(emulation_params);
-  expected_matrix = TransformationMatrix::MakeScale(2.f);
+  expected_matrix = gfx::Transform::MakeScale(2.f);
   expected_matrix.Translate(-50, -55);
   expected_matrix.Translate(100, 150);
   expected_matrix.Scale(1. / 1.5f);
@@ -5262,7 +5327,7 @@ TEST_F(WebViewTest, ViewportOverrideAdaptsToScaleAndScroll) {
   frame_view->LayoutViewport()->SetScrollOffset(
       ScrollOffset(50, 55), mojom::blink::ScrollType::kProgrammatic,
       mojom::blink::ScrollBehavior::kInstant);
-  expected_matrix = TransformationMatrix::MakeScale(2.f);
+  expected_matrix = gfx::Transform::MakeScale(2.f);
   expected_matrix.Translate(-50, -55);
   expected_matrix.Translate(50, 55);
   expected_matrix.Scale(1. / 1.5f);
@@ -5270,7 +5335,7 @@ TEST_F(WebViewTest, ViewportOverrideAdaptsToScaleAndScroll) {
 
   // Transform adapts to page scale changes.
   web_view_impl->SetPageScaleFactor(2.f);
-  expected_matrix = TransformationMatrix::MakeScale(2.f);
+  expected_matrix = gfx::Transform::MakeScale(2.f);
   expected_matrix.Translate(-50, -55);
   expected_matrix.Translate(50, 55);
   expected_matrix.Scale(1. / 2.f);
@@ -5394,8 +5459,6 @@ TEST_F(WebViewTest, ViewportUnitsPrintingWithPageZoom) {
 }
 
 TEST_F(WebViewTest, ResizeWithFixedPosCrash) {
-  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
-    return;
   ScopedLayoutNGPrintingForTest ng_printing_enabled(true);
   WebViewImpl* web_view = web_view_helper_.Initialize();
   WebURL base_url = url_test_helpers::ToKURL("http://example.com/");

@@ -46,6 +46,7 @@ AVFILTEROBJS-$(CONFIG_GBLUR_FILTER)      += vf_gblur.o
 AVFILTEROBJS-$(CONFIG_HFLIP_FILTER)      += vf_hflip.o
 AVFILTEROBJS-$(CONFIG_THRESHOLD_FILTER)  += vf_threshold.o
 AVFILTEROBJS-$(CONFIG_NLMEANS_FILTER)    += vf_nlmeans.o
+AVFILTEROBJS-$(CONFIG_SOBEL_FILTER)      += vf_convolution.o
 
 CHECKASMOBJS-$(CONFIG_AVFILTER) += $(AVFILTEROBJS-yes)
 
@@ -63,6 +64,7 @@ CHECKASMOBJS-$(CONFIG_AVUTIL)  += $(AVUTILOBJS)
 
 CHECKASMOBJS-$(ARCH_AARCH64)            += aarch64/checkasm.o
 CHECKASMOBJS-$(HAVE_ARMV5TE_EXTERNAL)   += arm/checkasm.o
+CHECKASMOBJS-$(ARCH_RISCV)              += riscv/checkasm.o
 CHECKASMOBJS-$(HAVE_X86ASM)             += x86/checkasm.o
 
 CHECKASMOBJS += $(CHECKASMOBJS-yes) checkasm.o

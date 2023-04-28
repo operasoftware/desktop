@@ -10,11 +10,11 @@
 namespace blink {
 
 namespace {
-constexpr char kOtpCredentialType2[] = "otp";
+constexpr char kOtpCredentialType[] = "otp";
 }
 
 OTPCredential::OTPCredential(const String& code)
-    : Credential(String(), kOtpCredentialType2), code_(code) {}
+    : Credential(String(), kOtpCredentialType), code_(code) {}
 
 bool OTPCredential::IsOTPCredential() const {
   return true;

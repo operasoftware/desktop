@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_TEST_FAKE_FRAME_SCHEDULER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_TEST_FAKE_FRAME_SCHEDULER_H_
 
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_task_queue.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
@@ -162,10 +163,19 @@ class FakeFrameScheduler : public FrameSchedulerImpl {
       bool is_web_history_inert_commit,
       FrameScheduler::NavigationType navigation_type) override {}
   void OnFirstMeaningfulPaint() override {}
-  void OnStartedUsingFeature(SchedulingPolicy::Feature feature,
-                             const SchedulingPolicy& policy) override {}
-  void OnStoppedUsingFeature(SchedulingPolicy::Feature feature,
-                             const SchedulingPolicy& policy) override {}
+  // |source_location| is nullptr when JS is not running.
+  // |handle| is nullptr when sticky feature starts to be used.
+  void OnStartedUsingNonStickyFeature(
+      SchedulingPolicy::Feature feature,
+      const SchedulingPolicy& policy,
+      std::unique_ptr<SourceLocation> source_location,
+      SchedulingAffectingFeatureHandle* handle) override {}
+  void OnStartedUsingStickyFeature(
+      SchedulingPolicy::Feature feature,
+      const SchedulingPolicy& policy,
+      std::unique_ptr<SourceLocation> source_location) override {}
+  void OnStoppedUsingNonStickyFeature(
+      SchedulingAffectingFeatureHandle* handle) override {}
   bool IsExemptFromBudgetBasedThrottling() const override {
     return is_exempt_from_throttling_;
   }

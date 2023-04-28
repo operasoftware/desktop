@@ -81,7 +81,7 @@ static av_cold void init_uni_ac_vlc(const uint8_t huff_size_ac[256],
 static void mjpeg_encode_picture_header(MpegEncContext *s)
 {
     ff_mjpeg_encode_picture_header(s->avctx, &s->pb, s->picture->f, s->mjpeg_ctx,
-                                   &s->intra_scantable, 0,
+                                   s->intra_scantable.permutated, 0,
                                    s->intra_matrix, s->chroma_intra_matrix,
                                    s->slice_context_count > 1);
 
@@ -651,7 +651,8 @@ const FFCodec ff_mjpeg_encoder = {
     .init           = ff_mpv_encode_init,
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close          = mjpeg_encode_close,
-    .p.capabilities = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+    .p.capabilities = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_ICC_PROFILES,
     .p.pix_fmts     = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ444P,
@@ -685,5 +686,6 @@ const FFCodec ff_amv_encoder = {
         AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_NONE
     },
     .p.priv_class   = &amv_class,
+    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
 };
 #endif

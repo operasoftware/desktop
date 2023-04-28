@@ -66,14 +66,16 @@ DocumentInit::DocumentInit(const DocumentInit&) = default;
 
 DocumentInit::~DocumentInit() = default;
 
-DocumentInit& DocumentInit::ForTest(ExecutionContext* execution_context) {
+DocumentInit& DocumentInit::ForTest(ExecutionContext& execution_context) {
   DCHECK(!execution_context_);
   DCHECK(!window_);
+  DCHECK(!agent_);
 #if DCHECK_IS_ON()
   DCHECK(!for_test_);
   for_test_ = true;
 #endif
-  execution_context_ = execution_context;
+  execution_context_ = &execution_context;
+  agent_ = execution_context.GetAgent();
   return *this;
 }
 
@@ -86,8 +88,9 @@ bool DocumentInit::IsSrcdocDocument() const {
 }
 
 const KURL& DocumentInit::FallbackSrcdocBaseURL() const {
-  DCHECK(window_ && !window_->GetFrame()->IsMainFrame() ||
-         fallback_srcdoc_base_url_.IsEmpty());
+  // The following DCHECK will need to change when we also use the fallback base
+  // url for about:blank. https://crbug.com/1356658.
+  DCHECK(IsSrcdocDocument() || fallback_srcdoc_base_url_.IsEmpty());
   return fallback_srcdoc_base_url_;
 }
 
@@ -95,14 +98,30 @@ DocumentInit& DocumentInit::WithWindow(LocalDOMWindow* window,
                                        Document* owner_document) {
   DCHECK(!window_);
   DCHECK(!execution_context_);
+  DCHECK(!agent_);
 #if DCHECK_IS_ON()
   DCHECK(!for_test_);
 #endif
   DCHECK(window);
   window_ = window;
   execution_context_ = window;
+  agent_ = window->GetAgent();
   owner_document_ = owner_document;
   return *this;
+}
+
+DocumentInit& DocumentInit::WithAgent(Agent& agent) {
+  DCHECK(!agent_);
+#if DCHECK_IS_ON()
+  DCHECK(!for_test_);
+#endif
+  agent_ = &agent;
+  return *this;
+}
+
+Agent& DocumentInit::GetAgent() const {
+  DCHECK(agent_);
+  return *agent_;
 }
 
 DocumentInit& DocumentInit::WithToken(const DocumentToken& token) {
@@ -206,6 +225,7 @@ DocumentInit& DocumentInit::WithExecutionContext(
     ExecutionContext* execution_context) {
   DCHECK(!execution_context_);
   DCHECK(!window_);
+  DCHECK(!agent_);
 #if DCHECK_IS_ON()
   DCHECK(!for_test_);
 #endif
@@ -216,6 +236,11 @@ DocumentInit& DocumentInit::WithExecutionContext(
 DocumentInit& DocumentInit::WithURL(const KURL& url) {
   DCHECK(url_.IsNull());
   url_ = url;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithBaseUrlOverride(const KURL& base_url_override) {
+  base_url_override_ = base_url_override;
   return *this;
 }
 
@@ -257,12 +282,6 @@ DocumentInit& DocumentInit::WithFallbackSrcdocBaseURL(
   return *this;
 }
 
-DocumentInit& DocumentInit::WithWebBundleClaimedUrl(
-    const KURL& web_bundle_claimed_url) {
-  web_bundle_claimed_url_ = web_bundle_claimed_url;
-  return *this;
-}
-
 DocumentInit& DocumentInit::WithUkmSourceId(ukm::SourceId ukm_source_id) {
   ukm_source_id_ = ukm_source_id;
   return *this;
@@ -270,7 +289,8 @@ DocumentInit& DocumentInit::WithUkmSourceId(ukm::SourceId ukm_source_id) {
 
 Document* DocumentInit::CreateDocument() const {
 #if DCHECK_IS_ON()
-  DCHECK(execution_context_ || for_test_);
+  DCHECK(execution_context_);
+  DCHECK(agent_);
 #endif
   switch (type_) {
     case Type::kHTML:

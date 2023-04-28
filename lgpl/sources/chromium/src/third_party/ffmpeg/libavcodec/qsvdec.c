@@ -41,6 +41,7 @@
 #include "libavutil/time.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/film_grain_params.h"
+#include "libavutil/mastering_display_metadata.h"
 
 #include "avcodec.h"
 #include "codec_internal.h"
@@ -127,7 +128,9 @@ static int qsv_get_continuous_buffer(AVCodecContext *avctx, AVFrame *frame,
 {
     int ret = 0;
 
-    ff_decode_frame_props(avctx, frame);
+    ret = ff_decode_frame_props(avctx, frame);
+    if (ret < 0)
+        return ret;
 
     frame->width       = avctx->width;
     frame->height      = avctx->height;
@@ -137,12 +140,18 @@ static int qsv_get_continuous_buffer(AVCodecContext *avctx, AVFrame *frame,
         frame->linesize[0] = FFALIGN(avctx->width, 128);
         break;
     case AV_PIX_FMT_P010:
+    case AV_PIX_FMT_P012:
     case AV_PIX_FMT_YUYV422:
         frame->linesize[0] = 2 * FFALIGN(avctx->width, 128);
         break;
     case AV_PIX_FMT_Y210:
     case AV_PIX_FMT_VUYX:
+    case AV_PIX_FMT_XV30:
+    case AV_PIX_FMT_Y212:
         frame->linesize[0] = 4 * FFALIGN(avctx->width, 128);
+        break;
+    case AV_PIX_FMT_XV36:
+        frame->linesize[0] = 8 * FFALIGN(avctx->width, 128);
         break;
     default:
         av_log(avctx, AV_LOG_ERROR, "Unsupported pixel format.\n");
@@ -155,7 +164,8 @@ static int qsv_get_continuous_buffer(AVCodecContext *avctx, AVFrame *frame,
 
     frame->data[0] = frame->buf[0]->data;
     if (avctx->pix_fmt == AV_PIX_FMT_NV12 ||
-        avctx->pix_fmt == AV_PIX_FMT_P010) {
+        avctx->pix_fmt == AV_PIX_FMT_P010 ||
+        avctx->pix_fmt == AV_PIX_FMT_P012) {
         frame->linesize[1] = frame->linesize[0];
         frame->data[1] = frame->data[0] +
             frame->linesize[0] * FFALIGN(avctx->height, 64);
@@ -485,6 +495,22 @@ static int alloc_frame(AVCodecContext *avctx, QSVContext *q, QSVFrame *frame)
     }
 #endif
 
+#if QSV_VERSION_ATLEAST(1, 35)
+    if (QSV_RUNTIME_VERSION_ATLEAST(q->ver, 1, 35) && avctx->codec_id == AV_CODEC_ID_HEVC) {
+        frame->mdcv.Header.BufferId = MFX_EXTBUFF_MASTERING_DISPLAY_COLOUR_VOLUME;
+        frame->mdcv.Header.BufferSz = sizeof(frame->mdcv);
+        // The data in mdcv is valid when this flag is 1
+        frame->mdcv.InsertPayloadToggle = 0;
+        ff_qsv_frame_add_ext_param(avctx, frame, (mfxExtBuffer *)&frame->mdcv);
+
+        frame->clli.Header.BufferId = MFX_EXTBUFF_CONTENT_LIGHT_LEVEL_INFO;
+        frame->clli.Header.BufferSz = sizeof(frame->clli);
+        // The data in clli is valid when this flag is 1
+        frame->clli.InsertPayloadToggle = 0;
+        ff_qsv_frame_add_ext_param(avctx, frame, (mfxExtBuffer *)&frame->clli);
+    }
+#endif
+
     frame->used = 1;
 
     return 0;
@@ -621,6 +647,53 @@ static int qsv_export_film_grain(AVCodecContext *avctx, mfxExtAV1FilmGrainParam 
 }
 #endif
 
+#if QSV_VERSION_ATLEAST(1, 35)
+static int qsv_export_hdr_side_data(AVCodecContext *avctx, mfxExtMasteringDisplayColourVolume *mdcv,
+                                    mfxExtContentLightLevelInfo *clli, AVFrame *frame)
+{
+    // The SDK re-uses this flag for HDR SEI parsing
+    if (mdcv->InsertPayloadToggle) {
+        AVMasteringDisplayMetadata *mastering = av_mastering_display_metadata_create_side_data(frame);
+        const int mapping[3] = {2, 0, 1};
+        const int chroma_den = 50000;
+        const int luma_den = 10000;
+        int i;
+
+        if (!mastering)
+            return AVERROR(ENOMEM);
+
+        for (i = 0; i < 3; i++) {
+            const int j = mapping[i];
+            mastering->display_primaries[i][0] = av_make_q(mdcv->DisplayPrimariesX[j], chroma_den);
+            mastering->display_primaries[i][1] = av_make_q(mdcv->DisplayPrimariesY[j], chroma_den);
+        }
+
+        mastering->white_point[0] = av_make_q(mdcv->WhitePointX, chroma_den);
+        mastering->white_point[1] = av_make_q(mdcv->WhitePointY, chroma_den);
+
+        mastering->max_luminance = av_make_q(mdcv->MaxDisplayMasteringLuminance, luma_den);
+        mastering->min_luminance = av_make_q(mdcv->MinDisplayMasteringLuminance, luma_den);
+
+        mastering->has_luminance = 1;
+        mastering->has_primaries = 1;
+    }
+
+    // The SDK re-uses this flag for HDR SEI parsing
+    if (clli->InsertPayloadToggle) {
+        AVContentLightMetadata *light = av_content_light_metadata_create_side_data(frame);
+
+        if (!light)
+            return AVERROR(ENOMEM);
+
+        light->MaxCLL  = clli->MaxContentLightLevel;
+        light->MaxFALL = clli->MaxPicAverageLightLevel;
+    }
+
+    return 0;
+}
+
+#endif
+
 static int qsv_decode(AVCodecContext *avctx, QSVContext *q,
                       AVFrame *frame, int *got_frame,
                       const AVPacket *avpkt)
@@ -736,6 +809,15 @@ static int qsv_decode(AVCodecContext *avctx, QSVContext *q,
             QSV_RUNTIME_VERSION_ATLEAST(q->ver, 1, 34) &&
             avctx->codec_id == AV_CODEC_ID_AV1) {
             ret = qsv_export_film_grain(avctx, &aframe.frame->av1_film_grain_param, frame);
+
+            if (ret < 0)
+                return ret;
+        }
+#endif
+
+#if QSV_VERSION_ATLEAST(1, 35)
+        if (QSV_RUNTIME_VERSION_ATLEAST(q->ver, 1, 35) && avctx->codec_id == AV_CODEC_ID_HEVC) {
+            ret = qsv_export_hdr_side_data(avctx, &aframe.frame->mdcv, &aframe.frame->clli, frame);
 
             if (ret < 0)
                 return ret;
@@ -1040,9 +1122,13 @@ const FFCodec ff_##x##_qsv_decoder = { \
     .p.priv_class   = &x##_qsv_class, \
     .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_NV12, \
                                                     AV_PIX_FMT_P010, \
+                                                    AV_PIX_FMT_P012, \
                                                     AV_PIX_FMT_YUYV422, \
                                                     AV_PIX_FMT_Y210, \
+                                                    AV_PIX_FMT_Y212, \
                                                     AV_PIX_FMT_VUYX, \
+                                                    AV_PIX_FMT_XV30, \
+                                                    AV_PIX_FMT_XV36, \
                                                     AV_PIX_FMT_QSV, \
                                                     AV_PIX_FMT_NONE }, \
     .hw_configs     = qsv_hw_configs, \

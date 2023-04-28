@@ -115,7 +115,7 @@ class Internals final : public ScriptWrappable {
 
   bool doesWindowHaveUrlFragment(DOMWindow*);
 
-  CSSStyleDeclaration* computedStyleIncludingVisitedInfo(Node*) const;
+  CSSStyleDeclaration* computedStyleIncludingVisitedInfo(Element*) const;
 
   void setBrowserControlsState(float top_height,
                                float bottom_height,
@@ -241,7 +241,6 @@ class Internals final : public ScriptWrappable {
   String suggestedValue(Element*, ExceptionState&);
   void setSuggestedValue(Element*, const String&, ExceptionState&);
   void setAutofilledValue(Element*, const String&, ExceptionState&);
-  void setEditingValue(Element* input_element, const String&, ExceptionState&);
   void setAutofilled(Element*, bool enabled, ExceptionState&);
   void setSelectionRangeForNumberType(Element* input_element,
                                       uint32_t start,
@@ -279,6 +278,12 @@ class Internals final : public ScriptWrappable {
                                                int height,
                                                Document*,
                                                ExceptionState&);
+  Node* touchNodeAdjustedToBestStylusWritableNode(int x,
+                                                  int y,
+                                                  int width,
+                                                  int height,
+                                                  Document*,
+                                                  ExceptionState&);
 
   int lastSpellCheckRequestSequence(Document*, ExceptionState&);
   int lastSpellCheckProcessedSequence(Document*, ExceptionState&);
@@ -589,10 +594,6 @@ class Internals final : public ScriptWrappable {
   Vector<String> supportedTextEncodingLabels() const;
 
   void simulateRasterUnderInvalidations(bool enable);
-
-  // The number of calls to update the blink lifecycle (see:
-  // LocalFrameView::UpdateLifecyclePhasesInternal).
-  unsigned LifecycleUpdateCount() const;
 
   void DisableIntersectionObserverThrottleDelay() const;
   bool isSiteIsolated(HTMLIFrameElement* iframe) const;

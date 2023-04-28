@@ -54,7 +54,6 @@
 #include "third_party/blink/renderer/core/highlight/highlight_registry.h"
 #include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
-#include "third_party/blink/renderer/core/layout/deferred_shaping_controller.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
@@ -1414,19 +1413,21 @@ void Range::FixupRemovedChildrenAcrossShadowBoundary(ContainerNode& container) {
   BoundaryShadowNodeChildrenWillBeRemoved(end_, container);
 }
 
-static inline void BoundaryNodeWillBeRemoved(RangeBoundaryPoint& boundary,
+// Returns true if `boundary` was modified.
+static inline bool BoundaryNodeWillBeRemoved(RangeBoundaryPoint& boundary,
                                              Node& node_to_be_removed) {
   if (boundary.ChildBefore() == node_to_be_removed) {
     boundary.ChildBeforeWillBeRemoved();
-    return;
+    return true;
   }
 
   for (Node* n = &boundary.Container(); n; n = n->parentNode()) {
     if (n == node_to_be_removed) {
       boundary.SetToBeforeChild(node_to_be_removed);
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 static inline void BoundaryShadowNodeWillBeRemoved(RangeBoundaryPoint& boundary,
@@ -1450,8 +1451,14 @@ void Range::NodeWillBeRemoved(Node& node) {
   // should change following if-statement to DCHECK(!node->parentNode).
   if (!node.parentNode())
     return;
-  BoundaryNodeWillBeRemoved(start_, node);
-  BoundaryNodeWillBeRemoved(end_, node);
+  const bool is_collapsed = collapsed();
+  const bool start_updated = BoundaryNodeWillBeRemoved(start_, node);
+  if (is_collapsed) {
+    if (start_updated)
+      end_ = start_;
+  } else {
+    BoundaryNodeWillBeRemoved(end_, node);
+  }
 }
 
 void Range::FixupRemovedNodeAcrossShadowBoundary(Node& node) {
@@ -1593,10 +1600,6 @@ void Range::expand(const String& unit, ExceptionState& exception_state) {
 }
 
 DOMRectList* Range::getClientRects() const {
-  if (owner_document_->View()) {
-    DeferredShapingController::From(*owner_document_)
-        ->ReshapeAllDeferred(ReshapeReason::kGeometryApi);
-  }
   DisplayLockUtilities::ScopedForcedUpdate force_locks(
       this, DisplayLockContext::ForcedPhase::kLayout);
   owner_document_->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
@@ -1720,10 +1723,6 @@ void Range::GetBorderAndTextQuads(Vector<gfx::QuadF>& quads) const {
 }
 
 gfx::RectF Range::BoundingRect() const {
-  if (owner_document_->View()) {
-    DeferredShapingController::From(*owner_document_)
-        ->ReshapeAllDeferred(ReshapeReason::kGeometryApi);
-  }
   absl::optional<DisplayLockUtilities::ScopedForcedUpdate> force_locks;
   if (!collapsed()) {
     force_locks = DisplayLockUtilities::ScopedForcedUpdate(

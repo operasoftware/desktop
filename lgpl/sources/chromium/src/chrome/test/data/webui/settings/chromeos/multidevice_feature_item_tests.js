@@ -6,7 +6,7 @@ import {MultiDeviceFeature, MultiDeviceFeatureState, Router, routes} from 'chrom
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 
-import {assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 suite('Multidevice', function() {
   /** @type {?SettingsMultideviceFeatureItemElement} */
@@ -47,10 +47,9 @@ suite('Multidevice', function() {
     element.click();
     flush();
     assertEquals(
-        shouldRouteAway,
-        initialRoute !== Router.getInstance().getCurrentRoute());
+        shouldRouteAway, initialRoute !== Router.getInstance().currentRoute);
     Router.getInstance().navigateTo(initialRoute);
-    assertEquals(initialRoute, Router.getInstance().getCurrentRoute());
+    assertEquals(initialRoute, Router.getInstance().currentRoute);
   }
 
   setup(function() {

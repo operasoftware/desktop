@@ -80,7 +80,6 @@ class MutationObserverAgentData
   void Trace(Visitor* visitor) const override {
     Supplement<Agent>::Trace(visitor);
     visitor->Trace(active_mutation_observers_);
-    visitor->Trace(suspended_mutation_observers_);
     visitor->Trace(active_slot_change_list_);
   }
 
@@ -135,7 +134,6 @@ class MutationObserverAgentData
  private:
   // For MutationObserver.
   MutationObserverSet active_mutation_observers_;
-  MutationObserverSet suspended_mutation_observers_;
   SlotChangeList active_slot_change_list_;
 };
 
@@ -305,13 +303,13 @@ void MutationObserver::ObservationEnded(
 // static
 void MutationObserver::EnqueueSlotChange(HTMLSlotElement& slot) {
   DCHECK(IsMainThread());
-  MutationObserverAgentData::From(*slot.GetDocument().GetAgent())
+  MutationObserverAgentData::From(slot.GetDocument().GetAgent())
       .EnqueueSlotChange(slot);
 }
 
 // static
 void MutationObserver::CleanSlotChangeList(Document& document) {
-  MutationObserverAgentData::From(*document.GetAgent())
+  MutationObserverAgentData::From(document.GetAgent())
       .CleanSlotChangeList(document);
 }
 

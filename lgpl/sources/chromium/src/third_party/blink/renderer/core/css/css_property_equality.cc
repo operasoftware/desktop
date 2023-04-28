@@ -24,26 +24,32 @@ bool FillLayersEqual(const FillLayer& a_layers, const FillLayer& b_layers) {
     switch (property) {
       case CSSPropertyID::kBackgroundPositionX:
       case CSSPropertyID::kWebkitMaskPositionX:
-        if (a_layer->PositionX() != b_layer->PositionX())
+        if (a_layer->PositionX() != b_layer->PositionX()) {
           return false;
-        if (a_layer->BackgroundXOrigin() != b_layer->BackgroundXOrigin())
+        }
+        if (a_layer->BackgroundXOrigin() != b_layer->BackgroundXOrigin()) {
           return false;
+        }
         break;
       case CSSPropertyID::kBackgroundPositionY:
       case CSSPropertyID::kWebkitMaskPositionY:
-        if (a_layer->PositionY() != b_layer->PositionY())
+        if (a_layer->PositionY() != b_layer->PositionY()) {
           return false;
-        if (a_layer->BackgroundYOrigin() != b_layer->BackgroundYOrigin())
+        }
+        if (a_layer->BackgroundYOrigin() != b_layer->BackgroundYOrigin()) {
           return false;
+        }
         break;
       case CSSPropertyID::kBackgroundSize:
       case CSSPropertyID::kWebkitMaskSize:
-        if (!(a_layer->SizeLength() == b_layer->SizeLength()))
+        if (!(a_layer->SizeLength() == b_layer->SizeLength())) {
           return false;
+        }
         break;
       case CSSPropertyID::kBackgroundImage:
-        if (!base::ValuesEquivalent(a_layer->GetImage(), b_layer->GetImage()))
+        if (!base::ValuesEquivalent(a_layer->GetImage(), b_layer->GetImage())) {
           return false;
+        }
         break;
       default:
         NOTREACHED();
@@ -138,7 +144,7 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
     case CSSPropertyID::kClip:
       return a.Clip() == b.Clip();
     case CSSPropertyID::kColor:
-      return a.GetColor() == b.GetColor() &&
+      return a.Color() == b.Color() &&
              a.InternalVisitedColor() == b.InternalVisitedColor();
     case CSSPropertyID::kFill:
       return a.FillPaint().EqualTypeOrColor(b.FillPaint()) &&
@@ -168,6 +174,8 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
       return a.FontSizeAdjust() == b.FontSizeAdjust();
     case CSSPropertyID::kFontStretch:
       return a.GetFontStretch() == b.GetFontStretch();
+    case CSSPropertyID::kFontStyle:
+      return a.GetFontStyle() == b.GetFontStyle();
     case CSSPropertyID::kFontVariationSettings:
       return base::ValuesEquivalent(a.GetFontDescription().VariationSettings(),
                                     b.GetFontDescription().VariationSettings());
@@ -280,6 +288,8 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
       return base::ValuesEquivalent(a.TextShadow(), b.TextShadow());
     case CSSPropertyID::kTextSizeAdjust:
       return a.GetTextSizeAdjust() == b.GetTextSizeAdjust();
+    case CSSPropertyID::kTextUnderlineOffset:
+      return a.TextUnderlineOffset() == b.TextUnderlineOffset();
     case CSSPropertyID::kTop:
       return a.Top() == b.Top();
     case CSSPropertyID::kVerticalAlign:
@@ -335,8 +345,7 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
     case CSSPropertyID::kPerspective:
       return a.Perspective() == b.Perspective();
     case CSSPropertyID::kPerspectiveOrigin:
-      return a.PerspectiveOriginX() == b.PerspectiveOriginX() &&
-             a.PerspectiveOriginY() == b.PerspectiveOriginY();
+      return a.PerspectiveOrigin() == b.PerspectiveOrigin();
     case CSSPropertyID::kWebkitTextStrokeColor:
       return a.TextStrokeColor() == b.TextStrokeColor() &&
              a.InternalVisitedTextStrokeColor() ==
@@ -351,19 +360,17 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
     case CSSPropertyID::kScale:
       return base::ValuesEquivalent<TransformOperation>(a.Scale(), b.Scale());
     case CSSPropertyID::kTransformOrigin:
-      return a.TransformOriginX() == b.TransformOriginX() &&
-             a.TransformOriginY() == b.TransformOriginY() &&
-             a.TransformOriginZ() == b.TransformOriginZ();
+      return a.GetTransformOrigin() == b.GetTransformOrigin();
     case CSSPropertyID::kWebkitPerspectiveOriginX:
-      return a.PerspectiveOriginX() == b.PerspectiveOriginX();
+      return a.PerspectiveOrigin().X() == b.PerspectiveOrigin().X();
     case CSSPropertyID::kWebkitPerspectiveOriginY:
-      return a.PerspectiveOriginY() == b.PerspectiveOriginY();
+      return a.PerspectiveOrigin().Y() == b.PerspectiveOrigin().Y();
     case CSSPropertyID::kWebkitTransformOriginX:
-      return a.TransformOriginX() == b.TransformOriginX();
+      return a.GetTransformOrigin().X() == b.GetTransformOrigin().X();
     case CSSPropertyID::kWebkitTransformOriginY:
-      return a.TransformOriginY() == b.TransformOriginY();
+      return a.GetTransformOrigin().Y() == b.GetTransformOrigin().Y();
     case CSSPropertyID::kWebkitTransformOriginZ:
-      return a.TransformOriginZ() == b.TransformOriginZ();
+      return a.GetTransformOrigin().Z() == b.GetTransformOrigin().Z();
     case CSSPropertyID::kWidows:
       return a.Widows() == b.Widows();
     case CSSPropertyID::kWidth:

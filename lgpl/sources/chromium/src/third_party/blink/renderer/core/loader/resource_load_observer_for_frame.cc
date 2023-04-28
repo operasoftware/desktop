@@ -294,6 +294,13 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
     }
   }
 
+  // Count usage of Content-Disposition header in SVGUse resources.
+  if (resource->Options().initiator_info.name ==
+          fetch_initiator_type_names::kUse &&
+      request.Url().ProtocolIsInHTTPFamily() && response.IsAttachment()) {
+    CountUsage(WebFeature::kContentDispositionInSvgUse);
+  }
+
   if (resource->GetType() == ResourceType::kLinkPrefetch)
     LogLinkPrefetchMimeTypeHistogram(response.MimeType());
 
@@ -314,12 +321,6 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
         document_loader_->GetContentSecurityNotifier());
   }
 
-  if (response.IsLegacyTLSVersion()) {
-    frame->Loader().ReportLegacyTLSVersion(
-        response.CurrentRequestUrl(), true /* is_subresource */,
-        resource->GetResourceRequest().IsAdResource());
-  }
-
   frame->GetAttributionSrcLoader()->MaybeRegisterAttributionHeaders(
       request, response, resource);
 
@@ -329,8 +330,6 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
   // It is essential that inspector gets resource response BEFORE console.
   frame->Console().ReportResourceResponseReceived(document_loader_, identifier,
                                                   response);
-
-  document_->CheckPartitionedCookiesOriginTrial(response);
 }
 
 void ResourceLoadObserverForFrame::DidReceiveData(

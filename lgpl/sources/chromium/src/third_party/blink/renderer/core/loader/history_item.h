@@ -40,7 +40,6 @@
 
 namespace blink {
 
-class ContentEditablesState;
 class DocumentState;
 class EncodedFormData;
 class KURL;
@@ -50,8 +49,6 @@ class SerializedScriptValue;
 namespace mojom {
 enum class FetchCacheMode : int32_t;
 }  // namespace mojom
-
-typedef DocumentState DocumentFormsState;
 
 class CORE_EXPORT HistoryItem final : public GarbageCollected<HistoryItem> {
  public:
@@ -92,18 +89,9 @@ class CORE_EXPORT HistoryItem final : public GarbageCollected<HistoryItem> {
   void SetPageScaleFactor(float);
 
   Vector<String> GetReferencedFilePaths();
-
-  const Vector<String>& FormState();
-  void SetFormState(DocumentFormsState*);
-  void SetFormState(const Vector<String>&);
-  void ClearFormState();
-
-  const Vector<String>& GetContentEditablesState();
-  void SetContentEditablesState(ContentEditablesState*);
-  void ClearContentEditablesState();
-
+  const Vector<String>& GetDocumentState();
   void SetDocumentState(const Vector<String>&);
-  void GetDocumentState(Vector<String>*);
+  void SetDocumentState(DocumentState*);
   void ClearDocumentState();
 
   void SetURL(const KURL&);
@@ -159,10 +147,8 @@ class CORE_EXPORT HistoryItem final : public GarbageCollected<HistoryItem> {
   network::mojom::ReferrerPolicy referrer_policy_ =
       network::mojom::ReferrerPolicy::kDefault;
 
-  Vector<String> form_state_;
-  Member<DocumentFormsState> document_forms_state_;
-  Member<ContentEditablesState> content_editables_state_;
-  Vector<String> content_editables_state_vector_;
+  Vector<String> document_state_vector_;
+  Member<DocumentState> document_state_;
 
   absl::optional<ViewState> view_state_;
 

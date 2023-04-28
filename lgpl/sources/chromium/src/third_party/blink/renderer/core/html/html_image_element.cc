@@ -39,6 +39,7 @@
 #include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/html/cross_origin_attribute.h"
 #include "third_party/blink/renderer/core/html/forms/form_associated.h"
@@ -62,7 +63,7 @@
 #include "third_party/blink/renderer/core/media_type_names.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/paint/paint_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/style/content_data.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_for_container.h"
@@ -116,9 +117,7 @@ HTMLImageElement::HTMLImageElement(Document& document, bool created_by_parser)
       is_changed_shortly_after_mouseover_(false),
       has_sizes_attribute_in_img_or_sibling_(false),
       is_lazy_loaded_(false),
-      referrer_policy_(network::mojom::ReferrerPolicy::kDefault) {
-  SetHasCustomStyleCallbacks();
-}
+      referrer_policy_(network::mojom::ReferrerPolicy::kDefault) {}
 
 HTMLImageElement::~HTMLImageElement() = default;
 
@@ -455,13 +454,9 @@ ImageCandidate HTMLImageElement::FindBestFitImageFromPictureParent() {
 
 LayoutObject* HTMLImageElement::CreateLayoutObject(const ComputedStyle& style,
                                                    LegacyLayout legacy) {
-  const ContentData* content_data = style.GetContentData();
-  if (content_data && content_data->IsImage()) {
-    const StyleImage* content_image =
-        To<ImageContentData>(content_data)->GetImage();
-    bool error_occurred = content_image && content_image->CachedImage() &&
-                          content_image->CachedImage()->ErrorOccurred();
-    if (!error_occurred)
+  if (auto* content_image =
+          DynamicTo<ImageContentData>(style.GetContentData())) {
+    if (!content_image->GetImage()->ErrorOccurred())
       return LayoutObject::CreateObject(this, style, legacy);
   }
 
@@ -511,18 +506,10 @@ Node::InsertionNotificationRequest HTMLImageElement::InsertedInto(
     was_added_to_picture_parent = picture_parent == insertion_point;
   }
 
-  bool image_was_modified = false;
-  if (GetDocument().IsActive() && was_added_to_picture_parent) {
-    ImageCandidate candidate = FindBestFitImageFromPictureParent();
-    if (!candidate.IsEmpty()) {
-      InvalidateAttributeMapping();
-      SetBestFitURLAndDPRFromImageCandidate(candidate);
-      image_was_modified = true;
-    }
-  }
-
-  if (image_was_modified || GetImageLoader().ShouldUpdateOnInsertedInto(
-                                insertion_point, referrer_policy_)) {
+  if (was_added_to_picture_parent) {
+    SelectSourceURL(ImageLoader::kUpdateIgnorePreviousError);
+  } else if (GetImageLoader().ShouldUpdateOnInsertedInto(insertion_point,
+                                                         referrer_policy_)) {
     GetImageLoader().UpdateFromElement(ImageLoader::kUpdateNormal,
                                        referrer_policy_);
   }
@@ -530,14 +517,25 @@ Node::InsertionNotificationRequest HTMLImageElement::InsertedInto(
 }
 
 void HTMLImageElement::RemovedFrom(ContainerNode& insertion_point) {
-  InvalidateAttributeMapping();
+  if (InActiveDocument() && !last_reported_ad_rect_.IsEmpty()) {
+    gfx::Rect empty_rect;
+    GetDocument().GetFrame()->Client()->OnMainFrameImageAdRectangleChanged(
+        DOMNodeIds::IdForNode(this), empty_rect);
+    last_reported_ad_rect_ = empty_rect;
+  }
+
   if (!form_ || NodeTraversal::HighestAncestorOrSelf(*form_.Get()) !=
                     NodeTraversal::HighestAncestorOrSelf(*this))
     ResetFormOwner();
-  if (listener_) {
+  if (listener_)
     GetDocument().GetMediaQueryMatcher().RemoveViewportListener(listener_);
-    if (auto* picture_parent = DynamicTo<HTMLPictureElement>(parentNode()))
-      picture_parent->RemoveListenerFromSourceChildren();
+  bool was_removed_from_parent = !parentNode();
+  auto* picture_parent = DynamicTo<HTMLPictureElement>(
+      was_removed_from_parent ? &insertion_point : parentNode());
+  if (picture_parent) {
+    picture_parent->RemoveListenerFromSourceChildren();
+    if (was_removed_from_parent)
+      SelectSourceURL(ImageLoader::kUpdateIgnorePreviousError);
   }
   HTMLElement::RemovedFrom(insertion_point);
 }
@@ -670,6 +668,48 @@ bool HTMLImageElement::HasLegalLinkAttribute(const QualifiedName& name) const {
 
 const QualifiedName& HTMLImageElement::SubResourceAttributeName() const {
   return html_names::kSrcAttr;
+}
+
+void HTMLImageElement::SetIsAdRelated() {
+  if (!is_ad_related_ && GetDocument().View()) {
+    GetDocument().View()->RegisterForLifecycleNotifications(this);
+  }
+
+  is_ad_related_ = true;
+}
+
+void HTMLImageElement::DidFinishLifecycleUpdate(
+    const LocalFrameView& local_frame_view) {
+  DCHECK(is_ad_related_);
+
+  // Scope to the outermost frame to avoid counting image ads that are (likely)
+  // already in ad iframes.
+  LocalFrame* frame = GetDocument().GetFrame();
+  if (!frame || !frame->View() || !frame->IsOutermostMainFrame()) {
+    return;
+  }
+
+  gfx::Rect rect_to_report;
+  if (LayoutObject* r = GetLayoutObject()) {
+    gfx::Rect rect_in_viewport = r->AbsoluteBoundingBoxRect();
+
+    // Exclude image ads that are invisible or too small (e.g. tracking pixels).
+    if (rect_in_viewport.width() > 1 && rect_in_viewport.height() > 1) {
+      if (!image_ad_use_counter_recorded_) {
+        UseCounter::Count(GetDocument(), WebFeature::kImageAd);
+        image_ad_use_counter_recorded_ = true;
+      }
+
+      rect_to_report =
+          rect_in_viewport + frame->View()->LayoutViewport()->ScrollOffsetInt();
+    }
+  }
+
+  if (last_reported_ad_rect_ != rect_to_report) {
+    frame->Client()->OnMainFrameImageAdRectangleChanged(
+        DOMNodeIds::IdForNode(this), rect_to_report);
+    last_reported_ad_rect_ = rect_to_report;
+  }
 }
 
 bool HTMLImageElement::draggable() const {
@@ -906,6 +946,11 @@ void HTMLImageElement::SetLayoutDisposition(
   DCHECK(!GetDocument().InStyleRecalc());
 
   layout_disposition_ = layout_disposition;
+  if (layout_disposition == LayoutDisposition::kFallbackContent) {
+    SetHasCustomStyleCallbacks();
+  } else {
+    UnsetHasCustomStyleCallbacks();
+  }
 
   if (layout_disposition_ == LayoutDisposition::kFallbackContent) {
     EventDispatchForbiddenScope::AllowUserAgentEvents allow_events;
@@ -920,22 +965,9 @@ void HTMLImageElement::SetLayoutDisposition(
   SetForceReattachLayoutTree();
 }
 
-scoped_refptr<ComputedStyle> HTMLImageElement::CustomStyleForLayoutObject(
-    const StyleRecalcContext& style_recalc_context) {
-  switch (layout_disposition_) {
-    case LayoutDisposition::kPrimaryContent:  // Fall through.
-    case LayoutDisposition::kCollapsed:
-      return OriginalStyleForLayoutObject(style_recalc_context);
-    case LayoutDisposition::kFallbackContent: {
-      scoped_refptr<ComputedStyle> style =
-          OriginalStyleForLayoutObject(style_recalc_context);
-      HTMLImageFallbackHelper::CustomStyleForAltText(*this, *style);
-      return style;
-    }
-    default:
-      NOTREACHED();
-      return nullptr;
-  }
+void HTMLImageElement::AdjustStyle(ComputedStyleBuilder& builder) {
+  DCHECK_EQ(layout_disposition_, LayoutDisposition::kFallbackContent);
+  HTMLImageFallbackHelper::CustomStyleForAltText(*this, builder);
 }
 
 void HTMLImageElement::AssociateWith(HTMLFormElement* form) {

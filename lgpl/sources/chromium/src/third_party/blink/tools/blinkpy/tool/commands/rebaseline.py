@@ -27,13 +27,13 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import collections
-import json
 import logging
 import optparse
 import re
-
 from collections import defaultdict
+from typing import ClassVar
 
+from blinkpy.common import message_pool
 from blinkpy.common.path_finder import WEB_TESTS_LAST_COMPONENT
 from blinkpy.common.memoized import memoized
 from blinkpy.common.net.results_fetcher import Build
@@ -56,7 +56,7 @@ MAX_TESTS_IN_OPTIMIZE_CMDLINE = 128
 
 class AbstractRebaseliningCommand(Command):
     """Base class for rebaseline-related commands."""
-    # Not overriding execute() - pylint: disable=abstract-method
+    # pylint: disable=abstract-method; not overriding `execute()`
 
     # Generic option groups (list of options):
     platform_options = factory.platform_options(use_globs=True)
@@ -111,7 +111,7 @@ class AbstractRebaseliningCommand(Command):
         '--flag-specific',
         # TODO(crbug/1291020): build the list from builders.json
         choices=[
-            "disable-layout-ng", "disable-site-isolation-trials", "highdpi",
+            "disable-site-isolation-trials", "highdpi",
             "skia-vulkan-swiftshader"
         ],
         default=None,
@@ -144,6 +144,7 @@ class AbstractRebaseliningCommand(Command):
         self.expectation_line_changes = ChangeSet()
         self._tool = None
         self._dry_run = False
+        self._resultdb_fetcher = False
 
     def baseline_directory(self, builder_name):
         port = self._tool.port_factory.get_from_builder_name(builder_name)
@@ -296,8 +297,9 @@ class TestBaselineSet(object):
 
 class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
     """Base class for rebaseline commands that do some tasks in parallel."""
+    # pylint: disable=abstract-method; not overriding `execute()`
 
-    # Not overriding execute() - pylint: disable=abstract-method
+    MAX_WORKERS: ClassVar[int] = 16
 
     def __init__(self, options=None):
         super(AbstractParallelRebaselineCommand,
@@ -350,7 +352,7 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         #TODO: we should make the selection of (builder, step) deterministic
         for builder, step in list(release_build_steps) + list(
                 debug_build_steps):
-            if not self._tool.builders.is_wpt_builder(builder):
+            if not self._tool.builders.uses_wptrunner(builder):
                 # Some result db related unit tests set step to None
                 is_legacy_step = step is None or 'blink_web_tests' in step
                 flag_spec_option = self._tool.builders.flag_specific_option(
@@ -364,29 +366,6 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                         is_legacy_step][builder, step] = fallback_path
         return (set(build_steps_to_fallback_paths[True])
                 | set(build_steps_to_fallback_paths[False]))
-
-    def baseline_fetch_url_resultdb(self, test_name, build):
-        # TODO(crbug.com/1213998): Optimize the loop through all artifact_list.
-        # Currently the runtime is O(# tests * # artifacts), but the rpc to get
-        # query all artifacts per build is cached instead rpc sent per test.
-        webtest_results_resultdb = self._tool.results_fetcher.fetch_results_from_resultdb_layout_tests(
-            build, True)
-        artifact_list = (self._tool.results_fetcher.
-                         query_artifact_for_build_test_results(build))
-        artifact_fetch_urls = []
-        if webtest_results_resultdb:
-            results_list = webtest_results_resultdb.test_results_resultdb()
-            done = False
-            for result in results_list:
-                if done:
-                    break
-                if test_name in result['testId']:
-                    for artifact in artifact_list:
-                        if 'actual' in artifact['artifactId'] and result[
-                                'name'] in artifact['name']:
-                            artifact_fetch_urls.append(artifact['fetchUrl'])
-                            done = True
-        return artifact_fetch_urls
 
     def _rebaseline_args(self,
                          test,
@@ -413,23 +392,16 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
 
     def _rebaseline_commands(self, test_baseline_set, options):
         path_to_blink_tool = self._tool.path()
-        cwd = self._tool.git().checkout_root
         rebaseline_commands = []
         copy_baseline_commands = []
         lines_to_remove = {}
-        fetch_urls = []
 
         # A test baseline set is a high-dimensional object, so we try to avoid
         # iterating it.
         baseline_subset = self._filter_baseline_set_builders(test_baseline_set)
         for test, build, step_name, port_name in baseline_subset:
-            if options.resultDB:
-                fetch_urls = self.baseline_fetch_url_resultdb(test, build)
-                suffixes = list(
-                    self._suffixes_for_actual_failures_resultdb(test, build))
-            else:
-                suffixes = list(
-                    self._suffixes_for_actual_failures(test, build, step_name))
+            suffixes = list(
+                self._suffixes_for_actual_failures(test, build, step_name))
             if not suffixes:
                 # Only try to remove the expectation if the test
                 #   1. ran and passed ([ Skip ], [ WontFix ] should be kept)
@@ -458,15 +430,24 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             if step_name:
                 args.extend(['--step-name', step_name])
 
-            if options.resultDB:
+            if self._resultdb_fetcher:
                 args.append('--resultDB')
+                raw_result = self._result_for_test(test, build,
+                                                   step_name).result_dict()
+                # TODO(crbug.com/1282507): Instead of grabbing the first
+                # artifact of each type, we should download artifacts across
+                # all retries and and check if they're all exactly the same.
+                fetch_urls = [
+                    artifacts[0]
+                    for artifacts in raw_result['artifacts'].values()
+                ]
                 args.extend(['--fetch-url', ','.join(fetch_urls)])
 
             rebaseline_command = [
                 self._tool.executable, path_to_blink_tool,
                 'rebaseline-test-internal'
             ] + args
-            rebaseline_commands.append((rebaseline_command, cwd))
+            rebaseline_commands.append(rebaseline_command)
 
             copy_command = [
                 self._tool.executable,
@@ -476,49 +457,31 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             copy_command.extend(
                 self._rebaseline_args(test, suffixes, port_name,
                                       flag_spec_option, options.verbose))
-            copy_baseline_commands.append((copy_command, cwd))
+            copy_baseline_commands.append(copy_command)
 
         return copy_baseline_commands, rebaseline_commands, lines_to_remove
 
-    @staticmethod
-    def _extract_expectation_line_changes(command_results):
-        """Parses the JSON lines from sub-command output and returns the result as a ChangeSet."""
-        change_set = ChangeSet()
-        for _, stdout, _ in command_results:
-            updated = False
-            for line in stdout.splitlines():
-                if not line:
-                    continue
-                try:
-                    parsed_line = json.loads(line)
-                    change_set.update(ChangeSet.from_dict(parsed_line))
-                    updated = True
-                except ValueError:
-                    _log.debug('"%s" is not a JSON object, ignoring', line)
-            if not updated:
-                # TODO(crbug.com/649412): This could be made into an error.
-                _log.debug('Could not add file based off output "%s"', stdout)
-        return change_set
-
-    def _optimize_commands(self,
-                           test_baseline_set,
-                           verbose=False,
-                           resultDB=False):
+    def _optimize_commands(self, test_baseline_set, verbose=False):
         """Returns a list of commands to run in parallel to de-duplicate baselines."""
         test_set = set()
         baseline_subset = self._filter_baseline_set_builders(test_baseline_set)
         for test, build, step_name, _ in baseline_subset:
             # Use the suffixes information to determine whether to proceed with the optimize
             # step. Suffixes are not passed to the optimizer.
-            if resultDB:
-                suffixes = self._suffixes_for_actual_failures_resultdb(
-                    test, build)
-            else:
-                suffixes = self._suffixes_for_actual_failures(
-                    test, build, step_name)
-            if suffixes == set():
-                continue
-            test_set.add(test)
+            suffixes = self._suffixes_for_actual_failures(
+                test, build, step_name)
+            if suffixes:
+                test_set.add(test)
+
+        # For real tests we will optimize all the virtual tests derived from
+        # that. No need to include a virtual tests if we will also optimize the
+        # non virtual version.
+        port = self._tool.port_factory.get()
+        virtual_tests_to_exclude = set([
+            test for test in test_set
+            if port.lookup_virtual_test_base(test) in test_set
+        ])
+        test_set -= virtual_tests_to_exclude
 
         # Process the test_list so that each list caps at MAX_TESTS_IN_OPTIMIZE_CMDLINE tests
         capped_test_list = []
@@ -528,7 +491,6 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                                               MAX_TESTS_IN_OPTIMIZE_CMDLINE])
 
         optimize_commands = []
-        cwd = self._tool.git().checkout_root
         path_to_blink_tool = self._tool.path()
 
         # Build one optimize-baselines invocation command for each flag_spec.
@@ -547,7 +509,7 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                 command.append('--verbose')
 
             command.extend(test_list)
-            optimize_commands.append((command, cwd))
+            optimize_commands.append(command)
 
         return optimize_commands
 
@@ -596,24 +558,21 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             system_remover.remove_os_versions(test, versions)
         system_remover.update_expectations()
 
-    def _run_in_parallel(self, commands):
-        if not commands:
-            return []
+    def _message_pool(self):
+        num_workers = min(self.MAX_WORKERS, self._tool.executive.cpu_count())
+        return message_pool.get(self, self._worker_factory, num_workers)
 
-        if self._dry_run:
-            for command, _ in commands:
-                _log.debug('Would have run: "%s"',
-                           self._tool.executive.command_for_printing(command))
-            return [(0, '', '')] * len(commands)
+    def _worker_factory(self, worker_connection):
+        return Worker(worker_connection,
+                      self._tool.git().checkout_root,
+                      dry_run=self._dry_run)
 
-        command_results = self._tool.executive.run_in_parallel(commands)
-        for _, _, stderr in command_results:
-            if stderr:
-                lines = stderr.decode("utf-8", "ignore").splitlines()
-                for line in lines:
-                    print(line)
+    def handle(self, name: str, source: str, *_):
+        """No-op handler called when a worker completes a rebaseline task.
 
-        return command_results
+        This allows this class to conform to the `message_pool.MessageHandler`
+        interface.
+        """
 
     def rebaseline(self, options, test_baseline_set):
         """Fetches new baselines and removes related test expectation lines.
@@ -633,22 +592,15 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         for test in test_baseline_set.all_tests():
             _log.info('Rebaselining %s', test)
 
-        # extra_lines_to_remove are unexpected passes, while lines_to_remove are
-        # failing tests that have been rebaselined.
-        copy_baseline_commands, rebaseline_commands, extra_lines_to_remove = self._rebaseline_commands(
+        # lines_to_remove are unexpected passes.
+        copy_baseline_commands, rebaseline_commands, lines_to_remove = self._rebaseline_commands(
             test_baseline_set, options)
-        lines_to_remove = {}
-        self._run_in_parallel(copy_baseline_commands)
-
-        command_results = self._run_in_parallel(rebaseline_commands)
-        change_set = self._extract_expectation_line_changes(command_results)
-        lines_to_remove = change_set.lines_to_remove
-        for test in extra_lines_to_remove:
-            if test in lines_to_remove:
-                lines_to_remove[test] = (
-                    lines_to_remove[test] + extra_lines_to_remove[test])
-            else:
-                lines_to_remove[test] = extra_lines_to_remove[test]
+        with self._message_pool() as pool:
+            pool.run([('copy_existing_baselines', command)
+                      for command in copy_baseline_commands])
+        with self._message_pool() as pool:
+            pool.run([('rebaseline', command)
+                      for command in rebaseline_commands])
 
         if lines_to_remove:
             self._update_expectations_files(lines_to_remove)
@@ -660,10 +612,10 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                 _log.info('Skipping optimization during dry run.')
             else:
                 optimize_commands = self._optimize_commands(
-                    test_baseline_set, options.verbose, options.resultDB)
-                for (cmd, cwd) in optimize_commands:
-                    output = self._tool.executive.run_command(cmd, cwd)
-                    print(output)
+                    test_baseline_set, options.verbose)
+                with self._message_pool() as pool:
+                    pool.run([('optimize_baselines', command)
+                              for command in optimize_commands])
 
         if not self._dry_run:
             self._tool.git().add_list(self.unstaged_baselines())
@@ -699,18 +651,6 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
 
     def _web_tests_dir(self):
         return self._tool.port_factory.get().web_tests_dir()
-
-    def _suffixes_for_actual_failures_resultdb(self, test, build):
-        suffixes = set()
-        fetch_url_list = self.baseline_fetch_url_resultdb(test, build)
-        for artifact_fetch_url in fetch_url_list:
-            if 'actual_image' in artifact_fetch_url:
-                suffixes.add('png')
-            if 'actual_text' in artifact_fetch_url:
-                suffixes.add('txt')
-            if 'actual_audio' in artifact_fetch_url:
-                suffixes.add('wav')
-        return suffixes
 
     def _suffixes_for_actual_failures(self, test, build, step_name=None):
         """Gets the baseline suffixes for actual mismatch failures in some results.
@@ -755,11 +695,16 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         return test_result.did_pass() and not test_result.did_run_as_expected()
 
     @memoized
-    def _result_for_test(self, test, build, step_name=None):
-        # We need full results to know if a test passed or was skipped.
-        # TODO(robertma): Make memoized support kwargs, and use full=True here.
-        results = self._tool.results_fetcher.fetch_results(
-            build, True, step_name)
+    def _result_for_test(self, test, build, step_name):
+        if self._resultdb_fetcher:
+            results = self._tool.results_fetcher.gather_results(
+                build, step_name)
+        else:
+            # We need full results to know if a test passed or was skipped.
+            # TODO(robertma): Make memoized support kwargs, and use full=True
+            # here.
+            results = self._tool.results_fetcher.fetch_results(
+                build, True, step_name)
         if not results:
             _log.debug('No results found for build %s', build)
             return None
@@ -824,3 +769,37 @@ class Rebaseline(AbstractParallelRebaselineCommand):
         _log.debug('Rebaselining: %s', test_baseline_set)
 
         self.rebaseline(options, test_baseline_set)
+
+
+class Worker:
+    """A worker delegate for running Blink tool commands.
+
+    The purpose of this worker is to persist HTTP(S) connections to ResultDB
+    across command invocations.
+
+    See Also:
+        crbug.com/1213998#c50
+    """
+
+    def __init__(self, connection, cwd: str, dry_run: bool = False):
+        self._connection = connection
+        self._cwd = cwd
+        self._dry_run = dry_run
+
+    def start(self):
+        # Dynamically import `BlinkTool` to avoid a circular import.
+        from blinkpy.tool.blink_tool import BlinkTool
+        # `BlinkTool` cannot be serialized, so construct one here in the worker
+        # process instead of in the constructor, which runs in the managing
+        # process. See crbug.com/1386267.
+        self._tool = BlinkTool(self._cwd)
+
+    def handle(self, name, source, command):
+        if self._dry_run:
+            _log.debug('Would have run: %s',
+                       self._tool.executive.command_for_printing(command))
+        else:
+            self._tool.main(command[1:])
+            # Post an empty message to the managing process to flush this
+            # worker's logs.
+            self._connection.post(name)

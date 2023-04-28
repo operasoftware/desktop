@@ -9,8 +9,6 @@ blink_core_sources_frame = [
   "ad_tracker.h",
   "ad_script_identifier.cc",
   "ad_script_identifier.h",
-  "attribution_response_parsing.cc",
-  "attribution_response_parsing.h",
   "attribution_src_loader.cc",
   "attribution_src_loader.h",
   "bar_prop.cc",
@@ -42,6 +40,7 @@ blink_core_sources_frame = [
   "frame_content_as_text.cc",
   "deprecation/deprecation.cc",
   "deprecation/deprecation.h",
+  "deprecation/deprecation_info.h",
   "deprecation/deprecation_report_body.cc",
   "deprecation/deprecation_report_body.h",
   "device_single_window_event_controller.cc",
@@ -260,9 +259,15 @@ if (opera_blink_feature_script_tracker) {
   blink_core_sources_frame += [ "script_tracker.cc" ]
 }
 
+if (opera_feature_blink_browser_colors) {
+  blink_core_sources_frame += [
+    "opera_colors_client_impl.cc",
+    "opera_colors_client_impl.h",
+  ]
+}
+
 blink_core_tests_frame = [
   "ad_tracker_test.cc",
-  "attribution_response_parsing_test.cc",
   "attribution_src_loader_test.cc",
   "browser_controls_test.cc",
   "child_frame_compositing_helper_test.cc",

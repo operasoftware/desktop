@@ -4,13 +4,11 @@
 
 #include "third_party/blink/renderer/core/input/gesture_manager.h"
 
-#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_pointer_event.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/public/public_buildflags.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/editing/selection_controller.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/gesture_event.h"
@@ -28,8 +26,6 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
-#include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
-#include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "ui/gfx/geometry/point_conversions.h"
 
 #if BUILDFLAG(ENABLE_UNHANDLED_TAP)
@@ -50,6 +46,11 @@ namespace {
 // The amount of drag (in pixels) that is considered to be within a slop region.
 // This allows firing touch dragend contextmenu events for shaky fingers.
 const int kTouchDragSlop = 8;
+
+bool TouchDragAndContextMenuEnabled(const LocalFrame* frame) {
+  return RuntimeEnabledFeatures::TouchDragAndContextMenuEnabled() &&
+         frame->GetSettings() && !frame->GetSettings()->GetModalContextMenu();
+}
 
 }  // namespace
 
@@ -331,6 +332,10 @@ WebInputEventResult GestureManager::HandleGestureTap(
       click_event_result =
           mouse_event_manager_->SetMousePositionAndDispatchMouseEvent(
               click_target_element, event_type_names::kClick, fake_mouse_up);
+
+      // Dispatching a JS event could have detached the frame.
+      if (frame_->View())
+        frame_->View()->RegisterTapEvent(tapped_element);
     }
     mouse_event_manager_->SetClickElement(nullptr);
   }
@@ -385,7 +390,7 @@ WebInputEventResult GestureManager::HandleGestureShortPress(
   // long-press.  However, on Android an ACTION_CANCEL event is fired on
   // drag-start, and occcasionally that happens before long-press gesture
   // timeout which causes GestureRecognizer to suppress long-press detection.
-  if (RuntimeEnabledFeatures::TouchDragAndContextMenuEnabled() &&
+  if (TouchDragAndContextMenuEnabled(frame_) &&
       RuntimeEnabledFeatures::TouchDragOnShortPressEnabled()) {
     drag_in_progress_ =
         mouse_event_manager_->HandleDragDropIfPossible(targeted_event);
@@ -411,7 +416,7 @@ WebInputEventResult GestureManager::HandleGestureLongPress(
 
   gesture_context_menu_deferred_ = false;
 
-  if (RuntimeEnabledFeatures::TouchDragAndContextMenuEnabled()) {
+  if (TouchDragAndContextMenuEnabled(frame_)) {
     if (!RuntimeEnabledFeatures::TouchDragOnShortPressEnabled()) {
       drag_in_progress_ =
           mouse_event_manager_->HandleDragDropIfPossible(targeted_event);

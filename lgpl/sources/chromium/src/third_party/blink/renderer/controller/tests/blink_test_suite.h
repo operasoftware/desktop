@@ -6,10 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CONTROLLER_TESTS_BLINK_TEST_SUITE_H_
 
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "content/public/test/blink_test_environment.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
+#include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/wtf/gc_plugin.h"
 #include "v8/include/v8.h"
 
 template <class Parent>
@@ -25,11 +29,13 @@ class BlinkUnitTestSuite : public Parent {
     Parent::Initialize();
 
     content::SetUpBlinkTestEnvironment();
+    conservative_gc_scope_.emplace(blink::ThreadState::Current());
   }
   void Shutdown() override {
     // Tickle EndOfTaskRunner which among other things will flush the queue
     // of error messages via V8Initializer::reportRejectedPromisesOnMainThread.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, base::DoNothing());
+    blink::scheduler::GetSingleThreadTaskRunnerForTesting()->PostTask(
+        FROM_HERE, base::DoNothing());
     base::RunLoop().RunUntilIdle();
 
     // Collect garbage (including threadspecific persistent handles) in order
@@ -41,6 +47,9 @@ class BlinkUnitTestSuite : public Parent {
 
     Parent::Shutdown();
   }
+
+  STACK_ALLOCATED_IGNORE("https://crbug.com/1409156")
+  absl::optional<blink::HeapPointersOnStackScope> conservative_gc_scope_;
 };
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CONTROLLER_TESTS_BLINK_TEST_SUITE_H_

@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 import {BrowserServiceImpl, CrDialogElement, ensureLazyLoaded, HistoryAppElement, HistoryEntry, HistoryItemElement, HistoryListElement, HistoryToolbarElement} from 'chrome://history/history.js';
-import {isMac, webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {webUIListenerCallback} from 'chrome://resources/js/cr.js';
+import {isMac} from 'chrome://resources/js/platform.js';
 import {pressAndReleaseKeyOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertDeepEquals, assertEquals, assertFalse, assertGT, assertNotEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
@@ -72,8 +73,7 @@ suite(history_list_test.suiteName, function() {
 
   setup(function() {
     window.history.replaceState({}, '', '/');
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     testService = new TestBrowserService();
     BrowserServiceImpl.setInstance(testService);
 
@@ -690,7 +690,7 @@ suite(history_list_test.suiteName, function() {
           assertEquals(2, toolbar.count);
           assertTrue(
               toolbar.shadowRoot!.querySelector('cr-toolbar-selection-overlay')!
-                  .deleteDisabled);
+                  .querySelector('cr-button')!.disabled);
 
           // Key event should be ignored.
           assertEquals(1, testService.getCallCount('removeVisits'));
@@ -714,7 +714,7 @@ suite(history_list_test.suiteName, function() {
           assertEquals(2, toolbar.count);
           assertFalse(
               toolbar.shadowRoot!.querySelector('cr-toolbar-selection-overlay')!
-                  .deleteDisabled);
+                  .querySelector('cr-button')!.disabled);
 
           // Menu button should also be re-enabled.
           items[1]!.$['menu-button'].click();

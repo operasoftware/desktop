@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("mediastream") {
@@ -13,11 +12,11 @@ blink_modules_sources("mediastream") {
     "apply_constraints_request.h",
     "browser_capture_media_stream_track.cc",
     "browser_capture_media_stream_track.h",
+    "capture_controller.cc",
+    "capture_controller.h",
     "crop_target.cc",
     "crop_target.h",
     "dom_window_media_stream.h",
-    "focusable_media_stream_track.cc",
-    "focusable_media_stream_track.h",
     "identifiability_metrics.cc",
     "identifiability_metrics.h",
     "input_device_info.cc",
@@ -28,14 +27,14 @@ blink_modules_sources("mediastream") {
     "local_video_capturer_source.h",
     "low_latency_video_renderer_algorithm.cc",
     "low_latency_video_renderer_algorithm.h",
+    "media_constraints.cc",
+    "media_constraints.h",
     "media_constraints_impl.cc",
     "media_constraints_impl.h",
     "media_device_info.cc",
     "media_device_info.h",
     "media_devices.cc",
     "media_devices.h",
-    "media_error_state.cc",
-    "media_error_state.h",
     "media_stream.cc",
     "media_stream.h",
     "media_stream_audio_processor.cc",
@@ -111,13 +110,6 @@ blink_modules_sources("mediastream") {
     "webmediaplayer_ms_compositor.cc",
     "webmediaplayer_ms_compositor.h",
   ]
-
-  jumbo_excluded_sources = [
-    "media_stream_constraints_util_audio.cc",
-    "processed_local_audio_source.cc",
-    "user_media_processor.cc",
-  ]
-
   deps = [
     "//build:chromecast_buildflags",
     "//build:chromeos_buildflags",
@@ -126,7 +118,7 @@ blink_modules_sources("mediastream") {
     "//services/viz/public/cpp/gpu:gpu",
     "//third_party/blink/public/common",
     "//third_party/blink/renderer/modules/imagecapture:imagecapture",
-    "//third_party/blink/renderer/modules/screen_enumeration:screen_enumeration",
+    "//third_party/blink/renderer/modules/screen_details:screen_details",
     "//third_party/libyuv:libyuv",
   ]
   allow_circular_includes_from =
@@ -135,7 +127,7 @@ blink_modules_sources("mediastream") {
   public_deps = [ "//media/capture:capture_lib" ]
 }
 
-jumbo_source_set("test_support") {
+source_set("test_support") {
   testonly = true
 
   sources = [
@@ -153,6 +145,8 @@ jumbo_source_set("test_support") {
     "mock_media_stream_video_source.cc",
     "mock_media_stream_video_source.h",
     "mock_video_capturer_source.h",
+    "test/fake_image_capturer.cc",
+    "test/fake_image_capturer.h",
     "test/transfer_test_utils.cc",
     "test/transfer_test_utils.h",
     "testing_platform_support_with_mock_audio_capture_source.cc",
@@ -162,6 +156,7 @@ jumbo_source_set("test_support") {
   deps = [
     "//base",
     "//base/test:test_support",
+    "//media/capture/mojom:image_capture_blink",
     "//skia",
     "//testing/gmock",
     "//third_party/blink/public:test_headers",

@@ -21,6 +21,11 @@ void NGLineInfo::SetLineStyle(const NGInlineNode& node,
   needs_accurate_end_position_ = ComputeNeedsAccurateEndPosition();
   is_ruby_base_ = box->IsRubyBase();
   is_ruby_text_ = box->IsRubyText();
+
+  // Reset block start offset related members.
+  annotation_block_start_adjustment_ = LayoutUnit();
+  initial_letter_box_block_start_adjustment_ = LayoutUnit();
+  initial_letter_box_block_size_ = LayoutUnit();
 }
 
 ETextAlign NGLineInfo::GetTextAlign(bool is_last_line) const {
@@ -103,8 +108,9 @@ unsigned NGLineInfo::InflowEndOffset() const {
 bool NGLineInfo::ShouldHangTrailingSpaces() const {
   if (!HasTrailingSpaces())
     return false;
-  if (!line_style_->AutoWrap())
+  if (!line_style_->ShouldWrapLine()) {
     return false;
+  }
   switch (text_align_) {
     case ETextAlign::kStart:
     case ETextAlign::kJustify:
@@ -127,7 +133,7 @@ void NGLineInfo::UpdateTextAlign() {
   text_align_ = GetTextAlign(IsLastLine());
   allow_hang_for_alignment_ = false;
 
-  if (HasTrailingSpaces() && line_style_->AutoWrap()) {
+  if (HasTrailingSpaces() && line_style_->ShouldWrapLine()) {
     if (ShouldHangTrailingSpaces()) {
       hang_width_ = ComputeTrailingSpaceWidth(&end_offset_for_justify_);
       allow_hang_for_alignment_ = true;
@@ -233,6 +239,114 @@ float NGLineInfo::ComputeWidthInFloat() const {
   return inline_size;
 }
 #endif
+
+// Block start adjustment and annotation ovreflow
+//
+//  Ruby without initial letter[1][2]:
+//                  RUBY = annotation overflow and block start adjustment
+//          This is line has ruby.
+//
+//  Raise/Sunken[3]: initial_letter_block_start > 0
+//   block start adjustment
+//        ***** ^
+//          *   | block start adjustment
+//          *   V
+//          *       RUBY = not annotation overflow
+//          *   his line has ruby.
+//
+//   Drop + Ruby(over)[4]: initial_letter_block_start == 0
+//                  RUBY = annotation overflow and block start adjustment
+//        ***** his line has ruby.
+//          *
+//          *
+//          *
+//          *
+//
+//  Ruby(over) is taller than initial letter[5]:
+//                  RUBY = annotation overflow
+//        *****     RUBY ^
+//          *       RUBY | block start adjustment
+//          *       RUBY |
+//          *       RUBY V
+//          *    his line has ruby.
+//
+//  Ruby(under) and raise/Sunken[6]:
+//        ***** ^
+//          *   | block start adjustment
+//          *   V
+//          *   his line has under ruby.
+//          *       RUBY
+//
+//  Ruby(under) and drop[7]:
+//               his line has under ruby
+//        ******     RUBY
+//          *
+//          *
+//
+// [1] fast/ruby/ruby-position-modern-japanese-fonts.html
+// [2] https://wpt.live/css/css-ruby/line-spacing.html
+// [3]
+// https://wpt.live/css/css-inline/initial-letter/initial-letter-block-position-raise-over-ruby.html
+// [4]
+// https://wpt.live/css/css-inline/initial-letter/initial-letter-block-position-drop-over-ruby.html
+// [5]
+// https://wpt.live/css/css-inline/initial-letter/initial-letter-block-position-raise-over-ruby.html
+// [6]
+// https://wpt.live/css/css-inline/initial-letter/initial-letter-block-position-raise-under-ruby.html
+// [7]
+// https://wpt.live/css/css-inline/initial-letter/initial-letter-block-position-drop-under-ruby.html
+
+LayoutUnit NGLineInfo::ComputeAnnotationBlockOffsetAdjustment() const {
+  if (annotation_block_start_adjustment_ < 0) {
+    // Test[1] or `ruby-position:under` reach here.
+    // [1] https://wpt.live/css/css-ruby/line-spacing.html
+    return annotation_block_start_adjustment_ +
+           initial_letter_box_block_start_adjustment_;
+  }
+  // The raise/sunken initial letter may cover annotations[2].
+  // [2]
+  // https://wpt.live/css/css-inline/initial-letter/initial-letter-block-position-raise-over-ruby.html
+  return std::max(annotation_block_start_adjustment_ -
+                      initial_letter_box_block_start_adjustment_,
+                  LayoutUnit());
+}
+
+LayoutUnit NGLineInfo::ComputeBlockStartAdjustment() const {
+  if (annotation_block_start_adjustment_ < 0) {
+    // Test[1] or `ruby-position:under` reaches here.
+    // [1] https://wpt.live/css/css-ruby/line-spacing.html
+    return annotation_block_start_adjustment_ +
+           initial_letter_box_block_start_adjustment_;
+  }
+  // The raise/sunken initial letter may cover annotations[2].
+  // [2]
+  // https://wpt.live/css/css-initial-letter/initial-letter-block-position-raise-over-ruby.html
+  return std::max(annotation_block_start_adjustment_,
+                  initial_letter_box_block_start_adjustment_);
+}
+
+LayoutUnit NGLineInfo::ComputeInitialLetterBoxBlockStartAdjustment() const {
+  if (!annotation_block_start_adjustment_)
+    return LayoutUnit();
+  if (annotation_block_start_adjustment_ < 0) {
+    return std::min(initial_letter_box_block_start_adjustment_ +
+                        annotation_block_start_adjustment_,
+                    LayoutUnit());
+  }
+  return std::max(annotation_block_start_adjustment_ -
+                      initial_letter_box_block_start_adjustment_,
+                  LayoutUnit());
+}
+
+LayoutUnit NGLineInfo::ComputeTotalBlockSize(
+    LayoutUnit line_height,
+    LayoutUnit annotation_overflow_block_end) const {
+  DCHECK_GE(annotation_overflow_block_end, LayoutUnit());
+  const LayoutUnit line_height_with_annotation =
+      line_height + annotation_block_start_adjustment_ +
+      annotation_overflow_block_end;
+  return std::max(initial_letter_box_block_size_, line_height_with_annotation);
+}
 
 std::ostream& operator<<(std::ostream& ostream, const NGLineInfo& line_info) {
   // Feel free to add more NGLneInfo members.

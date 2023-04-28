@@ -80,6 +80,14 @@
  * Codec supports embedded ICC profiles (AV_FRAME_DATA_ICC_PROFILE).
  */
 #define FF_CODEC_CAP_ICC_PROFILES           (1 << 9)
+/**
+ * The encoder has AV_CODEC_CAP_DELAY set, but does not actually have delay - it
+ * only wants to be flushed at the end to update some context variables (e.g.
+ * 2pass stats) or produce a trailing packet. Besides that it immediately
+ * produces exactly one output packet per each input frame, just as no-delay
+ * encoders do.
+ */
+#define FF_CODEC_CAP_EOF_FLUSH              (1 << 10)
 
 /**
  * FFCodec.codec_tags termination value
@@ -274,6 +282,25 @@ typedef struct FFCodec {
         .update_thread_context          = NULL
 #define UPDATE_THREAD_CONTEXT_FOR_USER(func) \
         .update_thread_context_for_user = NULL
+#endif
+
+#if FF_API_OLD_CHANNEL_LAYOUT
+#define CODEC_OLD_CHANNEL_LAYOUTS(...) CODEC_OLD_CHANNEL_LAYOUTS_ARRAY(((const uint64_t[]) { __VA_ARGS__, 0 }))
+#if defined(__clang__)
+#define CODEC_OLD_CHANNEL_LAYOUTS_ARRAY(array) \
+        FF_DISABLE_DEPRECATION_WARNINGS \
+        .p.channel_layouts = (array), \
+        FF_ENABLE_DEPRECATION_WARNINGS
+#else
+#define CODEC_OLD_CHANNEL_LAYOUTS_ARRAY(array) .p.channel_layouts = (array),
+#endif
+#else
+/* This is only provided to allow to test disabling FF_API_OLD_CHANNEL_LAYOUT
+ * without removing all the FF_API_OLD_CHANNEL_LAYOUT codeblocks.
+ * It is of course still expected to be removed when FF_API_OLD_CHANNEL_LAYOUT
+ * will be finally removed (along with all usages of these macros). */
+#define CODEC_OLD_CHANNEL_LAYOUTS(...)
+#define CODEC_OLD_CHANNEL_LAYOUTS_ARRAY(array)
 #endif
 
 #define FF_CODEC_DECODE_CB(func)                          \

@@ -56,7 +56,10 @@ MediaQueryEvaluatorTestCase g_screen_test_cases[] = {
     {"screen and (color)", true},
     {"not screen and (color)", false},
     {"screen and (device-aspect-ratio: 16/9)", false},
+    {"screen and (device-aspect-ratio: 0.5/0.5)", true},
+    {"screen and (device-aspect-ratio: 1.5)", false},
     {"screen and (device-aspect-ratio: 1/1)", true},
+    {"screen and (device-aspect-ratio: calc(1/1))", true},
     {"all and (min-color: 2)", true},
     {"all and (min-color: 32)", false},
     {"all and (min-color-index: 0)", true},
@@ -94,8 +97,13 @@ MediaQueryEvaluatorTestCase g_screen_test_cases[] = {
     {"(display-mode: @browser)", false},
     {"(display-mode: 'browser')", false},
     {"(display-mode: @junk browser)", false},
+    {"(display-mode: tabbed)", false},
     {"(max-device-aspect-ratio: 4294967295/1)", true},
     {"(min-device-aspect-ratio: 1/4294967296)", true},
+    {"(max-device-aspect-ratio: 0.5)", false},
+    {"(max-device-aspect-ratio: 0.6/0.5)", true},
+    {"(min-device-aspect-ratio: 1/2)", true},
+    {"(max-device-aspect-ratio: 1.5)", true},
     {nullptr, false}  // Do not remove the terminator line.
 };
 
@@ -177,24 +185,6 @@ MediaQueryEvaluatorTestCase g_print_test_cases[] = {
     {"print and (min-resolution: 1dppx)", true},
     {"print and (min-resolution: 118dpcm)", true},
     {"print and (min-resolution: 119dpcm)", false},
-    {nullptr, false}  // Do not remove the terminator line.
-};
-
-MediaQueryEvaluatorTestCase g_non_immersive_test_cases[] = {
-    {"(immersive: 1)", false},
-    {"(immersive: 0)", true},
-    {nullptr, false}  // Do not remove the terminator line.
-};
-
-MediaQueryEvaluatorTestCase g_immersive_test_cases[] = {
-    {"(immersive: 1)", true},
-    {"(immersive: 0)", false},
-    {nullptr, false}  // Do not remove the terminator line.
-};
-
-MediaQueryEvaluatorTestCase g_non_ua_sheet_immersive_test_cases[] = {
-    {"(immersive: 1)", false},
-    {"(immersive: 0)", false},
     {nullptr, false}  // Do not remove the terminator line.
 };
 
@@ -361,6 +351,30 @@ MediaQueryEvaluatorTestCase g_video_dynamic_range_feature_disabled_cases[] = {
     {nullptr, false}  // Do not remove the terminator line.
 };
 
+// Tests when the output device is print.
+MediaQueryEvaluatorTestCase g_overflow_with_print_device_test_cases[] = {
+    {"(overflow-inline)", false},
+    {"(overflow-block)", true},
+    {"(overflow-inline: none)", true},
+    {"(overflow-block: none)", false},
+    {"(overflow-block: paged)", true},
+    {"(overflow-inline: scroll)", false},
+    {"(overflow-block: scroll)", false},
+    {nullptr, false}  // Do not remove the terminator line.
+};
+
+// Tests when the output device is scrollable.
+MediaQueryEvaluatorTestCase g_overflow_with_scrollable_device_test_cases[] = {
+    {"(overflow-inline)", true},
+    {"(overflow-block)", true},
+    {"(overflow-inline: none)", false},
+    {"(overflow-block: none)", false},
+    {"(overflow-block: paged)", false},
+    {"(overflow-inline: scroll)", true},
+    {"(overflow-block: scroll)", true},
+    {nullptr, false}  // Do not remove the terminator line.
+};
+
 void TestMQEvaluator(MediaQueryEvaluatorTestCase* test_cases,
                      const MediaQueryEvaluator& media_query_evaluator,
                      CSSParserMode mode) {
@@ -399,7 +413,6 @@ TEST(MediaQueryEvaluatorTest, Cached) {
   data.media_type = media_type_names::kScreen;
   data.strict_mode = true;
   data.display_mode = blink::mojom::DisplayMode::kBrowser;
-  data.immersive_mode = false;
 
   // Default values.
   {
@@ -407,9 +420,6 @@ TEST(MediaQueryEvaluatorTest, Cached) {
     MediaQueryEvaluator media_query_evaluator(media_values);
     TestMQEvaluator(g_screen_test_cases, media_query_evaluator);
     TestMQEvaluator(g_viewport_test_cases, media_query_evaluator);
-    TestMQEvaluator(g_non_immersive_test_cases, media_query_evaluator,
-                    kUASheetMode);
-    TestMQEvaluator(g_non_ua_sheet_immersive_test_cases, media_query_evaluator);
   }
 
   // Print values.
@@ -432,15 +442,22 @@ TEST(MediaQueryEvaluatorTest, Cached) {
     data.monochrome_bits_per_component = 0;
   }
 
-  // Immersive values.
+  // Overflow values with printing.
   {
-    data.immersive_mode = true;
+    data.media_type = media_type_names::kPrint;
     auto* media_values = MakeGarbageCollected<MediaValuesCached>(data);
     MediaQueryEvaluator media_query_evaluator(media_values);
-    TestMQEvaluator(g_immersive_test_cases, media_query_evaluator,
-                    kUASheetMode);
-    TestMQEvaluator(g_non_ua_sheet_immersive_test_cases, media_query_evaluator);
-    data.immersive_mode = false;
+    TestMQEvaluator(g_overflow_with_print_device_test_cases,
+                    media_query_evaluator);
+    data.media_type = media_type_names::kScreen;
+  }
+
+  // Overflow values with scrolling.
+  {
+    auto* media_values = MakeGarbageCollected<MediaValuesCached>(data);
+    MediaQueryEvaluator media_query_evaluator(media_values);
+    TestMQEvaluator(g_overflow_with_scrollable_device_test_cases,
+                    media_query_evaluator);
   }
 }
 
@@ -450,8 +467,12 @@ TEST(MediaQueryEvaluatorTest, Dynamic) {
 
   MediaQueryEvaluator media_query_evaluator(&page_holder->GetFrame());
   TestMQEvaluator(g_viewport_test_cases, media_query_evaluator);
+  TestMQEvaluator(g_overflow_with_scrollable_device_test_cases,
+                  media_query_evaluator);
   page_holder->GetFrameView().SetMediaType(media_type_names::kPrint);
   TestMQEvaluator(g_print_test_cases, media_query_evaluator);
+  TestMQEvaluator(g_overflow_with_print_device_test_cases,
+                  media_query_evaluator);
 }
 
 TEST(MediaQueryEvaluatorTest, DynamicNoView) {
@@ -483,19 +504,6 @@ TEST(MediaQueryEvaluatorTest, CachedFloatViewportNonFloatFriendly) {
   MediaQueryEvaluator media_query_evaluator(media_values);
   TestMQEvaluator(g_float_non_friendly_viewport_test_cases,
                   media_query_evaluator);
-}
-
-TEST(MediaQueryEvaluatorTest, DynamicImmersive) {
-  auto page_holder = std::make_unique<DummyPageHolder>(gfx::Size(500, 500));
-  page_holder->GetFrameView().SetMediaType(media_type_names::kScreen);
-
-  MediaQueryEvaluator media_query_evaluator(&page_holder->GetFrame());
-  page_holder->GetDocument().GetSettings()->SetImmersiveModeEnabled(false);
-
-  TestMQEvaluator(g_non_immersive_test_cases, media_query_evaluator,
-                  kUASheetMode);
-  page_holder->GetDocument().GetSettings()->SetImmersiveModeEnabled(true);
-  TestMQEvaluator(g_immersive_test_cases, media_query_evaluator, kUASheetMode);
 }
 
 TEST(MediaQueryEvaluatorTest, CachedForcedColors) {
@@ -1078,8 +1086,6 @@ TEST(MediaQueryEvaluatorTest, DependentResults) {
 }
 
 TEST(MediaQueryEvaluatorTest, CSSMediaQueries4) {
-  ScopedCSSMediaQueries4ForTest media_queries_4_flag(true);
-
   MediaValuesCached::MediaValuesCachedData data;
   data.viewport_width = 500;
   data.viewport_height = 500;
@@ -1139,41 +1145,40 @@ TEST(MediaQueryEvaluatorTest, GeneralEnclosed) {
       {"not (unknown: 1px)", false},
       {"(width) or (unknown: 1px)", true},
       {"(unknown: 1px) or (width)", true},
+      {"(width: 42px) or (unknown: 1px)", false},
+      {"(unknown: 1px) or (width: 42px)", false},
+      {"not ((width: 42px) or (unknown: 1px))", false},
+      {"not ((unknown: 1px) or (width: 42px))", false},
       {"not ((width) or (unknown: 1px))", false},
       {"not ((unknown: 1px) or (width))", false},
       {"(width) and (unknown: 1px)", false},
       {"(unknown: 1px) and (width)", false},
+      {"(width: 42px) and (unknown: 1px)", false},
+      {"(unknown: 1px) and (width: 42px)", false},
+      {"not ((width: 42px) and (unknown: 1px))", true},
+      {"not ((unknown: 1px) and (width: 42px))", true},
       {"not ((width) and (unknown: 1px))", false},
       {"not ((unknown: 1px) and (width))", false},
   };
 
-  // Run the same tests twice (CSSMediaQueries4 on/off).
-  Vector<bool> flag_values = {true, false};
-  for (bool flag : flag_values) {
-    ScopedCSSMediaQueries4ForTest media_queries_4_flag(flag);
-
-    for (const MediaQueryEvaluatorTestCase& test : tests) {
-      SCOPED_TRACE(String(test.input));
-      String input(test.input);
-      MediaQuerySet* query_set =
-          MediaQueryParser::ParseMediaQuerySet(input, nullptr);
-      ASSERT_TRUE(query_set);
-      // Always expect `false` with CSSMediaQueries4 disabled, otherwise
-      // expect `test.output`.
-      EXPECT_EQ(flag && test.output, media_query_evaluator.Eval(*query_set));
-    }
+  for (const MediaQueryEvaluatorTestCase& test : tests) {
+    SCOPED_TRACE(String(test.input));
+    String input(test.input);
+    MediaQuerySet* query_set =
+        MediaQueryParser::ParseMediaQuerySet(input, nullptr);
+    ASSERT_TRUE(query_set);
+    EXPECT_EQ(test.output, media_query_evaluator.Eval(*query_set));
   }
 }
 
 class MediaQueryEvaluatorIdentifiabilityTest : public PageTestBase {
  public:
-  MediaQueryEvaluatorIdentifiabilityTest() {
-    CallCounts counts{.response_for_is_active = true,
-                      .response_for_is_anything_blocked = false,
-                      .response_for_is_allowed = true};
-
+  MediaQueryEvaluatorIdentifiabilityTest()
+      : counts_{.response_for_is_active = true,
+                .response_for_is_anything_blocked = false,
+                .response_for_is_allowed = true} {
     IdentifiabilityStudySettings::SetGlobalProvider(
-        std::make_unique<CountingSettingsProvider>(&counts));
+        std::make_unique<CountingSettingsProvider>(&counts_));
   }
   ~MediaQueryEvaluatorIdentifiabilityTest() override {
     IdentifiabilityStudySettings::ResetStateForTesting();
@@ -1184,6 +1189,7 @@ class MediaQueryEvaluatorIdentifiabilityTest : public PageTestBase {
   }
 
  protected:
+  CallCounts counts_;
   test::ScopedIdentifiabilityTestSampleCollector collector_;
   void UpdateAllLifecyclePhases() {
     GetDocument().View()->UpdateAllLifecyclePhasesForTest();

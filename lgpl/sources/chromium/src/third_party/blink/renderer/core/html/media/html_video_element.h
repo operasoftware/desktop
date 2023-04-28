@@ -178,7 +178,7 @@ class CORE_EXPORT HTMLVideoElement final
   // ExecutionContextLifecycleStateObserver functions.
   void ContextDestroyed() final;
 
-  bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
+  bool LayoutObjectIsNeeded(const DisplayStyle&) const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   void AttachLayoutTree(AttachContext&) override;
   void UpdatePosterImage();
@@ -199,6 +199,7 @@ class CORE_EXPORT HTMLVideoElement final
   // interface, fully implemented in the parent class HTMLMediaElement.
   void RequestEnterPictureInPicture() final;
   void RequestExitPictureInPicture() final;
+  void RequestMediaRemoting() final;
 
   void DidMoveToNewDocument(Document& old_document) override;
 

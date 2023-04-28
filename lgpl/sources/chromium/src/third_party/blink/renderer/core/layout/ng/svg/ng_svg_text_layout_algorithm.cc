@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_length_context.h"
 #include "third_party/blink/renderer/core/svg/svg_text_content_element.h"
+#include "third_party/blink/renderer/platform/wtf/text/code_point_iterator.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
@@ -158,9 +159,9 @@ void NGSvgTextLayoutAlgorithm::SetFlags(
                            item.TextLength());
     // 2.2. Set middle to true if the character at index i is the second or
     // later character that corresponds to a typographic character.
-    for (unsigned text_offset = item_string.NextCodePointOffset(0);
-         text_offset < item_string.length();
-         text_offset = item_string.NextCodePointOffset(text_offset)) {
+    WTF::CodePointIterator iterator = item_string.begin();
+    const WTF::CodePointIterator end = item_string.end();
+    for (++iterator; iterator != end; ++iterator) {
       SvgPerCharacterInfo middle_info;
       middle_info.middle = true;
       middle_info.item_index = info.item_index;
@@ -207,8 +208,10 @@ void NGSvgTextLayoutAlgorithm::AdjustPositionsDxDy(
     // 2.3. Let result[i].x = CSS_positions[i].x + shift.x and
     // result[i].y = CSS_positions[i].y + shift.y.
     const float scaling_factor = ScalingFactorAt(items, i);
-    result_[i].x = css_positions_[i].x() + shift.x() * scaling_factor;
-    result_[i].y = css_positions_[i].y() + shift.y() * scaling_factor;
+    result_[i].x =
+        ClampTo<float>(css_positions_[i].x() + shift.x() * scaling_factor);
+    result_[i].y =
+        ClampTo<float>(css_positions_[i].y() + shift.y() * scaling_factor);
   }
 }
 
@@ -240,9 +243,9 @@ void NGSvgTextLayoutAlgorithm::ResolveTextLength(
   const unsigned i = range.start_index;
   const unsigned j_plus_1 = range.end_index + 1;
   auto* element = To<SVGTextContentElement>(range.layout_object->GetNode());
-  const float text_length =
+  const float text_length = ClampTo<float>(
       element->textLength()->CurrentValue()->Value(SVGLengthContext(element)) *
-      ScalingFactorAt(items, i);
+      ScalingFactorAt(items, i));
   const SVGLengthAdjustType length_adjust =
       element->lengthAdjust()->CurrentEnumValue();
 
@@ -312,14 +315,16 @@ void NGSvgTextLayoutAlgorithm::ResolveTextLength(
                              return !info.middle && !info.text_length_resolved;
                            });
     // 2.4.3. Let n = n + number of resolved descendant nodes − 1.
-    n += std::count_if(resolved_descendant_node_starts.begin(),
-                       resolved_descendant_node_starts.end(),
-                       [i, j_plus_1](const auto& start_index) {
-                         return i <= start_index && start_index < j_plus_1;
-                       }) -
+    n += base::ranges::count_if(resolved_descendant_node_starts,
+                                [i, j_plus_1](const auto& start_index) {
+                                  return i <= start_index &&
+                                         start_index < j_plus_1;
+                                }) -
          1;
     // 2.4.4. Find the per-character adjustment small-delta = delta/n.
-    float character_delta = n != 0 ? delta / n : delta;
+    // character_delta should be 0 if n==0 because it means we have no
+    // adjustable characters for this textLength.
+    float character_delta = n != 0 ? delta / n : 0;
     // 2.4.5. Let shift = 0.
     shift = 0.0f;
     // 2.4.6. For each index k in the range [i,j]:
@@ -410,6 +415,7 @@ void NGSvgTextLayoutAlgorithm::AdjustPositionsXY(
       // Take into account of baseline-shift.
       if (!horizontal_)
         shift.set_x(shift.x() + css_positions_[i].x());
+      shift.set_x(ClampTo<float>(shift.x()));
     }
     // 3.2. If resolved_y[index] is set, then let
     // shift.y = resolved_y[index] − result.y[index].
@@ -420,6 +426,7 @@ void NGSvgTextLayoutAlgorithm::AdjustPositionsXY(
       // Take into account of baseline-shift.
       if (horizontal_)
         shift.set_y(shift.y() + css_positions_[i].y());
+      shift.set_y(ClampTo<float>(shift.y()));
     }
 
     // If this character is the first one in a <textPath>, reset the
@@ -662,6 +669,8 @@ void NGSvgTextLayoutAlgorithm::PositionOnPath(
               info.x = point_tangent.point.x() * scaling_factor;
               info.y = point_tangent.point.y() * scaling_factor;
             }
+            info.x = ClampTo<float>(*info.x);
+            info.y = ClampTo<float>(*info.y);
           }
         }
       } else {
@@ -695,8 +704,10 @@ void NGSvgTextLayoutAlgorithm::PositionOnPath(
           PointAndTangent point_tangent;
           path_mapper->PointAndNormalAtLength(path_mapper->length(),
                                               point_tangent);
-          path_end_x = point_tangent.point.x() * scaling_factor - *info.x;
-          path_end_y = point_tangent.point.y() * scaling_factor - *info.y;
+          path_end_x = ClampTo<float>(point_tangent.point.x() * scaling_factor -
+                                      *info.x);
+          path_end_y = ClampTo<float>(point_tangent.point.y() * scaling_factor -
+                                      *info.y);
         } else {
           // The 'current text position' should be at the next to the last
           // drawn character.

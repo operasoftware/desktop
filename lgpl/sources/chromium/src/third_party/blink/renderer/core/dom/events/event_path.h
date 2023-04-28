@@ -46,8 +46,6 @@ class WindowEventContext;
 
 class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
  public:
-  using NodePath = HeapVector<Member<Node>, 64>;
-
   explicit EventPath(Node&, Event* = nullptr);
   EventPath(const EventPath&) = delete;
   EventPath& operator=(const EventPath&) = delete;
@@ -79,6 +77,10 @@ class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
 
   void AdjustForRelatedTarget(Node&, EventTarget* related_target);
   void AdjustForTouchEvent(const TouchEvent&);
+  // AdjustForDisabledFormControl will shrink this event path if there is a
+  // disabled form control in it so that the disabled form control and its
+  // parents are not included.
+  void AdjustForDisabledFormControl();
 
   bool DisabledFormControlExistsInPath() const;
   bool HasEventListenersInPath(const AtomicString& event_type) const;
@@ -86,7 +88,6 @@ class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
   NodeEventContext& TopNodeEventContext();
 
   static EventTarget& EventTargetRespectingTargetRules(Node&);
-  static NodePath CalculateNodePath(Node&);
 
   void Trace(Visitor*) const;
   void Clear() {
@@ -99,8 +100,6 @@ class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
 
   void Initialize();
   void CalculatePath();
-  void CalculatePathCachingEnabled();
-  void CalculatePathCachingDisabled();
   void CalculateAdjustedTargets();
   void CalculateTreeOrderAndSetNearestAncestorClosedTree();
 

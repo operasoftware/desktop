@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/modules/mediarecorder/platform_video_encoder_adapter.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "media/base/bitrate.h"
 #include "media/base/video_codecs.h"
@@ -34,13 +34,11 @@ PlatformVideoEncoderAdapter::PlatformVideoEncoderAdapter(
     const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
     const VideoTrackRecorder::OnErrorCB& error_callback,
     uint32_t bits_per_second,
-    const gfx::Size& frame_size,
-    scoped_refptr<base::SequencedTaskRunner> main_task_runner)
+    const gfx::Size& frame_size)
     : Encoder(on_encoded_video_cb,
               bits_per_second > 0
                   ? bits_per_second
-                  : frame_size.GetArea() * kDefaultBitratePerPixel,
-              std::move(main_task_runner)),
+                  : frame_size.GetArea() * kDefaultBitratePerPixel),
       profile_(codec_profile.profile.value_or(media::H264PROFILE_BASELINE)),
       on_error_cb_(error_callback),
       encoder_(std::move(encoder)) {
@@ -53,7 +51,6 @@ PlatformVideoEncoderAdapter::~PlatformVideoEncoderAdapter() = default;
 void PlatformVideoEncoderAdapter::InitializeEncoder(const gfx::Size& frame_size) {
   DVLOG(1) << __func__ << " frame_size=" << frame_size.ToString()
            << " bits_per_second_=" << bits_per_second_;
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
 
   const bool was_initialized = is_encoder_initialized();
   frame_size_ = frame_size;
@@ -65,18 +62,19 @@ void PlatformVideoEncoderAdapter::InitializeEncoder(const gfx::Size& frame_size)
   options.bitrate = media::Bitrate::ConstantBitrate(bits_per_second_);
   options.keyframe_interval = 100;
 
-  auto output_cb = base::BindRepeating(
-      &PlatformVideoEncoderAdapter::OnEncodeOutputReady, this);
+  auto output_cb =
+      base::BindRepeating(&PlatformVideoEncoderAdapter::OnEncodeOutputReady,
+                          weak_factory_.GetWeakPtr());
 
   if (!was_initialized) {
     encoder_->Initialize(
-        profile_, options, std::move(output_cb),
+        profile_, options, base::DoNothing(), std::move(output_cb),
         OnSuccessRun(
             base::BindOnce(&PlatformVideoEncoderAdapter::set_configure_done,
-                           this)
+                           weak_factory_.GetWeakPtr())
                 .Then(base::BindOnce(
                     &PlatformVideoEncoderAdapter::MaybeEncodePendingFrame,
-                    this))));
+                    weak_factory_.GetWeakPtr()))));
   } else {
     // Unretained(encoder_.get()) is safe, because this runs synchronously from
     // the callback returned by OnSuccessRun(), which is safely bound to
@@ -86,18 +84,17 @@ void PlatformVideoEncoderAdapter::InitializeEncoder(const gfx::Size& frame_size)
         options, std::move(output_cb),
         OnSuccessRun(
             base::BindOnce(&PlatformVideoEncoderAdapter::set_configure_done,
-                           this)
+                           weak_factory_.GetWeakPtr())
                 .Then(base::BindOnce(
                     &PlatformVideoEncoderAdapter::MaybeEncodePendingFrame,
-                    this))))));
+                    weak_factory_.GetWeakPtr()))))));
   }
 }
 
-void PlatformVideoEncoderAdapter::EncodeOnEncodingTaskRunner(
+void PlatformVideoEncoderAdapter::EncodeFrame(
     scoped_refptr<media::VideoFrame> frame,
     base::TimeTicks capture_timestamp) {
   DVLOG(3) << __func__ << " " << frame->AsHumanReadableString();
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
 
   if (!frame) {
     DVLOG(1) << "No frame";
@@ -112,7 +109,6 @@ void PlatformVideoEncoderAdapter::EncodeOnEncodingTaskRunner(
 
 void PlatformVideoEncoderAdapter::MaybeEncodePendingFrame() {
   DVLOG(3) << __func__ << " pending_frames_.size()=" << pending_frames_.size();
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
 
   if (configuring_ || pending_frames_.empty())
     return;
@@ -126,10 +122,10 @@ void PlatformVideoEncoderAdapter::MaybeEncodePendingFrame() {
 
   pending_frames_.pop();
 
-  encoder_->Encode(
-      pending_frame.frame, /*key_frame=*/false,
-      OnSuccessRun(base::BindOnce(
-          &PlatformVideoEncoderAdapter::MaybeEncodePendingFrame, this)));
+  encoder_->Encode(pending_frame.frame, /*key_frame=*/false,
+                   OnSuccessRun(base::BindOnce(
+                       &PlatformVideoEncoderAdapter::MaybeEncodePendingFrame,
+                       weak_factory_.GetWeakPtr())));
 
   frames_in_encoder_.push(std::move(pending_frame));
 }
@@ -138,7 +134,6 @@ void PlatformVideoEncoderAdapter::OnEncodeOutputReady(
       media::VideoEncoderOutput output,
       absl::optional<media::VideoEncoder::CodecDescription>) {
   DVLOG(3) << __func__;
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(!frames_in_encoder_.empty());
 
   auto input_frame = std::move(frames_in_encoder_.front());
@@ -146,28 +141,21 @@ void PlatformVideoEncoderAdapter::OnEncodeOutputReady(
 
   std::string data(output.data.get(), output.data.get() + output.size);
 
-  PostCrossThreadTask(
-      *origin_task_runner_.get(), FROM_HERE,
-      CrossThreadBindOnce(
-          &OnFrameEncodeCompleted,
-          CrossThreadBindRepeating(on_encoded_video_cb_),
-          media::WebmMuxer::VideoParameters(std::move(input_frame.frame)),
-          std::move(data), /*alpha_data=*/std::string(),
-          input_frame.capture_timestamp, output.key_frame));
+  on_encoded_video_cb_.Run(media::Muxer::VideoParameters(*input_frame.frame),
+                           std::move(data), /*alpha_data=*/std::string(),
+                           input_frame.capture_timestamp, output.key_frame);
 }
 
 media::VideoEncoder::EncoderStatusCB PlatformVideoEncoderAdapter::OnSuccessRun(
     base::OnceClosure next_task) {
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
   return base::BindOnce(&PlatformVideoEncoderAdapter::OnEncoderTaskComplete,
-                        this, std::move(next_task));
+                        weak_factory_.GetWeakPtr(), std::move(next_task));
 }
 
 void PlatformVideoEncoderAdapter::OnEncoderTaskComplete(
     base::OnceClosure next_task,
     media::EncoderStatus status) {
   DVLOG(3) << __func__ << " status.code()=" << static_cast<int>(status.code());
-  DCHECK(encoding_task_runner_->RunsTasksInCurrentSequence());
 
   if (status.is_ok())
     std::move(next_task).Run();

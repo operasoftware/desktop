@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/modules/webaudio/deferred_task_handler.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
@@ -367,13 +368,16 @@ void DeferredTaskHandler::DeleteHandlersOnMainThread() {
 
 void DeferredTaskHandler::ClearHandlersToBeDeleted() {
   DCHECK(IsMainThread());
+  // crbug 1370091: Acquire graph lock before clearing
+  // rendering_automatic_pull_handlers_ to avoid race conditions on
+  // teardown.
+  GraphAutoLocker graph_locker(*this);
 
   {
     base::AutoLock locker(automatic_pull_handlers_lock_);
     rendering_automatic_pull_handlers_.clear();
   }
 
-  GraphAutoLocker locker(*this);
   tail_processing_handlers_.clear();
   rendering_orphan_handlers_.clear();
   deletable_orphan_handlers_.clear();

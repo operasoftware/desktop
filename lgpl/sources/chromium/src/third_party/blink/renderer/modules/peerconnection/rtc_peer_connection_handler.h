@@ -208,7 +208,8 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   virtual void GetStats(RTCStatsRequest* request);
   virtual void GetStats(
       RTCStatsReportCallback callback,
-      const Vector<webrtc::NonStandardGroupId>& exposed_group_ids);
+      const Vector<webrtc::NonStandardGroupId>& exposed_group_ids,
+      bool is_track_stats_deprecation_trial_enabled);
   virtual webrtc::RTCErrorOr<std::unique_ptr<RTCRtpTransceiverPlatform>>
   AddTransceiverWithTrack(MediaStreamComponent* component,
                           const webrtc::RtpTransceiverInit& init);
@@ -392,11 +393,11 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
       webrtc::CreateSessionDescriptionObserver* observer,
       webrtc::PeerConnectionInterface::RTCOfferAnswerOptions offer_options,
       blink::TransceiverStateSurfacer* transceiver_state_surfacer);
-  std::vector<std::unique_ptr<blink::RTCRtpSenderImpl>>::iterator FindSender(
+  Vector<std::unique_ptr<blink::RTCRtpSenderImpl>>::iterator FindSender(
       uintptr_t id);
-  std::vector<std::unique_ptr<blink::RTCRtpReceiverImpl>>::iterator
-  FindReceiver(uintptr_t id);
-  std::vector<std::unique_ptr<blink::RTCRtpTransceiverImpl>>::iterator
+  Vector<std::unique_ptr<blink::RTCRtpReceiverImpl>>::iterator FindReceiver(
+      uintptr_t id);
+  Vector<std::unique_ptr<blink::RTCRtpTransceiverImpl>>::iterator
   FindTransceiver(uintptr_t id);
   // For full transceiver implementations, returns the index of
   // |rtp_transceivers_| that correspond to |platform_transceiver|.
@@ -405,7 +406,7 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   // For receiver-only transceiver implementations, returns the index of
   // |rtp_receivers_| that correspond to |platform_transceiver.Receiver()|.
   // NOTREACHED()-crashes if no correspondent is found.
-  size_t GetTransceiverIndex(
+  wtf_size_t GetTransceiverIndex(
       const RTCRtpTransceiverPlatform& platform_transceiver);
   std::unique_ptr<blink::RTCRtpTransceiverImpl> CreateOrUpdateTransceiver(
       blink::RtpTransceiverState transceiver_state,
@@ -452,11 +453,11 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   // any components referencing it.
   scoped_refptr<blink::WebRtcMediaStreamTrackAdapterMap> track_adapter_map_;
   // Blink layer correspondents of |webrtc::RtpSenderInterface|.
-  std::vector<std::unique_ptr<blink::RTCRtpSenderImpl>> rtp_senders_;
+  Vector<std::unique_ptr<blink::RTCRtpSenderImpl>> rtp_senders_;
   // Blink layer correspondents of |webrtc::RtpReceiverInterface|.
-  std::vector<std::unique_ptr<blink::RTCRtpReceiverImpl>> rtp_receivers_;
+  Vector<std::unique_ptr<blink::RTCRtpReceiverImpl>> rtp_receivers_;
   // Blink layer correspondents of |webrtc::RtpTransceiverInterface|.
-  std::vector<std::unique_ptr<blink::RTCRtpTransceiverImpl>> rtp_transceivers_;
+  Vector<std::unique_ptr<blink::RTCRtpTransceiverImpl>> rtp_transceivers_;
   // A snapshot of transceiver ids taken before the last transition, used to
   // detect any removals during rollback.
   Vector<uintptr_t> previous_transceiver_ids_;
@@ -464,13 +465,6 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   WeakPersistent<PeerConnectionTracker> peer_connection_tracker_;
 
   MediaStreamTrackMetrics track_metrics_;
-
-  // Counter for a UMA stat reported at destruction time.
-  int num_data_channels_created_ = 0;
-
-  // Counter for number of IPv4 and IPv6 local candidates.
-  int num_local_candidates_ipv4_ = 0;
-  int num_local_candidates_ipv6_ = 0;
 
   // To make sure the observers are released after native_peer_connection_,
   // they have to come first.
@@ -505,8 +499,6 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
   // unit tests) are ignored.
   std::unique_ptr<FirstSessionDescription> first_local_description_;
   std::unique_ptr<FirstSessionDescription> first_remote_description_;
-
-  base::TimeTicks ice_connection_checking_start_;
 
   // Track which ICE Connection state that this PeerConnection has gone through.
   bool ice_state_seen_[webrtc::PeerConnectionInterface::kIceConnectionMax] = {};

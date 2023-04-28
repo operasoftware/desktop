@@ -33,8 +33,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/checked_math.h"
@@ -113,6 +113,7 @@
 #include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "ui/base/resource/resource_scale_factor.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "v8/include/v8.h"
 
@@ -167,6 +168,7 @@ HTMLCanvasElement::HTMLCanvasElement(Document& document)
     CanvasResourceTracker::For(execution_context->GetIsolate())
         ->Add(this, execution_context);
   }
+  SetHasCustomStyleCallbacks();
 }
 
 HTMLCanvasElement::~HTMLCanvasElement() {
@@ -209,6 +211,12 @@ void HTMLCanvasElement::Dispose() {
   }
 }
 
+void HTMLCanvasElement::ColorSchemeMayHaveChanged() {
+  if (context_) {
+    context_->ColorSchemeMayHaveChanged();
+  }
+}
+
 void HTMLCanvasElement::ParseAttribute(
     const AttributeModificationParams& params) {
   if (params.name == html_names::kWidthAttr ||
@@ -234,6 +242,7 @@ LayoutObject* HTMLCanvasElement::CreateLayoutObject(const ComputedStyle& style,
 Node::InsertionNotificationRequest HTMLCanvasElement::InsertedInto(
     ContainerNode& node) {
   SetIsInCanvasSubtree(true);
+  ColorSchemeMayHaveChanged();
   return HTMLElement::InsertedInto(node);
 }
 
@@ -416,7 +425,7 @@ CanvasRenderingContext* HTMLCanvasElement::GetCanvasRenderingContextInternal(
       return nullptr;
     SetNeedsUnbufferedInputEvents(true);
     frame_dispatcher_ = std::make_unique<CanvasResourceDispatcher>(
-        nullptr,
+        nullptr, GetDocument().GetTaskRunner(TaskType::kInternalDefault),
         GetPage()
             ->GetPageScheduler()
             ->GetAgentGroupScheduler()
@@ -442,19 +451,28 @@ CanvasRenderingContext* HTMLCanvasElement::GetCanvasRenderingContextInternal(
 void HTMLCanvasElement::configureHighDynamicRange(
     const CanvasHighDynamicRangeOptions* options,
     ExceptionState& exception_state) {
+  gfx::HDRMode hdr_mode = gfx::HDRMode::kDefault;
+  if (options->hasMode()) {
+    switch (options->mode().AsEnum()) {
+      case V8CanvasHighDynamicRangeMode::Enum::kDefault:
+        hdr_mode = gfx::HDRMode::kDefault;
+        break;
+      case V8CanvasHighDynamicRangeMode::Enum::kExtended:
+        hdr_mode = gfx::HDRMode::kExtended;
+        break;
+    }
+  }
   absl::optional<gfx::HDRMetadata> hdr_metadata;
   if (options->hasSmpteSt2086Metadata()) {
     hdr_metadata = gfx::HDRMetadata();
     auto& color_volume_metadata = hdr_metadata->color_volume_metadata;
     const auto* v8_metadata = options->smpteSt2086Metadata();
-    color_volume_metadata.primary_r.set_x(v8_metadata->redPrimaryX());
-    color_volume_metadata.primary_r.set_y(v8_metadata->redPrimaryY());
-    color_volume_metadata.primary_g.set_x(v8_metadata->greenPrimaryX());
-    color_volume_metadata.primary_g.set_y(v8_metadata->greenPrimaryY());
-    color_volume_metadata.primary_b.set_x(v8_metadata->bluePrimaryX());
-    color_volume_metadata.primary_b.set_y(v8_metadata->bluePrimaryY());
-    color_volume_metadata.white_point.set_x(v8_metadata->whitePointX());
-    color_volume_metadata.white_point.set_y(v8_metadata->whitePointY());
+    color_volume_metadata.primaries = {
+        v8_metadata->redPrimaryX(),   v8_metadata->redPrimaryY(),
+        v8_metadata->greenPrimaryX(), v8_metadata->greenPrimaryY(),
+        v8_metadata->bluePrimaryX(),  v8_metadata->bluePrimaryY(),
+        v8_metadata->whitePointX(),   v8_metadata->whitePointY(),
+    };
     color_volume_metadata.luminance_min = v8_metadata->minimumLuminance();
     color_volume_metadata.luminance_max = v8_metadata->maximumLuminance();
   }
@@ -465,22 +483,12 @@ void HTMLCanvasElement::configureHighDynamicRange(
     NOTIMPLEMENTED();
   }
 
-  CanvasResourceHost::SetHDRMetadata(hdr_metadata);
+  CanvasResourceHost::SetHDRConfiguration(hdr_mode, hdr_metadata);
   if (context_ && (IsWebGL() || IsWebGPU())) {
-    // TODO(https://crbug.com/1274220): Implement HDR support for WebGL and
-    // WebGPU.
-    NOTIMPLEMENTED();
+    context_->SetHDRConfiguration(hdr_mode, hdr_metadata);
   } else if (canvas2d_bridge_) {
-    canvas2d_bridge_->SetHDRMetadata(hdr_metadata);
+    canvas2d_bridge_->SetHDRConfiguration(hdr_mode, hdr_metadata);
   }
-}
-
-ScriptPromise HTMLCanvasElement::convertToBlob(
-    ScriptState* script_state,
-    const ImageEncodeOptions* options,
-    ExceptionState& exception_state) {
-  return CanvasRenderingContextHost::convertToBlob(script_state, options,
-                                                   exception_state, context_);
 }
 
 bool HTMLCanvasElement::ShouldBeDirectComposited() const {
@@ -528,21 +536,33 @@ void HTMLCanvasElement::SetContextCreationWasBlocked() {
 void HTMLCanvasElement::DidDraw(const SkIRect& rect) {
   if (rect.isEmpty())
     return;
-  if (GetLayoutObject() && GetLayoutObject()->PreviousVisibilityVisible() &&
-      GetDocument().GetPage())
-    GetDocument().GetPage()->Animator().SetHasCanvasInvalidation();
+
+  // To avoid issuing invalidations multiple times, we can check |dirty_rect_|
+  // and only issue invalidations the first time it becomes non-empty.
+  if (dirty_rect_.IsEmpty()) {
+    if (LayoutObject* layout_object = GetLayoutObject()) {
+      if (layout_object->PreviousVisibilityVisible() &&
+          GetDocument().GetPage()) {
+        GetDocument().GetPage()->Animator().SetHasCanvasInvalidation();
+      }
+      if (!LowLatencyEnabled()) {
+        layout_object->SetShouldCheckForPaintInvalidation();
+      }
+    }
+  }
+
   canvas_is_clear_ = false;
-  if (GetLayoutObject() && !LowLatencyEnabled())
-    GetLayoutObject()->SetShouldCheckForPaintInvalidation();
-  if (IsRenderingContext2D() && context_->ShouldAntialias() && GetPage()) {
+  const bool is_rendering_context2d = IsRenderingContext2D();
+  if (is_rendering_context2d && context_->ShouldAntialias()) {
     gfx::RectF inflated_rect(gfx::SkIRectToRect(rect));
     inflated_rect.Outset(1);
     dirty_rect_.Union(inflated_rect);
   } else {
     dirty_rect_.Union(gfx::RectF(gfx::SkIRectToRect(rect)));
   }
-  if (IsRenderingContext2D() && canvas2d_bridge_)
+  if (is_rendering_context2d && canvas2d_bridge_) {
     canvas2d_bridge_->DidDraw();
+  }
 }
 
 void HTMLCanvasElement::PreFinalizeFrame() {
@@ -876,7 +896,7 @@ void HTMLCanvasElement::Paint(GraphicsContext& context,
         gfx::Vector2dF(icon_size.width(), icon_size.height());
     // Make the icon more visually prominent on high-DPI displays.
     icon_size.Scale(dpr);
-    context.DrawImage(broken_canvas, Image::kSyncDecode,
+    context.DrawImage(*broken_canvas, Image::kSyncDecode,
                       ImageAutoDarkMode::Disabled(), ImagePaintTimingInfo(),
                       gfx::RectF(upper_left, icon_size));
     context.Restore();
@@ -899,7 +919,9 @@ void HTMLCanvasElement::Paint(GraphicsContext& context,
     DCHECK(GetDocument().Printing());
     scoped_refptr<StaticBitmapImage> image_for_printing =
         OffscreenCanvasFrame()->Bitmap()->MakeUnaccelerated();
-    context.DrawImage(image_for_printing.get(), Image::kSyncDecode,
+    if (!image_for_printing)
+      return;
+    context.DrawImage(*image_for_printing, Image::kSyncDecode,
                       ImageAutoDarkMode::Disabled(), ImagePaintTimingInfo(),
                       gfx::RectF(ToPixelSnappedRect(r)));
     return;
@@ -923,18 +945,17 @@ void HTMLCanvasElement::PaintInternal(GraphicsContext& context,
     // display list rendering: we replay the last full PaintRecord, if Canvas
     // has been redraw since beforeprint happened.
     if (IsPrinting() && IsRenderingContext2D() && canvas2d_bridge_) {
-      canvas2d_bridge_->FlushRecording();
-      if (canvas2d_bridge_->getLastRecord()) {
-        if (FilterQuality() != cc::PaintFlags::FilterQuality::kNone) {
-          context.Canvas()->save();
-          context.Canvas()->translate(r.X(), r.Y());
-          context.Canvas()->scale(r.Width() / Size().width(),
-                                  r.Height() / Size().height());
-          context.Canvas()->drawPicture(canvas2d_bridge_->getLastRecord());
-          context.Canvas()->restore();
-          UMA_HISTOGRAM_BOOLEAN("Blink.Canvas.2DPrintingAsVector", true);
-          return;
-        }
+      canvas2d_bridge_->FlushRecording(/*printing=*/true);
+      if (canvas2d_bridge_->getLastRecord() &&
+          FilterQuality() != cc::PaintFlags::FilterQuality::kNone) {
+        context.Canvas()->save();
+        context.Canvas()->translate(r.X(), r.Y());
+        context.Canvas()->scale(r.Width() / Size().width(),
+                                r.Height() / Size().height());
+        context.Canvas()->drawPicture(*canvas2d_bridge_->getLastRecord());
+        context.Canvas()->restore();
+        UMA_HISTOGRAM_BOOLEAN("Blink.Canvas.2DPrintingAsVector", true);
+        return;
       }
       UMA_HISTOGRAM_BOOLEAN("Blink.Canvas.2DPrintingAsVector", false);
     }
@@ -952,7 +973,7 @@ void HTMLCanvasElement::PaintInternal(GraphicsContext& context,
       // GraphicsContext cannot handle gpu resource serialization.
       snapshot = snapshot->MakeUnaccelerated();
       DCHECK(!snapshot->IsTextureBacked());
-      context.DrawImage(snapshot.get(), Image::kSyncDecode,
+      context.DrawImage(*snapshot, Image::kSyncDecode,
                         ImageAutoDarkMode::Disabled(), ImagePaintTimingInfo(),
                         gfx::RectF(ToPixelSnappedRect(r)), &src_rect,
                         composite_operator);
@@ -1308,10 +1329,14 @@ void HTMLCanvasElement::SetCanvas2DLayerBridgeInternal(
     // resource provider fails, the canvas will fallback to CPU rendering.
     UMA_HISTOGRAM_BOOLEAN(
         "Blink.Canvas.2DLayerBridge.WillReadFrequently",
-        context_ && context_->CreationAttributes().will_read_frequently);
+        context_ &&
+            context_->CreationAttributes().will_read_frequently ==
+                CanvasContextCreationAttributesCore::WillReadFrequently::kTrue);
 
-    if (ShouldAccelerate() && context_ &&
-        !context_->CreationAttributes().will_read_frequently) {
+    bool will_read_frequently =
+        context_->CreationAttributes().will_read_frequently ==
+        CanvasContextCreationAttributesCore::WillReadFrequently::kTrue;
+    if (ShouldAccelerate() && context_ && !will_read_frequently) {
       canvas2d_bridge_ = Create2DLayerBridge(RasterMode::kGPU);
     }
     if (!canvas2d_bridge_) {
@@ -1449,6 +1474,16 @@ void HTMLCanvasElement::DidMoveToNewDocument(Document& old_document) {
   HTMLElement::DidMoveToNewDocument(old_document);
 }
 
+void HTMLCanvasElement::DidRecalcStyle(const StyleRecalcChange change) {
+  HTMLElement::DidRecalcStyle(change);
+  ColorSchemeMayHaveChanged();
+}
+
+void HTMLCanvasElement::RemovedFrom(ContainerNode& insertion_point) {
+  HTMLElement::RemovedFrom(insertion_point);
+  ColorSchemeMayHaveChanged();
+}
+
 void HTMLCanvasElement::WillDrawImageTo2DContext(CanvasImageSource* source) {
   if (SharedGpuContext::AllowSoftwareToAcceleratedCanvasUpgrade() &&
       source->IsAccelerated() && GetOrCreateCanvas2DLayerBridge() &&
@@ -1557,7 +1592,7 @@ ScriptPromise HTMLCanvasElement::CreateImageBitmap(
     ExceptionState& exception_state) {
   return ImageBitmapSource::FulfillImageBitmap(
       script_state, MakeGarbageCollected<ImageBitmap>(this, crop_rect, options),
-      exception_state);
+      options, exception_state);
 }
 
 void HTMLCanvasElement::SetOffscreenCanvasResource(

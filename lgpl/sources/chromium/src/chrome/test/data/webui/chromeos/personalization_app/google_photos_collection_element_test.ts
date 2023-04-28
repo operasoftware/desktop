@@ -6,7 +6,7 @@ import 'chrome://personalization/strings.m.js';
 import 'chrome://webui-test/mojo_webui_test_support.js';
 
 import {GooglePhotosAlbum, GooglePhotosCollection, GooglePhotosEnablementState, Paths, PersonalizationRouter} from 'chrome://personalization/js/personalization_app.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 
@@ -83,6 +83,8 @@ suite('GooglePhotosCollectionTest', function() {
       title: '',
       photoCount: 0,
       preview: {url: ''},
+      timestamp: {internalValue: BigInt('1')},
+      isShared: false,
     }]);
 
     // Initialize |googlePhotosCollectionElement|.
@@ -145,6 +147,8 @@ suite('GooglePhotosCollectionTest', function() {
       title: 'Album 0',
       photoCount: 1,
       preview: {url: 'foo.com'},
+      timestamp: {internalValue: BigInt(`13318040939308000`)},
+      isShared: false,
     }];
     wallpaperProvider.setGooglePhotosAlbums(albums);
     wallpaperProvider.setGooglePhotosPhotos([{
@@ -280,8 +284,14 @@ suite('GooglePhotosCollectionTest', function() {
   });
 
   test('displays zero state when photos by album id is empty', async () => {
-    const album = new GooglePhotosAlbum();
-    album.id = '1';
+    const album: GooglePhotosAlbum = {
+      id: '1',
+      title: '',
+      photoCount: 0,
+      isShared: false,
+      preview: {url: ''},
+      timestamp: {internalValue: BigInt(0)},
+    };
 
     // Initialize Google Photos data in the |personalizationStore|.
     personalizationStore.data.wallpaper.googlePhotos.photosByAlbumId[album.id] =

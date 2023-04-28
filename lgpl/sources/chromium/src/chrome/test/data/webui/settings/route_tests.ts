@@ -25,8 +25,7 @@ suite('route', function() {
   }
 
   teardown(function() {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
   });
 
   /**
@@ -254,10 +253,14 @@ suite('route', function() {
     assertTrue(routes.TRIGGERED_RESET_DIALOG.isNavigableDialog);
     assertTrue(routes.TRIGGERED_RESET_DIALOG.parent === routes.RESET);
 
-    assertTrue(routes.SIGN_OUT.isNavigableDialog);
-    assertTrue(routes.SIGN_OUT.parent === routes.PEOPLE);
+    // <if expr="chromeos_ash">
+    // Regression test for b/265453606.
+    assertFalse(!!routes.SIGN_OUT);
+    // </if>
 
     // <if expr="not chromeos_ash">
+    assertTrue(routes.SIGN_OUT.isNavigableDialog);
+    assertTrue(routes.SIGN_OUT.parent === routes.PEOPLE);
     assertTrue(routes.IMPORT_DATA.isNavigableDialog);
     assertTrue(routes.IMPORT_DATA.parent === routes.PEOPLE);
     // </if>
@@ -313,8 +316,7 @@ suite('route', function() {
 
 suite('DynamicParameters', function() {
   setup(function() {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     window.history.replaceState({}, '', 'search?guid=a%2Fb&foo=42');
     const settingsUi = document.createElement('settings-ui');
     document.body.appendChild(settingsUi);
@@ -348,8 +350,7 @@ suite('DynamicParameters', function() {
 
 suite('NonExistentRoute', function() {
   setup(function() {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     window.history.replaceState({}, '', 'non/existent/route');
     const settingsUi = document.createElement('settings-ui');
     document.body.appendChild(settingsUi);

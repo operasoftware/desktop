@@ -7,7 +7,7 @@ import 'chrome://internet-detail-dialog/internet_detail_dialog_container.js';
 import {InternetDetailDialogBrowserProxyImpl} from 'chrome://internet-detail-dialog/internet_detail_dialog_container.js';
 import {MojoInterfaceProviderImpl} from 'chrome://resources/ash/common/network/mojo_interface_provider.js';
 import {OncMojo} from 'chrome://resources/ash/common/network/onc_mojo.js';
-import {CrosNetworkConfigRemote, InhibitReason} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/cros_network_config.mojom-webui.js';
+import {CrosNetworkConfigRemote, InhibitReason, MAX_NUM_CUSTOM_APNS} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/cros_network_config.mojom-webui.js';
 import {ConnectionStateType, DeviceStateType, NetworkType, OncSource, PortalState} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/network_types.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {FakeNetworkConfig} from 'chrome://test/chromeos/fake_network_config_mojom.js';
@@ -69,14 +69,14 @@ suite('internet-detail-dialog', () => {
     mojoApi_.resetForTest();
   });
 
-  async function init(captive_portal_2022) {
+  async function init() {
     internetDetailDialog = document.createElement('internet-detail-dialog');
-    internetDetailDialog.isCaptivePortalUI2022Enabled_ = captive_portal_2022;
     document.body.appendChild(internetDetailDialog);
     await flushAsync();
   }
 
-  async function setupCellularNetwork(isPrimary, isInhibited) {
+  async function setupCellularNetwork(
+      isPrimary, isInhibited, connectedApn, customApnList) {
     await mojoApi_.setNetworkTypeEnabledState(NetworkType.kCellular, true);
 
     const cellularNetwork =
@@ -88,6 +88,8 @@ suite('internet-detail-dialog', () => {
         ConnectionStateType.kNotConnected;
     // Required for networkChooseMobile to be rendered.
     cellularNetwork.typeProperties.cellular.supportNetworkScan = true;
+    cellularNetwork.typeProperties.cellular.connectedApn = connectedApn;
+    cellularNetwork.typeProperties.cellular.customApnList = customApnList;
 
     mojoApi_.setManagedPropertiesForTest(cellularNetwork);
     mojoApi_.setDeviceStateForTest({
@@ -126,7 +128,7 @@ suite('internet-detail-dialog', () => {
       wifiNetwork.portalState = PortalState.kPortal;
 
       mojoApi_.setManagedPropertiesForTest(wifiNetwork);
-      init(/*captive_portal_2022=*/ true);
+      init();
       return flushAsync().then(() => {
         const networkStateText =
             internetDetailDialog.shadowRoot.querySelector(`#networkState`);
@@ -150,7 +152,7 @@ suite('internet-detail-dialog', () => {
       wifiNetwork.portalState = PortalState.kNoInternet;
 
       mojoApi_.setManagedPropertiesForTest(wifiNetwork);
-      init(/*captive_portal_2022=*/ true);
+      init();
       return flushAsync().then(() => {
         const networkStateText =
             internetDetailDialog.shadowRoot.querySelector(`#networkState`);
@@ -175,7 +177,7 @@ suite('internet-detail-dialog', () => {
       wifiNetwork.portalState = PortalState.kProxyAuthRequired;
 
       mojoApi_.setManagedPropertiesForTest(wifiNetwork);
-      init(/*captive_portal_2022=*/ true);
+      init();
       return flushAsync().then(() => {
         const networkStateText =
             internetDetailDialog.shadowRoot.querySelector(`#networkState`);
@@ -187,30 +189,6 @@ suite('internet-detail-dialog', () => {
         assertTrue(!!signinButton);
         assertFalse(signinButton.hasAttribute('hidden'));
         assertFalse(signinButton.disabled);
-      });
-    });
-
-    test('WiFi in a portal portalState and feature flag disabled', function() {
-      mojoApi_.setNetworkTypeEnabledState(NetworkType.kWiFi, true);
-      const wifiNetwork = getManagedProperties(NetworkType.kWiFi, 'wifi_user');
-      wifiNetwork.source = OncSource.kUser;
-      wifiNetwork.connectable = true;
-      wifiNetwork.connectionState = ConnectionStateType.kPortal;
-      wifiNetwork.portalState = PortalState.kPortal;
-
-      mojoApi_.setManagedPropertiesForTest(wifiNetwork);
-      init(/*captive_portal_2022=*/ false);
-      return flushAsync().then(() => {
-        const networkStateText =
-            internetDetailDialog.shadowRoot.querySelector(`#networkState`);
-        assertTrue(networkStateText.hasAttribute('connected'));
-        assertEquals(
-            networkStateText.textContent.trim(),
-            internetDetailDialog.i18n('OncConnected'));
-        const signinButton =
-            internetDetailDialog.shadowRoot.querySelector(`#signinButton`);
-        // Button does not exist because feature flag is disabled.
-        assertTrue(!signinButton);
       });
     });
   });
@@ -305,4 +283,126 @@ suite('internet-detail-dialog', () => {
     assertFalse(networkNameservers.disabled);
     assertFalse(infoFields.disabled);
   });
+
+  // Syntactic sugar for running test twice with different values for the
+  // apnRevamp feature flag.
+  [true, false].forEach(isApnRevampEnabled => {
+    test('Show/Hide APN row correspondingly to ApnRevamp flag', async () => {
+      loadTimeData.overrideValues({
+        apnRevamp: isApnRevampEnabled,
+      });
+      await setupCellularNetwork(
+          /* isPrimary= */ true, /* isInhibited= */ false);
+
+      await init();
+      const legacyApnElement =
+          internetDetailDialog.shadowRoot.querySelector('network-apnlist');
+      const apnSection =
+          internetDetailDialog.shadowRoot.querySelector('cr-expand-button');
+
+      if (isApnRevampEnabled) {
+        assertFalse(!!legacyApnElement);
+        assertTrue(!!apnSection);
+        assertEquals(
+            internetDetailDialog.i18n('internetApnPageTitle'),
+            internetDetailDialog.shadowRoot.querySelector('#apnRowTitle')
+                .textContent);
+        const getApnSectionSublabel = () =>
+            internetDetailDialog.shadowRoot.querySelector('#apnRowSublabel')
+                .textContent.trim();
+        assertFalse(!!getApnSectionSublabel());
+        const getApnList = () =>
+            internetDetailDialog.shadowRoot.querySelector('apn-list');
+        assertTrue(!!getApnList());
+        assertTrue(getApnList().shouldOmitLinks);
+        const isApnListShowing = () =>
+            internetDetailDialog.shadowRoot.querySelector('iron-collapse')
+                .opened;
+        assertFalse(isApnListShowing());
+
+        // Add a connected APN.
+        const accessPointName = 'access point name';
+        await setupCellularNetwork(
+            /* isPrimary= */ true, /* isInhibited= */ false,
+            {accessPointName: accessPointName});
+
+        // Force a refresh.
+        internetDetailDialog.onDeviceStateListChanged();
+        await flushAsync();
+        assertEquals(accessPointName, getApnSectionSublabel());
+        assertFalse(isApnListShowing());
+
+        // Expand the section, the sublabel should no longer show.
+        apnSection.click();
+        await flushAsync();
+        assertFalse(!!getApnSectionSublabel());
+        assertTrue(isApnListShowing());
+
+        // Collapse the section, the sublabel should show.
+        apnSection.click();
+        await flushAsync();
+        assertEquals(accessPointName, getApnSectionSublabel());
+        assertFalse(isApnListShowing());
+      } else {
+        assertTrue(!!legacyApnElement);
+        assertFalse(!!apnSection);
+      }
+    });
+  });
+
+  test(
+      'Disable and show tooltip for New APN button when custom APNs limit is' +
+          'reached',
+      async () => {
+        loadTimeData.overrideValues({
+          apnRevamp: true,
+        });
+        await setupCellularNetwork(
+            /* isPrimary= */ true, /* isInhibited= */ false,
+            {accessPointName: 'access point name'}, []);
+        await init();
+        internetDetailDialog.shadowRoot.querySelector('cr-expand-button')
+            .click();
+
+        const getApnButton = () =>
+            internetDetailDialog.shadowRoot.querySelector(
+                '#createCustomApnButton');
+        const getApnTooltip = () =>
+            internetDetailDialog.shadowRoot.querySelector('#apnTooltip');
+
+        assertTrue(!!getApnButton());
+        assertFalse(!!getApnTooltip());
+        assertFalse(getApnButton().disabled);
+
+        // We're setting the list of APNs to the max number
+        await setupCellularNetwork(
+            /* isPrimary= */ true, /* isInhibited= */ false,
+            {accessPointName: 'access point name'},
+            Array.apply(null, {length: MAX_NUM_CUSTOM_APNS}).map(_ => {
+              return {
+                accessPointName: 'apn',
+              };
+            }));
+        internetDetailDialog.onDeviceStateListChanged();
+        await flushAsync();
+
+        assertTrue(!!getApnTooltip());
+        assertTrue(getApnButton().disabled);
+        assertTrue(getApnTooltip().innerHTML.includes(
+            internetDetailDialog.i18n('customApnLimitReached')));
+
+        await setupCellularNetwork(
+            /* isPrimary= */ true, /* isInhibited= */ false,
+            {accessPointName: 'access point name'}, []);
+        internetDetailDialog.onDeviceStateListChanged();
+        await flushAsync();
+
+        assertFalse(!!getApnTooltip());
+        assertFalse(getApnButton().disabled);
+
+        getApnButton().click();
+        await flushAsync();
+        assertTrue(!!internetDetailDialog.shadowRoot.querySelector('apn-list')
+                         .shadowRoot.querySelector('apn-detail-dialog'));
+      });
 });

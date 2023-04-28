@@ -4,16 +4,17 @@
 
 import 'chrome://os-settings/strings.m.js';
 
-import {Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
+import {OsBluetoothDevicesSubpageBrowserProxyImpl, Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
 import {mojoString16ToString} from 'chrome://resources/ash/common/bluetooth/bluetooth_utils.js';
 import {setBluetoothConfigForTesting} from 'chrome://resources/ash/common/bluetooth/cros_bluetooth_config.js';
 import {BluetoothSystemProperties, BluetoothSystemState, DeviceConnectionState, SystemPropertiesObserverInterface} from 'chrome://resources/mojo/chromeos/ash/services/bluetooth_config/public/mojom/cros_bluetooth_config.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {createDefaultBluetoothDevice, FakeBluetoothConfig} from 'chrome://test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
+import {assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {createDefaultBluetoothDevice, FakeBluetoothConfig} from 'chrome://webui-test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
 import {waitBeforeNextRender} from 'chrome://webui-test/polymer_test_util.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 
-import {assertEquals, assertNotEquals, assertTrue} from '../../../chai_assert.js';
+import {TestOsBluetoothDevicesSubpageBrowserProxy} from './test_os_bluetooth_subpage_browser_proxy.js';
 
 suite('OsBluetoothSummaryTest', function() {
   /** @type {!FakeBluetoothConfig} */
@@ -27,12 +28,18 @@ suite('OsBluetoothSummaryTest', function() {
    */
   let propertiesObserver;
 
+  /** @type {?OsBluetoothDevicesSubpageBrowserProxy} */
+  let browserProxy = null;
+
   setup(function() {
     bluetoothConfig = new FakeBluetoothConfig();
     setBluetoothConfigForTesting(bluetoothConfig);
   });
 
   function init() {
+    browserProxy = new TestOsBluetoothDevicesSubpageBrowserProxy();
+    OsBluetoothDevicesSubpageBrowserProxyImpl.setInstanceForTesting(
+        browserProxy);
     bluetoothSummary = document.createElement('os-settings-bluetooth-summary');
     document.body.appendChild(bluetoothSummary);
     flush();
@@ -64,8 +71,7 @@ suite('OsBluetoothSummaryTest', function() {
     assertTrue(!!iconButton);
 
     iconButton.click();
-    assertEquals(
-        Router.getInstance().getCurrentRoute(), routes.BLUETOOTH_DEVICES);
+    assertEquals(Router.getInstance().currentRoute, routes.BLUETOOTH_DEVICES);
     assertNotEquals(
         iconButton, bluetoothSummary.shadowRoot.activeElement,
         'subpage icon should not be focused');
@@ -109,6 +115,8 @@ suite('OsBluetoothSummaryTest', function() {
 
   test('Toggle button states', async function() {
     init();
+    assertEquals(0, browserProxy.getShowBluetoothRevampHatsSurveyCount());
+
     const enableBluetoothToggle =
         bluetoothSummary.shadowRoot.querySelector('#enableBluetoothToggle');
     assertTrue(!!enableBluetoothToggle);
@@ -120,6 +128,9 @@ suite('OsBluetoothSummaryTest', function() {
 
     // Toggle should be on since systemState is enabling.
     assertTrue(enableBluetoothToggle.checked);
+    assertEquals(
+        1, browserProxy.getShowBluetoothRevampHatsSurveyCount(),
+        'Count failed to increase');
 
     // Mock operation failing.
     bluetoothConfig.completeSetBluetoothEnabledState(/*success=*/ false);
@@ -127,6 +138,9 @@ suite('OsBluetoothSummaryTest', function() {
 
     // Toggle should be off again.
     assertFalse(enableBluetoothToggle.checked);
+    assertEquals(
+        1, browserProxy.getShowBluetoothRevampHatsSurveyCount(),
+        'Count failed to remain the same');
 
     // Click again.
     enableBluetoothToggle.click();
@@ -134,6 +148,9 @@ suite('OsBluetoothSummaryTest', function() {
 
     // Toggle should be on since systemState is enabling.
     assertTrue(enableBluetoothToggle.checked);
+    assertEquals(
+        2, browserProxy.getShowBluetoothRevampHatsSurveyCount(),
+        'Count failed to increase');
 
     // Mock operation success.
     bluetoothConfig.completeSetBluetoothEnabledState(/*success=*/ true);
@@ -141,11 +158,18 @@ suite('OsBluetoothSummaryTest', function() {
 
     // Toggle should still be on.
     assertTrue(enableBluetoothToggle.checked);
+    assertEquals(
+        2, browserProxy.getShowBluetoothRevampHatsSurveyCount(),
+        'Count failed to remain the same');
 
     // Mock systemState becoming unavailable.
     bluetoothConfig.setSystemState(BluetoothSystemState.kUnavailable);
     await flushAsync();
     assertTrue(enableBluetoothToggle.disabled);
+    assertFalse(enableBluetoothToggle.checked);
+    assertEquals(
+        2, browserProxy.getShowBluetoothRevampHatsSurveyCount(),
+        'Count failed to remain the same');
   });
 
   test('UI states test', async function() {
@@ -158,13 +182,17 @@ suite('OsBluetoothSummaryTest', function() {
         bluetoothSummary.shadowRoot.querySelector('#arrowIconButton');
     const getBluetoothStatusIcon = () =>
         bluetoothSummary.shadowRoot.querySelector('#statusIcon');
+    const getSecondaryLabel = () => bluetoothSecondaryLabel.textContent.trim();
+    const getPairNewDeviceBtn = () =>
+        bluetoothSummary.shadowRoot.querySelector('#pairNewDeviceBtn');
 
     assertFalse(!!getBluetoothArrowIconBtn());
     assertTrue(!!getBluetoothStatusIcon());
+    assertFalse(!!getPairNewDeviceBtn());
     assertTrue(!!bluetoothSecondaryLabel);
-    let label = bluetoothSecondaryLabel.textContent.trim();
 
-    assertEquals(bluetoothSummary.i18n('bluetoothSummaryPageOff'), label);
+    assertEquals(
+        bluetoothSummary.i18n('bluetoothSummaryPageOff'), getSecondaryLabel());
     assertEquals(
         'os-settings:bluetooth-disabled', getBluetoothStatusIcon().icon);
 
@@ -172,6 +200,7 @@ suite('OsBluetoothSummaryTest', function() {
     await flushAsync();
 
     assertTrue(!!getBluetoothArrowIconBtn());
+    assertTrue(!!getPairNewDeviceBtn());
     // Bluetooth Icon should be default because no devices are connected.
     assertEquals('cr:bluetooth', getBluetoothStatusIcon().icon);
 
@@ -203,39 +232,46 @@ suite('OsBluetoothSummaryTest', function() {
 
     assertEquals(
         'os-settings:bluetooth-connected', getBluetoothStatusIcon().icon);
-
-    label = bluetoothSecondaryLabel.textContent.trim();
     assertEquals(
         bluetoothSummary.i18n(
             'bluetoothSummaryPageTwoOrMoreDevicesDescription', device1.nickname,
             mockPairedBluetoothDeviceProperties.length - 1),
-        label);
+        getSecondaryLabel());
 
     // Simulate 2 connected devices.
     bluetoothConfig.removePairedDevice(device3);
     await flushAsync();
 
-    label = bluetoothSecondaryLabel.textContent.trim();
     assertEquals(
         bluetoothSummary.i18n(
             'bluetoothSummaryPageTwoDevicesDescription', device1.nickname,
             mojoString16ToString(device2.deviceProperties.publicName)),
-        label);
+        getSecondaryLabel());
 
     // Simulate a single connected device.
     bluetoothConfig.removePairedDevice(device2);
     await flushAsync();
 
-    label = bluetoothSecondaryLabel.textContent.trim();
-    assertEquals(device1.nickname, label);
+    assertEquals(device1.nickname, getSecondaryLabel());
 
     /// Simulate no connected device.
     bluetoothConfig.removePairedDevice(device1);
     await flushAsync();
 
-    label = bluetoothSecondaryLabel.textContent.trim();
-    assertEquals(bluetoothSummary.i18n('bluetoothSummaryPageOn'), label);
+    assertEquals(
+        bluetoothSummary.i18n('bluetoothSummaryPageOn'), getSecondaryLabel());
     assertEquals('cr:bluetooth', getBluetoothStatusIcon().icon);
+    assertTrue(!!getPairNewDeviceBtn());
+
+    // Mock systemState becoming unavailable.
+    bluetoothConfig.setSystemState(BluetoothSystemState.kUnavailable);
+    await flushAsync();
+    assertFalse(!!getBluetoothArrowIconBtn());
+    assertFalse(!!getPairNewDeviceBtn());
+    assertEquals(
+        bluetoothSummary.i18n('bluetoothSummaryPageOff'), getSecondaryLabel());
+    assertEquals(
+        'os-settings:bluetooth-disabled', getBluetoothStatusIcon().icon);
   });
 
   test('start-pairing is fired on pairNewDeviceBtn click', async function() {
@@ -280,4 +316,14 @@ suite('OsBluetoothSummaryTest', function() {
             'bluetoothPrimaryUserControlled', primaryUserEmail),
         bluetoothSummarySecondaryText.textContent.trim());
   });
+
+  test('Route to summary page', function() {
+    init();
+    assertEquals(0, browserProxy.getShowBluetoothRevampHatsSurveyCount());
+    Router.getInstance().navigateTo(routes.BLUETOOTH);
+    assertEquals(
+        1, browserProxy.getShowBluetoothRevampHatsSurveyCount(),
+        'Count failed to increase');
+  });
+
 });

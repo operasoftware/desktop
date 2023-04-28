@@ -20,7 +20,7 @@ config("modules_implementation") {
   defines = [ "BLINK_MODULES_IMPLEMENTATION=1" ]
 }
 
-jumbo_component("modules") {
+component("modules") {
   output_name = "blink_modules"
 
   visibility = []  # Allow re-assignment of list.
@@ -44,7 +44,6 @@ jumbo_component("modules") {
     "//third_party/blink/renderer:non_test_config",
     "//third_party/blink/renderer:inside_blink",
     "//third_party/blink/renderer/core:blink_core_pch",
-    "//tools/v8_context_snapshot:use_v8_context_snapshot",
     "//v8:external_startup_data",
   ]
 
@@ -56,7 +55,6 @@ jumbo_component("modules") {
     "//third_party/blink/renderer/modules/animationworklet",
     "//third_party/blink/renderer/modules/app_banner",
     "//third_party/blink/renderer/modules/audio_output_devices",
-    "//third_party/blink/renderer/modules/autofill_assistant",
     "//third_party/blink/renderer/modules/background_fetch",
     "//third_party/blink/renderer/modules/background_sync",
     "//third_party/blink/renderer/modules/badging",
@@ -119,8 +117,6 @@ jumbo_component("modules") {
     "//third_party/blink/renderer/modules/mediastream",
     "//third_party/blink/renderer/modules/media",
     "//third_party/blink/renderer/modules/ml",
-    "//third_party/blink/renderer/modules/ml/webnn",
-    "//third_party/blink/renderer/modules/native_io",
     "//third_party/blink/renderer/modules/navigatorcontentutils",
     "//third_party/blink/renderer/modules/netinfo",
     "//third_party/blink/renderer/modules/nfc",
@@ -137,17 +133,17 @@ jumbo_component("modules") {
     "//third_party/blink/renderer/modules/remoteplayback",
     "//third_party/blink/renderer/modules/sanitizer_api",
     "//third_party/blink/renderer/modules/scheduler",
-    "//third_party/blink/renderer/modules/screen_enumeration",
+    "//third_party/blink/renderer/modules/screen_details",
     "//third_party/blink/renderer/modules/screen_orientation",
     "//third_party/blink/renderer/modules/sensor",
     "//third_party/blink/renderer/modules/service_worker",
     "//third_party/blink/renderer/modules/shapedetection",
     "//third_party/blink/renderer/modules/shared_storage",
+    "//third_party/blink/renderer/modules/smart_card",
     "//third_party/blink/renderer/modules/speech",
     "//third_party/blink/renderer/modules/srcobject",
     "//third_party/blink/renderer/modules/storage",
     "//third_party/blink/renderer/modules/subapps",
-    "//third_party/blink/renderer/modules/url_pattern",
     "//third_party/blink/renderer/modules/vibration",
     "//third_party/blink/renderer/modules/video_rvfc",
     "//third_party/blink/renderer/modules/virtualkeyboard",
@@ -192,6 +188,7 @@ jumbo_component("modules") {
     "//third_party/icu",
     "//third_party/webrtc_overrides:webrtc_component",
     "//third_party/zlib",
+    "//tools/v8_context_snapshot:buildflags",
   ]
 
   public_deps = sub_modules
@@ -206,7 +203,7 @@ jumbo_component("modules") {
   configs += blink_symbols_config
 }
 
-jumbo_source_set("modules_testing") {
+source_set("modules_testing") {
   testonly = true
 
   sources = [
@@ -227,7 +224,7 @@ jumbo_source_set("modules_testing") {
     "peerconnection/testing/mock_peer_connection_interface.h",
     "peerconnection/testing/mock_rtp_receiver.h",
     "peerconnection/testing/mock_rtp_sender.h",
-    "peerconnection/testing/mock_transformable_video_frame.h",
+    "peerconnection/testing/mock_transformable_audio_frame.h",
     "permissions/testing/internals_permission.cc",
     "permissions/testing/internals_permission.h",
     "service_worker/testing/internals_service_worker.cc",
@@ -409,7 +406,7 @@ blink_modules_sources("modules_generated") {
   }
 }
 
-jumbo_source_set("unit_tests") {
+source_set("unit_tests") {
   testonly = true
 
   sources = [
@@ -429,19 +426,24 @@ jumbo_source_set("unit_tests") {
     "animationworklet/animation_worklet_global_scope_test.cc",
     "animationworklet/animation_worklet_proxy_client_test.cc",
     "animationworklet/worklet_animation_test.cc",
-    "autofill_assistant/node_signals_test.cc",
     "background_fetch/background_fetch_icon_loader_test.cc",
     "background_fetch/background_fetch_manager_test.cc",
     "broadcastchannel/broadcast_channel_unittest.cc",
     "cache_storage/cache_test.cc",
+    "canvas/canvas2d/base_rendering_context_2d_test.cc",
+    "canvas/canvas2d/canvas_color_cache_test.cc",
     "canvas/canvas2d/canvas_rendering_context_2d_api_test.cc",
     "canvas/canvas2d/canvas_rendering_context_2d_test.cc",
+    "canvas/canvas2d/canvas_style_test_utils.cc",
+    "canvas/canvas2d/canvas_style_test_utils.h",
     "canvas/htmlcanvas/html_canvas_element_module_test.cc",
     "canvas/offscreencanvas/offscreen_canvas_rendering_api_ukm_metrics_test.cc",
     "canvas/offscreencanvas/offscreen_canvas_test.cc",
     "content_index/content_description_type_converter_test.cc",
+    "credentialmanagement/credential_manager_type_converters_unittest.cc",
     "credentialmanagement/credentials_container_test.cc",
     "credentialmanagement/password_credential_test.cc",
+    "credentialmanagement/web_identity_requester_test.cc",
     "csspaint/document_paint_definition_test.cc",
     "csspaint/nativepaint/background_color_paint_definition_test.cc",
     "csspaint/nativepaint/clip_path_paint_definition_test.cc",
@@ -494,7 +496,6 @@ jumbo_source_set("unit_tests") {
     "mediarecorder/video_track_recorder_unittest.cc",
     "mediasession/media_session_test.cc",
     "mediastream/browser_capture_media_stream_track_test.cc",
-    "mediastream/focusable_media_stream_track_test.cc",
     "mediastream/low_latency_video_renderer_algorithm_unittest.cc",
     "mediastream/media_constraints_test.cc",
     "mediastream/media_devices_test.cc",
@@ -521,7 +522,6 @@ jumbo_source_set("unit_tests") {
     "mediastream/video_track_adapter_unittest.cc",
     "mediastream/webaudio_media_stream_audio_sink_test.cc",
     "mediastream/webmediaplayer_ms_test.cc",
-    "ml/webnn/ml_graph_builder_test.cc",
     "nfc/nfc_proxy_test.cc",
     "notifications/notification_data_test.cc",
     "notifications/notification_resources_loader_test.cc",
@@ -552,6 +552,7 @@ jumbo_source_set("unit_tests") {
     "peerconnection/rtc_data_channel_test.cc",
     "peerconnection/rtc_encoded_audio_underlying_sink_test.cc",
     "peerconnection/rtc_encoded_audio_underlying_source_test.cc",
+    "peerconnection/rtc_encoded_video_frame_test.cc",
     "peerconnection/rtc_encoded_video_underlying_sink_test.cc",
     "peerconnection/rtc_encoded_video_underlying_source_test.cc",
     "peerconnection/rtc_ice_transport_test.cc",
@@ -611,6 +612,7 @@ jumbo_source_set("unit_tests") {
     "webaudio/stereo_panner_node_test.cc",
     "webdatabase/dom_window_web_database_test.cc",
     "webdatabase/quota_tracker_test.cc",
+    "webrtc/webrtc_audio_device_impl_test.cc",
     "webshare/navigator_share_test.cc",
     "websockets/dom_websocket_test.cc",
     "websockets/mock_websocket_channel.cc",
@@ -635,29 +637,6 @@ jumbo_source_set("unit_tests") {
   }
 
 
-  jumbo_excluded_sources = [
-    "delegated_ink/delegated_ink_trail_presenter_unittest.cc",
-    "media_capabilities/media_capabilities_test.cc",
-    "media/audio/audio_renderer_sink_cache_test.cc",
-    "media/audio/mojo_audio_output_ipc_test.cc",
-    "mediarecorder/video_track_recorder_unittest.cc",
-    "mediastream/focusable_media_stream_track_test.cc",
-    "mediastream/media_stream_track_impl_test.cc",
-    "mediastream/processed_local_audio_source_test.cc",
-    "mediastream/user_media_client_test.cc",
-    "peerconnection/rtc_data_channel_test.cc",
-    "peerconnection/rtc_encoded_video_underlying_sink_test.cc",
-    "peerconnection/rtc_encoded_video_underlying_source_test.cc",
-    "peerconnection/rtc_ice_transport_test.cc",
-    "peerconnection/rtc_sctp_transport_test.cc",
-    "remoteplayback/remote_playback_test.cc",
-    "service_worker/service_worker_event_queue_test.cc",
-    "service_worker/web_embedded_worker_impl_test.cc",
-    "video_rvfc/video_frame_callback_requester_impl_test.cc",
-    "webaudio/audio_worklet_global_scope_test.cc",
-    "websockets/dom_websocket_test.cc",
-  ]
-
   configs += [
     "//third_party/blink/renderer:config",
     "//third_party/blink/renderer:inside_blink",
@@ -673,6 +652,7 @@ jumbo_source_set("unit_tests") {
     "//components/schema_org/common:mojom_blink",
     "//components/ukm:test_support",
     "//media:test_support",
+    "//media/capture/mojom:image_capture_blink",
     "//media/gpu:gpu",
     "//media/mojo:buildflags",
     "//media/mojo/mojom",
@@ -701,6 +681,7 @@ jumbo_source_set("unit_tests") {
     "//third_party/blink/renderer/modules/indexeddb:unit_tests",
     "//third_party/blink/renderer/modules/mediarecorder:buildflags",
     "//third_party/blink/renderer/modules/mediastream:test_support",
+    "//third_party/blink/renderer/modules/ml:unit_tests",
     "//third_party/blink/renderer/modules/peerconnection:test_support",
     "//third_party/blink/renderer/modules/storage:unit_tests",
     "//third_party/blink/renderer/modules/webcodecs:unit_tests",

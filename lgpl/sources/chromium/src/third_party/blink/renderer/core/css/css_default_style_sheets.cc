@@ -57,8 +57,9 @@ String OverflowForReplacedElementRules() {
 }
 
 String OverflowForSVGRules() {
-  if (!RuntimeEnabledFeatures::CSSOverflowForReplacedElementsEnabled())
+  if (!RuntimeEnabledFeatures::CSSOverflowForReplacedElementsEnabled()) {
     return "";
+  }
 
   // SVG uses an overflow value of 'hidden' for backwards compatibility with
   // flex layout. 'overflow-clip-margin' below still applies because the used
@@ -155,10 +156,11 @@ void CSSDefaultStyleSheets::PrepareForLeakDetection() {
   text_track_style_sheet_.Clear();
   forced_colors_style_sheet_.Clear();
   fullscreen_style_sheet_.Clear();
-  popup_style_sheet_.Clear();
+  popover_style_sheet_.Clear();
   selectmenu_style_sheet_.Clear();
   webxr_overlay_style_sheet_.Clear();
   marker_style_sheet_.Clear();
+  form_controls_not_vertical_style_sheet_.Clear();
   // Recreate the default style sheet to clean up possible SVG resources.
   String default_rules = UncompressResourceAsASCIIString(IDR_UASTYLE_HTML_CSS) +
                          OverflowForReplacedElementRules() +
@@ -227,8 +229,9 @@ void CSSDefaultStyleSheets::AddRulesToDefaultStyleSheets(
   }
   // Add to print and forced color for all namespaces.
   default_print_style_->AddRulesFromSheet(rules, PrintEval());
-  if (default_forced_color_style_)
+  if (default_forced_color_style_) {
     default_forced_color_style_->AddRulesFromSheet(rules, ForcedColorsEval());
+  }
 }
 
 bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElement(
@@ -297,13 +300,14 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElement(
     }
   }
 
-  if (!popup_style_sheet_ && element.HasPopupAttribute()) {
-    // TODO: We should assert that this sheet only contains rules for popups.
-    DCHECK(RuntimeEnabledFeatures::HTMLPopupAttributeEnabled(
+  if (!popover_style_sheet_ && IsA<HTMLElement>(element) &&
+      To<HTMLElement>(element).HasPopoverAttribute()) {
+    // TODO: We should assert that this sheet only contains rules for popovers.
+    DCHECK(RuntimeEnabledFeatures::HTMLPopoverAttributeEnabled(
         element.GetDocument().GetExecutionContext()));
-    popup_style_sheet_ =
-        ParseUASheet(UncompressResourceAsASCIIString(IDR_UASTYLE_POPUP_CSS));
-    AddRulesToDefaultStyleSheets(popup_style_sheet_, NamespaceType::kHTML);
+    popover_style_sheet_ =
+        ParseUASheet(UncompressResourceAsASCIIString(IDR_UASTYLE_POPOVER_CSS));
+    AddRulesToDefaultStyleSheets(popover_style_sheet_, NamespaceType::kHTML);
     changed_default_style = true;
   }
 
@@ -317,6 +321,21 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElement(
     changed_default_style = true;
   }
 
+  // TODO(crbug.com/681917): The FormControlsVerticalWritingModeSupport
+  // flag enables vertical writing mode to be used on form controls. When
+  // it is *disabled*, we need to force horizontal writing mode.
+  if (!RuntimeEnabledFeatures::
+          FormControlsVerticalWritingModeSupportEnabled() &&
+      !form_controls_not_vertical_style_sheet_ &&
+      (IsA<HTMLProgressElement>(element) || IsA<HTMLMeterElement>(element))) {
+    form_controls_not_vertical_style_sheet_ =
+        ParseUASheet(UncompressResourceAsASCIIString(
+            IDR_UASTYLE_FORM_CONTROLS_NOT_VERTICAL_CSS));
+    AddRulesToDefaultStyleSheets(form_controls_not_vertical_style_sheet_,
+                                 NamespaceType::kHTML);
+    changed_default_style = true;
+  }
+
   DCHECK(!default_html_style_->Features().HasIdsInSelectors());
   return changed_default_style;
 }
@@ -325,12 +344,14 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForPseudoElement(
     PseudoId pseudo_id) {
   switch (pseudo_id) {
     case kPseudoIdMarker: {
-      if (marker_style_sheet_)
+      if (marker_style_sheet_) {
         return false;
+      }
       marker_style_sheet_ =
           ParseUASheet(UncompressResourceAsASCIIString(IDR_UASTYLE_MARKER_CSS));
-      if (!default_pseudo_element_style_)
+      if (!default_pseudo_element_style_) {
         default_pseudo_element_style_ = MakeGarbageCollected<RuleSet>();
+      }
       default_pseudo_element_style_->AddRulesFromSheet(MarkerStyleSheet(),
                                                        ScreenEval());
       return true;
@@ -346,8 +367,9 @@ void CSSDefaultStyleSheets::SetMediaControlsStyleSheetLoader(
 }
 
 bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetForXrOverlay() {
-  if (webxr_overlay_style_sheet_)
+  if (webxr_overlay_style_sheet_) {
     return false;
+  }
 
   webxr_overlay_style_sheet_ = ParseUASheet(
       UncompressResourceAsASCIIString(IDR_UASTYLE_WEBXR_OVERLAY_CSS));
@@ -357,8 +379,9 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetForXrOverlay() {
 }
 
 void CSSDefaultStyleSheets::EnsureDefaultStyleSheetForFullscreen() {
-  if (fullscreen_style_sheet_)
+  if (fullscreen_style_sheet_) {
     return;
+  }
 
   String fullscreen_rules =
       UncompressResourceAsASCIIString(IDR_UASTYLE_FULLSCREEN_CSS) +
@@ -368,8 +391,9 @@ void CSSDefaultStyleSheets::EnsureDefaultStyleSheetForFullscreen() {
 }
 
 bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetForForcedColors() {
-  if (forced_colors_style_sheet_)
+  if (forced_colors_style_sheet_) {
     return false;
+  }
 
   String forced_colors_rules =
       RuntimeEnabledFeatures::ForcedColorsEnabled()
@@ -377,8 +401,9 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetForForcedColors() {
           : String();
   forced_colors_style_sheet_ = ParseUASheet(forced_colors_rules);
 
-  if (!default_forced_color_style_)
+  if (!default_forced_color_style_) {
     default_forced_color_style_ = MakeGarbageCollected<RuleSet>();
+  }
   default_forced_color_style_->AddRulesFromSheet(DefaultStyleSheet(),
                                                  ForcedColorsEval());
   default_forced_color_style_->AddRulesFromSheet(ForcedColorsStyleSheet(),
@@ -401,14 +426,18 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetForForcedColors() {
 
 void CSSDefaultStyleSheets::CollectFeaturesTo(const Document& document,
                                               RuleFeatureSet& features) {
-  if (DefaultHtmlStyle())
+  if (DefaultHtmlStyle()) {
     features.Merge(DefaultHtmlStyle()->Features());
-  if (DefaultMediaControlsStyle())
+  }
+  if (DefaultMediaControlsStyle()) {
     features.Merge(DefaultMediaControlsStyle()->Features());
-  if (DefaultMathMLStyle())
+  }
+  if (DefaultMathMLStyle()) {
     features.Merge(DefaultMathMLStyle()->Features());
-  if (document.IsViewSource() && DefaultViewSourceStyle())
+  }
+  if (document.IsViewSource() && DefaultViewSourceStyle()) {
     features.Merge(DefaultViewSourceStyle()->Features());
+  }
 }
 
 void CSSDefaultStyleSheets::Trace(Visitor* visitor) const {
@@ -429,10 +458,11 @@ void CSSDefaultStyleSheets::Trace(Visitor* visitor) const {
   visitor->Trace(text_track_style_sheet_);
   visitor->Trace(forced_colors_style_sheet_);
   visitor->Trace(fullscreen_style_sheet_);
-  visitor->Trace(popup_style_sheet_);
+  visitor->Trace(popover_style_sheet_);
   visitor->Trace(selectmenu_style_sheet_);
   visitor->Trace(webxr_overlay_style_sheet_);
   visitor->Trace(marker_style_sheet_);
+  visitor->Trace(form_controls_not_vertical_style_sheet_);
 }
 
 }  // namespace blink

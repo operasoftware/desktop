@@ -35,13 +35,8 @@ Document* AXVirtualObject::GetDocument() const {
   return GetAccessibleNode() ? GetAccessibleNode()->GetDocument() : nullptr;
 }
 
-bool AXVirtualObject::ComputeAccessibilityIsIgnored(
-    IgnoredReasons* ignoredReasons) const {
-  return AccessibilityIsIgnoredByDefault(ignoredReasons);
-}
-
 void AXVirtualObject::AddChildren() {
-#if DCHECK_IS_ON()
+#if defined(AX_FAIL_FAST_BUILD)
   DCHECK(!IsDetached());
   DCHECK(!is_adding_children_) << " Reentering method on " << GetNode();
   base::AutoReset<bool> reentrancy_protector(&is_adding_children_, true);
@@ -69,7 +64,7 @@ void AXVirtualObject::AddChildren() {
 
 void AXVirtualObject::ChildrenChangedWithCleanLayout() {
   ClearChildren();
-  AXObjectCache().PostNotification(this, ax::mojom::Event::kChildrenChanged);
+  AXObjectCache().MarkAXObjectDirtyWithCleanLayout(this);
 }
 
 const AtomicString& AXVirtualObject::GetAOMPropertyOrARIAAttribute(

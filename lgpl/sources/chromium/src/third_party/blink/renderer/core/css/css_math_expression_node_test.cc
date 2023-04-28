@@ -47,8 +47,9 @@
 namespace blink {
 
 void PrintTo(const CSSLengthArray& length_array, ::std::ostream* os) {
-  for (double x : length_array.values)
+  for (double x : length_array.values) {
     *os << x << ' ';
+  }
 }
 
 namespace {
@@ -76,8 +77,9 @@ void TestAccumulatePixelsAndPercent(
 bool AccumulateLengthArray(String text, CSSLengthArray& length_array) {
   auto* property_set =
       MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLQuirksMode);
-  property_set->SetProperty(CSSPropertyID::kLeft, text, /* important */ false,
-                            SecureContextMode::kInsecureContext);
+  property_set->ParseAndSetProperty(CSSPropertyID::kLeft, text,
+                                    /* important */ false,
+                                    SecureContextMode::kInsecureContext);
   return To<CSSPrimitiveValue>(
              property_set->GetPropertyCSSValue(CSSPropertyID::kLeft))
       ->AccumulateLengthArray(length_array);
@@ -90,12 +92,14 @@ CSSLengthArray& SetLengthArray(String text, CSSLengthArray& length_array) {
 }
 
 TEST(CSSCalculationValue, AccumulatePixelsAndPercent) {
-  scoped_refptr<ComputedStyle> style =
-      ComputedStyle::CreateInitialStyleSingleton();
-  style->SetEffectiveZoom(5);
+  ComputedStyleBuilder builder(*ComputedStyle::CreateInitialStyleSingleton());
+  builder.SetEffectiveZoom(5);
+  scoped_refptr<const ComputedStyle> style = builder.TakeStyle();
+  CSSToLengthConversionData::Flags ignored_flags = 0;
   CSSToLengthConversionData conversion_data(
-      style.get(), style.get(), style.get(), nullptr,
-      CSSToLengthConversionData::ContainerSizes(), style->EffectiveZoom());
+      *style, style.get(), style.get(), nullptr,
+      CSSToLengthConversionData::ContainerSizes(), style->EffectiveZoom(),
+      ignored_flags);
 
   TestAccumulatePixelsAndPercent(
       conversion_data,
@@ -207,7 +211,6 @@ TEST(CSSCalculationValue, AddToLengthUnitValues) {
 
 TEST(CSSCalculationValue, CSSLengthArrayUnits) {
   ScopedCSSViewportUnits4ForTest scoped_viewport_units(true);
-  ScopedCSSContainerRelativeUnitsForTest scoped_container_units(true);
 
   CSSLengthArray unused;
 
@@ -302,8 +305,9 @@ TEST(CSSMathExpressionNode, TestParseDeeplyNestedExpression) {
     // max(1px, 1px + max(1px, 1px + max(1px, 1px)))
     // clamp(1px, 1px, 1px + clamp(1px, 1px, 1px + clamp(1px, 1px, 1px)))
     for (int i = 0; i < test_case.nest_num; i++) {
-      if (i)
+      if (i) {
         ss << " + ";
+      }
       switch (test_case.kind) {
         case kCalc:
           ss << "calc(1px";

@@ -24,6 +24,8 @@
  * AMR wideband decoder
  */
 
+#include "config.h"
+
 #include "libavutil/channel_layout.h"
 #include "libavutil/common.h"
 #include "libavutil/lfg.h"
@@ -42,7 +44,9 @@
 #include "amr.h"
 
 #include "amrwbdata.h"
+#if ARCH_MIPS
 #include "mips/amrwbdec_mips.h"
+#endif /* ARCH_MIPS */
 
 typedef struct AMRWBContext {
     AMRWBFrame                             frame; ///< AMRWB parameters decoded from bitstream
@@ -1300,6 +1304,6 @@ const FFCodec ff_amrwb_decoder = {
     .init           = amrwb_decode_init,
     FF_CODEC_DECODE_CB(amrwb_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
-    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_FLT,
+    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_FLTP,
                                                      AV_SAMPLE_FMT_NONE },
 };

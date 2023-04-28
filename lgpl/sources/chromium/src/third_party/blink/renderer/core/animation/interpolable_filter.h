@@ -7,6 +7,7 @@
 
 #include <memory>
 #include "base/notreached.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/animation/interpolable_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/style/filter_operation.h"
@@ -56,6 +57,9 @@ class CORE_EXPORT InterpolableFilter final : public InterpolableValue {
   void Scale(double scale) final { NOTREACHED(); }
   void Add(const InterpolableValue& other) final;
   void AssertCanInterpolateWith(const InterpolableValue& other) const final;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  const InterpolableValue* Value() const { return value_.get(); }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
  private:
   InterpolableFilter* RawClone() const final {

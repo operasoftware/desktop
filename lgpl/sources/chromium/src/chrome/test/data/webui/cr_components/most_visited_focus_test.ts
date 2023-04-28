@@ -6,17 +6,16 @@ import 'chrome://webui-test/mojo_webui_test_support.js';
 
 import {MostVisitedBrowserProxy} from 'chrome://resources/cr_components/most_visited/browser_proxy.js';
 import {MostVisitedElement} from 'chrome://resources/cr_components/most_visited/most_visited.js';
-import {MostVisitedPageCallbackRouter, MostVisitedPageHandlerRemote} from 'chrome://resources/cr_components/most_visited/most_visited.mojom-webui.js';
+import {MostVisitedPageCallbackRouter, MostVisitedPageHandlerRemote, MostVisitedPageRemote} from 'chrome://resources/cr_components/most_visited/most_visited.mojom-webui.js';
 import {TextDirection} from 'chrome://resources/mojo/mojo/public/mojom/base/text_direction.mojom-webui.js';
-
-import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
+import {TestMock} from 'chrome://webui-test/test_mock.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 
 import {assertFocus, keydown} from './most_visited_test_support.js';
 
 suite('CrComponentsMostVisitedFocusTest', () => {
   let mostVisited: MostVisitedElement;
-  let callbackRouterRemote: MostVisitedPageCallbackRouter;
+  let callbackRouterRemote: MostVisitedPageRemote;
 
   function queryTiles() {
     return Array.from(
@@ -32,6 +31,7 @@ suite('CrComponentsMostVisitedFocusTest', () => {
         url: {url: `https://${char}/`},
         source: i,
         titleSource: i,
+        isQueryTile: false,
       };
     });
     const tilesRendered = eventToPromise('dom-change', mostVisited.$.tiles);
@@ -45,10 +45,9 @@ suite('CrComponentsMostVisitedFocusTest', () => {
   }
 
   setup(() => {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
-    const handler = TestBrowserProxy.fromClass(MostVisitedPageHandlerRemote);
+    const handler = TestMock.fromClass(MostVisitedPageHandlerRemote);
     const callbackRouter = new MostVisitedPageCallbackRouter();
     MostVisitedBrowserProxy.setInstance(
         new MostVisitedBrowserProxy(handler, callbackRouter));

@@ -90,8 +90,9 @@ class PLATFORM_EXPORT FrameWidget {
   virtual int GetLayerTreeId() = 0;
 
   // Return the LayerTreeSettings from the compositor. These are constant from
-  // the time the compositor is created.
-  virtual const cc::LayerTreeSettings& GetLayerTreeSettings() = 0;
+  // the time the compositor is created. This may return null if the widget
+  // does not composite.
+  virtual const cc::LayerTreeSettings* GetLayerTreeSettings() = 0;
 
   // Sets the state of the browser controls. (Used for URL bar animations.)
   virtual void UpdateBrowserControlsState(cc::BrowserControlsState constraints,
@@ -283,6 +284,12 @@ class PLATFORM_EXPORT FrameWidget {
   // CompositorFrames.  See https://crbug.com/1232173 for more details.
   virtual void SetMayThrottleIfUndrawnFrames(
       bool may_throttle_if_undrawn_frames) = 0;
+
+  // Returns, in physical pixels, the amount that the widget has been resized
+  // by the virtual keyboard. The virtual keyboard always insets a widget from
+  // the bottom so only the height can be affected. Only the outermost main
+  // frame's widget returns a non-zero value.
+  virtual int GetVirtualKeyboardResizeHeight() const = 0;
 };
 
 }  // namespace blink

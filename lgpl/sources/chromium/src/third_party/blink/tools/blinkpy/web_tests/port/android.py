@@ -74,7 +74,6 @@ CHROME_ANDROID = 'chrome_android'
 PRODUCTS = [ANDROID_WEBLAYER, ANDROID_WEBVIEW, CHROME_ANDROID]
 
 PRODUCTS_TO_STEPNAMES = {
-    ANDROID_WEBLAYER: 'weblayer_shell_wpt',
     ANDROID_WEBVIEW: 'system_webview_wpt',
     CHROME_ANDROID: 'chrome_public_wpt',
 }
@@ -95,7 +94,6 @@ WPT_SMOKE_TESTS_FILE = os.path.join(
     ANDROID_WEB_TESTS_DIR, 'WPTSmokeTestCases')
 
 _friendly_browser_names = {
-    'weblayershell': 'weblayer',
     'systemwebviewshell': 'webview',
     'chromepublic': 'chromium'
 }
@@ -258,11 +256,18 @@ class AndroidDevices(object):
             return self._usable_devices
 
         devices = device_utils.DeviceUtils.HealthyDevices()
-        self._usable_devices = [
-            d for d in devices if
-            (battery_utils.BatteryUtils(d).GetBatteryInfo().get('level', 0) >=
-             AndroidDevices.MINIMUM_BATTERY_PERCENTAGE and d.IsScreenOn())
-        ]
+        usable_devices = []
+        for d in devices:
+            try:
+                battery_level = int(
+                    battery_utils.BatteryUtils(d).GetBatteryInfo().get(
+                        'level', '0'))
+            except ValueError:
+                battery_level = 0
+            if (battery_level >= AndroidDevices.MINIMUM_BATTERY_PERCENTAGE
+                    and d.IsScreenOn()):
+                usable_devices.append(d)
+        self._usable_devices = usable_devices
 
         return self._usable_devices
 

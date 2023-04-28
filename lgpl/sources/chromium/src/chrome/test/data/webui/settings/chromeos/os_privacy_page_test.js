@@ -2,19 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://os-settings/chromeos/lazy_load.js';
-
-import {DataAccessPolicyState, PeripheralDataAccessBrowserProxyImpl, Router, routes, SecureDnsMode} from 'chrome://os-settings/chromeos/os_settings.js';
-import {assert} from 'chrome://resources/js/assert.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util.js';
+import {PrivacyHubBrowserProxyImpl} from 'chrome://os-settings/chromeos/lazy_load.js';
+import {PeripheralDataAccessBrowserProxyImpl, Router, routes, SecureDnsMode} from 'chrome://os-settings/chromeos/os_settings.js';
+import {assert} from 'chrome://resources/ash/common/assert.js';
+import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
+import {getDeepActiveElement} from 'chrome://resources/ash/common/util.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
+import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
-import {assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
-import {TestBrowserProxy} from '../../test_browser_proxy.js';
-
+import {FakeMetricsPrivate} from './fake_metrics_private.js';
 import {FakeQuickUnlockPrivate} from './fake_quick_unlock_private.js';
+import {TestPrivacyHubBrowserProxy} from './test_privacy_hub_browser_proxy.js';
 
 const crosSettingPrefName = 'cros.device.peripheral_data_access_enabled';
 const localStatePrefName =
@@ -58,7 +58,6 @@ class TestPeripheralDataAccessBrowserProxy extends TestBrowserProxy {
     this.policy_state_.isUserConfigurable = is_user_configurable;
   }
 }
-
 
 suite('PrivacyPageTests', function() {
   /** @type {SettingsPrivacyPageElement} */
@@ -111,9 +110,6 @@ suite('PrivacyPageTests', function() {
       async () => {
         loadTimeData.overrideValues({
           showPrivacyHubPage: true,
-          showPrivacyHubMVPPage: true,
-          showPrivacyHubDogfoodPage: true,
-          showPrivacyHubFuturePage: true,
         });
 
         privacyPage = document.createElement('os-settings-privacy-page');
@@ -126,9 +122,6 @@ suite('PrivacyPageTests', function() {
   test('Suggested content, pref disabled', async () => {
     loadTimeData.overrideValues({
       showPrivacyHubPage: false,
-      showPrivacyHubMVPPage: false,
-      showPrivacyHubDogfoodPage: false,
-      showPrivacyHubFuturePage: false,
     });
 
     privacyPage = document.createElement('os-settings-privacy-page');
@@ -144,9 +137,6 @@ suite('PrivacyPageTests', function() {
   test('Suggested content, pref enabled', async () => {
     loadTimeData.overrideValues({
       showPrivacyHubPage: false,
-      showPrivacyHubMVPPage: false,
-      showPrivacyHubDogfoodPage: false,
-      showPrivacyHubFuturePage: false,
     });
 
     // Update the backing pref to enabled.
@@ -205,7 +195,7 @@ suite('PrivacyPageTests', function() {
     flush();
 
     const deepLinkElement =
-        privacyPage.shadowRoot.querySelector('settings-users-page')
+        privacyPage.shadowRoot.querySelector('settings-manage-users-page')
             .shadowRoot.querySelector('#allowGuestBrowsing')
             .shadowRoot.querySelector('cr-toggle');
     await waitAfterNextRender(deepLinkElement);
@@ -222,7 +212,7 @@ suite('PrivacyPageTests', function() {
     flush();
 
     const deepLinkElement =
-        privacyPage.shadowRoot.querySelector('settings-users-page')
+        privacyPage.shadowRoot.querySelector('settings-manage-users-page')
             .shadowRoot.querySelector('#showUserNamesOnSignIn')
             .shadowRoot.querySelector('cr-toggle');
     await waitAfterNextRender(deepLinkElement);
@@ -295,7 +285,7 @@ suite('PrivacyPageTests', function() {
     subpageTrigger.click();
     flush();
 
-    assertEquals(Router.getInstance().getCurrentRoute(), routes.LOCK_SCREEN);
+    assertEquals(Router.getInstance().currentRoute, routes.LOCK_SCREEN);
     const lockScreenPage =
         assert(privacyPage.shadowRoot.querySelector('#lockScreen'));
 
@@ -307,7 +297,7 @@ suite('PrivacyPageTests', function() {
     editFingerprintsTrigger.click();
     flush();
 
-    assertEquals(Router.getInstance().getCurrentRoute(), routes.FINGERPRINT);
+    assertEquals(Router.getInstance().currentRoute, routes.FINGERPRINT);
     assertFalse(privacyPage.showPasswordPromptDialog_);
 
     const fingerprintTrigger =
@@ -321,7 +311,7 @@ suite('PrivacyPageTests', function() {
     lockScreenPage.dispatchEvent(event);
     assertTrue(privacyPage.authToken_ === undefined);
 
-    assertEquals(Router.getInstance().getCurrentRoute(), routes.FINGERPRINT);
+    assertEquals(Router.getInstance().currentRoute, routes.FINGERPRINT);
     assertTrue(privacyPage.showPasswordPromptDialog_);
   });
 
@@ -374,6 +364,71 @@ suite('PrivacyPageTests', function() {
     await waitAfterNextRender(privacyPage);
 
     assertTrue(elementExists('#smartPrivacySubpageTrigger'));
+  });
+
+  test('Open PrivacyHub', async () => {
+    loadTimeData.overrideValues({
+      showPrivacyHubPage: true,
+    });
+
+    const privacyHubBrowserProxy = new TestPrivacyHubBrowserProxy();
+    PrivacyHubBrowserProxyImpl.setInstanceForTesting(privacyHubBrowserProxy);
+
+    const fakeMetricsPrivate = new FakeMetricsPrivate();
+    chrome.metricsPrivate = fakeMetricsPrivate;
+    privacyPage = document.createElement('os-settings-privacy-page');
+    document.body.appendChild(privacyPage);
+
+    await waitAfterNextRender(privacyPage);
+
+    const privacyHubPageRow = assert(
+        privacyPage.shadowRoot.querySelector('#privacyHubSubpageTrigger'));
+
+    assertEquals(
+        fakeMetricsPrivate.countMetricValue('ChromeOS.PrivacyHub.Opened', 0),
+        0);
+
+    privacyHubPageRow.click();
+    flush();
+    waitAfterNextRender();
+
+    assertEquals(
+        fakeMetricsPrivate.countMetricValue('ChromeOS.PrivacyHub.Opened', 0),
+        1);
+  });
+
+  test('Send HaTS messages', async () => {
+    loadTimeData.overrideValues({
+      isPrivacyHubHatsEnabled: true,
+    });
+
+    const privacyHubBrowserProxy = new TestPrivacyHubBrowserProxy();
+    PrivacyHubBrowserProxyImpl.setInstanceForTesting(privacyHubBrowserProxy);
+
+    privacyPage = document.createElement('os-settings-privacy-page');
+    document.body.appendChild(privacyPage);
+
+    await waitAfterNextRender(privacyPage);
+
+    assertEquals(privacyHubBrowserProxy.sendOpenedOsPrivacyPageCalled, 0);
+    assertEquals(privacyHubBrowserProxy.sendLeftOsPrivacyPageCalled, 1);
+
+    const params = new URLSearchParams();
+    params.append('settingId', '1101');
+    Router.getInstance().navigateTo(routes.OS_PRIVACY, params);
+
+    flush();
+
+    assertEquals(privacyHubBrowserProxy.sendOpenedOsPrivacyPageCalled, 1);
+    assertEquals(privacyHubBrowserProxy.sendLeftOsPrivacyPageCalled, 1);
+
+    params.set('settingId', '1105');
+    Router.getInstance().navigateTo(routes.ACCOUNTS, params);
+
+    flush();
+
+    assertEquals(privacyHubBrowserProxy.sendOpenedOsPrivacyPageCalled, 1);
+    assertEquals(privacyHubBrowserProxy.sendLeftOsPrivacyPageCalled, 2);
   });
 
   // TODO(crbug.com/1262869): add a test for deep linking to snopping setting

@@ -132,9 +132,11 @@ void LayoutRubyRun::AddChild(LayoutObject* child, LayoutObject* before_child) {
 
       // Make sure we don't leave anything in the percentage descendant
       // map before moving the children to the new base.
-      if (HasPercentHeightDescendants())
+      LayoutRubyBase& base = EnsureRubyBase();
+      if (HasPercentHeightDescendants() || base.HasPercentHeightDescendants()) {
         ClearPercentHeightDescendants();
-      EnsureRubyBase().MoveChildren(new_base, before_child);
+      }
+      base.MoveChildren(new_base, before_child);
     }
   } else {
     // child is not a text -> insert it into the base
@@ -187,12 +189,13 @@ void LayoutRubyRun::RemoveChild(LayoutObject* child) {
 LayoutRubyBase& LayoutRubyRun::CreateRubyBase() const {
   NOT_DESTROYED();
   auto* layout_object = LayoutRubyBase::CreateAnonymous(&GetDocument(), *this);
-  scoped_refptr<ComputedStyle> new_style =
-      GetDocument().GetStyleResolver().CreateAnonymousStyleWithDisplay(
+  ComputedStyleBuilder new_style_builder =
+      GetDocument().GetStyleResolver().CreateAnonymousStyleBuilderWithDisplay(
           StyleRef(), EDisplay::kBlock);
-  new_style->SetTextAlign(ETextAlign::kCenter);  // FIXME: use WEBKIT_CENTER?
-  new_style->SetHasLineIfEmpty(true);
-  layout_object->SetStyle(std::move(new_style));
+  new_style_builder.SetTextAlign(
+      ETextAlign::kCenter);  // FIXME: use WEBKIT_CENTER?
+  new_style_builder.SetHasLineIfEmpty(true);
+  layout_object->SetStyle(new_style_builder.TakeStyle());
   return *layout_object;
 }
 
@@ -208,7 +211,7 @@ LayoutRubyRun& LayoutRubyRun::Create(const LayoutObject* parent_ruby,
     rr = MakeGarbageCollected<LayoutRubyRun>(nullptr);
   }
   rr->SetDocumentForAnonymous(&parent_ruby->GetDocument());
-  scoped_refptr<ComputedStyle> new_style =
+  scoped_refptr<const ComputedStyle> new_style =
       parent_ruby->GetDocument()
           .GetStyleResolver()
           .CreateAnonymousStyleWithDisplay(parent_ruby->StyleRef(),

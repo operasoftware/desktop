@@ -745,8 +745,8 @@ TEST_P(MAYBE_PaintLayerScrollableAreaTest,
   scrollable_area->SetScrollOffset(ScrollOffset(0, 1),
                                    mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesExceptPaint();
-  EXPECT_EQ(!RuntimeEnabledFeatures::ScrollUpdateOptimizationsEnabled(),
-            GetDocument().View()->GetPaintArtifactCompositor()->NeedsUpdate());
+  EXPECT_FALSE(
+      GetDocument().View()->GetPaintArtifactCompositor()->NeedsUpdate());
   UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(ScrollOffset(0, 1), scrollable_area->GetScrollOffset());
 }
@@ -1095,6 +1095,45 @@ TEST_P(MAYBE_PaintLayerScrollableAreaTest, HitTestOverlayScrollbars) {
   EXPECT_EQ(hit_result.GetScrollbar(), scrollable_area->HorizontalScrollbar());
 }
 
+TEST_P(MAYBE_PaintLayerScrollableAreaTest,
+       ShowNonCompositedScrollbarOnCompositorScroll) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    html, body {
+      margin: 0;
+    }
+    #scroller {
+      overflow: scroll;
+      height: 100px;
+      width: 100px;
+    }
+    #scrolled {
+      width: 1000px;
+      height: 1000px;
+    }
+    </style>
+    <div id='scroller'><div id='scrolled'></div></div>
+  )HTML");
+
+  auto* scroller = GetLayoutObjectByElementId("scroller");
+  auto* scrollable_area =
+      To<LayoutBoxModelObject>(scroller)->GetScrollableArea();
+
+  scrollable_area->SetScrollbarsHiddenIfOverlay(true);
+
+  EXPECT_TRUE(scrollable_area->ScrollbarsHiddenIfOverlay());
+
+  // This will be false because
+  // cc::MainThreadScrollingReason::kNotOpaqueForTextAndLCDText. See
+  // PaintLayerScrollableArea::ComputeNeedsCompositedScrollingInternal.
+  EXPECT_FALSE(scrollable_area->NeedsCompositedScrolling());
+
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 20),
+                                   mojom::blink::ScrollType::kCompositor);
+
+  EXPECT_FALSE(scrollable_area->ScrollbarsHiddenIfOverlay());
+}
+
 TEST_P(MAYBE_PaintLayerScrollableAreaTest, CompositedStickyDescendant) {
   SetBodyInnerHTML(R"HTML(
     <div id=scroller style="overflow: scroll; width: 500px; height: 300px;
@@ -1123,7 +1162,7 @@ TEST_P(MAYBE_PaintLayerScrollableAreaTest, CompositedStickyDescendant) {
   EXPECT_EQ(gfx::Vector2dF(0, 50), sticky->FirstFragment()
                                        .PaintProperties()
                                        ->StickyTranslation()
-                                       ->Translation2D());
+                                       ->Get2dTranslation());
 }
 
 TEST_P(MAYBE_PaintLayerScrollableAreaTest, StickyPositionUseCounter) {
@@ -1219,7 +1258,7 @@ TEST_P(MAYBE_PaintLayerScrollableAreaTest, ScrollingBackgroundVisualRect) {
     </div>
   )HTML");
 
-  EXPECT_EQ(gfx::Rect(2, 3, 101, 200),
+  EXPECT_EQ(gfx::Rect(2, 2, 101, 200),
             GetLayoutBoxByElementId("scroller")
                 ->GetScrollableArea()
                 ->ScrollingBackgroundVisualRect(PhysicalOffset()));
@@ -1421,70 +1460,6 @@ TEST_P(MAYBE_PaintLayerScrollableAreaTest, SetSnapContainerDataNeedsUpdate) {
   EXPECT_FALSE(snap_coordinator.AnySnapContainerDataNeedsUpdate());
 }
 
-class ScrollTimelineForTest : public ScrollTimeline {
- public:
-  ScrollTimelineForTest(Document* document, Element* scroll_source)
-      : ScrollTimeline(document,
-                       ScrollTimeline::ReferenceType::kSource,
-                       scroll_source,
-                       ScrollDirection::kVertical),
-        invalidated_(false) {}
-  void Invalidate() override {
-    ScrollTimeline::Invalidate();
-    invalidated_ = true;
-  }
-  bool Invalidated() const { return invalidated_; }
-  void ResetInvalidated() { invalidated_ = false; }
-  void Trace(Visitor* visitor) const override {
-    ScrollTimeline::Trace(visitor);
-  }
-
- private:
-  bool invalidated_;
-};
-
-// Verify that scrollable area changes invalidate scroll timeline.
-TEST_P(MAYBE_PaintLayerScrollableAreaTest, ScrollTimelineInvalidation) {
-  SetBodyInnerHTML(R"HTML(
-    <style>
-      #scroller { overflow: scroll; width: 100px; height: 100px; }
-      #spacer { height: 1000px; }
-    </style>
-    <div id='scroller'>
-      <div id ='spacer'></div>
-    </div>
-  )HTML");
-
-  auto* scroller =
-      To<LayoutBoxModelObject>(GetLayoutObjectByElementId("scroller"));
-  PaintLayerScrollableArea* scrollable_area = scroller->GetScrollableArea();
-  scrollable_area->SetScrollOffset(ScrollOffset(0, 20),
-                                   mojom::blink::ScrollType::kProgrammatic);
-  Element* scroller_element = GetElementById("scroller");
-  ScrollTimelineForTest* scroll_timeline =
-      MakeGarbageCollected<ScrollTimelineForTest>(&GetDocument(),
-                                                  scroller_element);
-  scroll_timeline->ResetInvalidated();
-  // Verify that changing scroll offset invalidates scroll timeline.
-  scrollable_area->SetScrollOffset(ScrollOffset(0, 30),
-                                   mojom::blink::ScrollType::kProgrammatic);
-  EXPECT_TRUE(scroll_timeline->Invalidated());
-  scroll_timeline->ResetInvalidated();
-
-  // Verify that changing scroller size invalidates scroll timeline.
-  scroller_element->setAttribute(html_names::kStyleAttr, "height:110px;");
-  UpdateAllLifecyclePhasesForTest();
-  EXPECT_TRUE(scroll_timeline->Invalidated());
-  scroll_timeline->ResetInvalidated();
-
-  // Verify that changing content area size invalidates scroll timeline.
-  Element* spacer_element = GetElementById("spacer");
-  spacer_element->setAttribute(html_names::kStyleAttr, "height:900px;");
-  UpdateAllLifecyclePhasesForTest();
-  EXPECT_TRUE(scroll_timeline->Invalidated());
-  scroll_timeline->ResetInvalidated();
-}
-
 TEST_P(MAYBE_PaintLayerScrollableAreaTest,
        RootScrollbarShouldUseParentOfOverscrollNodeAsTransformNode) {
   auto& document = GetDocument();
@@ -1608,7 +1583,6 @@ TEST_P(MAYBE_PaintLayerScrollableAreaTest, RemoveAddResizerWithoutScrollbars) {
   EXPECT_TRUE(scrollable_area->Layer()->NeedsReorderOverlayOverflowControls());
 
   target->RemoveInlineStyleProperty(CSSPropertyID::kResize);
-  LOG(ERROR) << "REMOVE";
   UpdateAllLifecyclePhasesForTest();
   ASSERT_EQ(scrollable_area, target->GetLayoutBox()->GetScrollableArea());
   ASSERT_FALSE(scrollable_area->HasScrollbar());
@@ -1616,7 +1590,6 @@ TEST_P(MAYBE_PaintLayerScrollableAreaTest, RemoveAddResizerWithoutScrollbars) {
   EXPECT_FALSE(scrollable_area->Layer()->NeedsReorderOverlayOverflowControls());
 
   target->SetInlineStyleProperty(CSSPropertyID::kResize, "both");
-  LOG(ERROR) << "ADD";
   UpdateAllLifecyclePhasesForTest();
   ASSERT_EQ(scrollable_area, target->GetLayoutBox()->GetScrollableArea());
   ASSERT_FALSE(scrollable_area->HasScrollbar());

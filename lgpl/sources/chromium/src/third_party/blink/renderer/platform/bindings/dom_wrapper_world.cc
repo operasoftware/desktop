@@ -41,6 +41,7 @@
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/thread_specific.h"
 
 namespace blink {
@@ -52,7 +53,7 @@ static_assert(kMainDOMWorldId == DOMWrapperWorld::kMainWorldId,
 unsigned DOMWrapperWorld::number_of_non_main_worlds_in_main_thread_ = 0;
 
 // This does not contain the main world because the WorldMap needs
-// non-default hashmap traits (WTF::UnsignedWithZeroKeyHashTraits) to contain
+// non-default hashmap traits (WTF::IntWithZeroKeyHashTraits) to contain
 // it for the main world's id (0), and it may change the performance trends.
 // (see https://crbug.com/704778#c6).
 using WorldMap = HashMap<int, DOMWrapperWorld*>;
@@ -92,7 +93,8 @@ DOMWrapperWorld::DOMWrapperWorld(v8::Isolate* isolate,
     case WorldType::kInspectorIsolated:
     case WorldType::kRegExp:
     case WorldType::kForV8ContextSnapshotNonMain:
-    case WorldType::kWorker: {
+    case WorldType::kWorker:
+    case WorldType::kShadowRealm: {
       WorldMap& map = GetWorldMap();
       DCHECK(!map.Contains(world_id_));
       map.insert(world_id_, this);
@@ -276,10 +278,12 @@ int DOMWrapperWorld::GenerateWorldIdForType(WorldType world_type) {
     case WorldType::kRegExp:
     case WorldType::kForV8ContextSnapshotNonMain:
     case WorldType::kWorker:
+    case WorldType::kShadowRealm: {
       int32_t world_id = *next_world_id;
       CHECK_GE(world_id, WorldId::kUnspecifiedWorldIdStart);
       *next_world_id = world_id + 1;
       return world_id;
+    }
   }
   NOTREACHED();
   return kInvalidWorldId;

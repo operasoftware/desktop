@@ -37,7 +37,6 @@
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
 #include "third_party/blink/renderer/platform/fonts/font_vertical_position_type.h"
 #include "third_party/blink/renderer/platform/fonts/glyph.h"
-#include "third_party/blink/renderer/platform/fonts/lock_for_parallel_text_shaping.h"
 #include "third_party/blink/renderer/platform/fonts/typesetting_features.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -45,7 +44,7 @@
 #include "third_party/skia/include/core/SkFont.h"
 #include "ui/gfx/geometry/rect_f.h"
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
 #include "third_party/blink/renderer/platform/fonts/glyph_metrics_map.h"
 #endif
 
@@ -88,10 +87,9 @@ class PLATFORM_EXPORT SimpleFontData final : public FontData {
 
   const FontPlatformData& PlatformData() const { return platform_data_; }
 
-  scoped_refptr<SimpleFontData> SmallCapsFontData(const FontDescription&) const
-      LOCKS_EXCLUDED(derived_font_data_lock_);
+  scoped_refptr<SimpleFontData> SmallCapsFontData(const FontDescription&) const;
   scoped_refptr<SimpleFontData> EmphasisMarkFontData(
-      const FontDescription&) const LOCKS_EXCLUDED(derived_font_data_lock_);
+      const FontDescription&) const;
   scoped_refptr<SimpleFontData> MetricsOverriddenFontData(
       const FontMetricsOverride&) const;
 
@@ -210,9 +208,7 @@ class PLATFORM_EXPORT SimpleFontData final : public FontData {
     scoped_refptr<SimpleFontData> emphasis_mark;
   };
 
-  mutable std::unique_ptr<DerivedFontData> derived_font_data_
-      GUARDED_BY(derived_font_data_lock_);
-  mutable LockForParallelTextShaping derived_font_data_lock_;
+  mutable std::unique_ptr<DerivedFontData> derived_font_data_;
 
   const scoped_refptr<CustomFontData> custom_font_data_;
 
@@ -228,14 +224,14 @@ class PLATFORM_EXPORT SimpleFontData final : public FontData {
 // https://bugs.chromium.org/p/skia/issues/detail?id=5328 :
 // On Mac we're still using path based glyph metrics, and they seem to be
 // too slow to be able to remove the caching layer we have here.
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
   mutable std::unique_ptr<GlyphMetricsMap<gfx::RectF>> glyph_to_bounds_map_;
   mutable GlyphMetricsMap<float> glyph_to_width_map_;
 #endif
 };
 
 ALWAYS_INLINE gfx::RectF SimpleFontData::BoundsForGlyph(Glyph glyph) const {
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_APPLE)
   return PlatformBoundsForGlyph(glyph);
 #else
   if (glyph_to_bounds_map_) {
@@ -255,7 +251,7 @@ ALWAYS_INLINE gfx::RectF SimpleFontData::BoundsForGlyph(Glyph glyph) const {
 }
 
 ALWAYS_INLINE float SimpleFontData::WidthForGlyph(Glyph glyph) const {
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_APPLE)
   return PlatformWidthForGlyph(glyph);
 #else
   if (absl::optional<float> width = glyph_to_width_map_.MetricsForGlyph(glyph))

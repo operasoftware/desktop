@@ -5,8 +5,8 @@
 #include <array>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/test/gmock_callback_support.h"
@@ -18,6 +18,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/modules/video_capture/web_video_capture_impl_manager.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/platform/video_capture/gpu_memory_buffer_test_support.h"
 #include "third_party/blink/renderer/platform/video_capture/video_capture_impl.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
@@ -53,7 +54,7 @@ class MockVideoCaptureImpl : public VideoCaptureImpl,
                        PauseResumeCallback* pause_callback,
                        base::OnceClosure destruct_callback)
       : VideoCaptureImpl(session_id,
-                         base::ThreadTaskRunnerHandle::Get(),
+                         scheduler::GetSingleThreadTaskRunnerForTesting(),
                          &GetEmptyBrowserInterfaceBroker()),
         pause_callback_(pause_callback),
         destruct_callback_(std::move(destruct_callback)) {}

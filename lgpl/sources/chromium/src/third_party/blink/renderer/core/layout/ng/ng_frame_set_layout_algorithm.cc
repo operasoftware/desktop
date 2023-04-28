@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/html/html_frame_set_element.h"
 #include "third_party/blink/renderer/core/layout/ng/frame_set_layout_data.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_disable_side_effects_scope.h"
 
 namespace blink {
 
@@ -284,6 +285,7 @@ void NGFrameSetLayoutAlgorithm::LayoutChildren(
   NGLayoutInputNode child = Node().FirstChild();
   if (!child)
     return;
+  auto container_direction = Style().GetWritingDirection();
   for (wtf_size_t row = 0; row < layout_data.row_sizes.size(); ++row) {
     position.left = LayoutUnit();
     const LayoutUnit row_size = layout_data.row_sizes[row];
@@ -291,20 +293,18 @@ void NGFrameSetLayoutAlgorithm::LayoutChildren(
       const LayoutUnit col_size = layout_data.col_sizes[col];
       const bool kNewFormattingContext = true;
       NGConstraintSpaceBuilder space_builder(
-          Style().GetWritingMode(), child.Style().GetWritingDirection(),
-          kNewFormattingContext);
-      space_builder.SetAvailableSize(
-          IsHorizontalWritingMode(child.Style().GetWritingMode())
-              ? LogicalSize(col_size, row_size)
-              : LogicalSize(row_size, col_size));
+          container_direction.GetWritingMode(),
+          child.Style().GetWritingDirection(), kNewFormattingContext);
+      space_builder.SetAvailableSize(container_direction.IsHorizontal()
+                                         ? LogicalSize(col_size, row_size)
+                                         : LogicalSize(row_size, col_size));
       space_builder.SetIsFixedInlineSize(true);
       space_builder.SetIsFixedBlockSize(true);
       const NGLayoutResult* result =
           To<NGBlockNode>(child).Layout(space_builder.ToConstraintSpace());
       container_builder_.AddResult(
-          *result,
-          position.ConvertToLogical(Style().GetWritingDirection(),
-                                    frameset_size, {col_size, row_size}));
+          *result, position.ConvertToLogical(container_direction, frameset_size,
+                                             {col_size, row_size}));
 
       child = child.NextSibling();
       if (!child)
@@ -314,7 +314,9 @@ void NGFrameSetLayoutAlgorithm::LayoutChildren(
     position.top += row_size + layout_data.border_thickness;
   }
 
-  ClearNeedsLayoutOnHiddenFrames(child.GetLayoutBox());
+  if (!NGDisableSideEffectsScope::IsDisabled()) {
+    ClearNeedsLayoutOnHiddenFrames(child.GetLayoutBox());
+  }
 }
 
 }  // namespace blink

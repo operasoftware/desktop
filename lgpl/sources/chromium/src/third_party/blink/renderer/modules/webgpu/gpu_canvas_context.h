@@ -11,11 +11,11 @@
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context_factory.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgpu_swap_buffer_provider.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 
 namespace blink {
 
-class GPUAdapter;
 class GPUDevice;
 class GPUCanvasConfiguration;
 class GPUSwapChain;
@@ -50,6 +50,8 @@ class GPUCanvasContext : public CanvasRenderingContext,
 
   GPUCanvasContext(const GPUCanvasContext&) = delete;
   GPUCanvasContext& operator=(const GPUCanvasContext&) = delete;
+
+  ~GPUCanvasContext() override;
 
   void Trace(Visitor*) const override;
 
@@ -104,8 +106,6 @@ class GPUCanvasContext : public CanvasRenderingContext,
 
   void configure(const GPUCanvasConfiguration* descriptor, ExceptionState&);
   void unconfigure();
-  String getPreferredFormat(ExecutionContext* execution_context,
-                            GPUAdapter* adapter);
   GPUTexture* getCurrentTexture(ExceptionState&);
 
   // WebGPUSwapBufferProvider::Client implementation
@@ -113,8 +113,7 @@ class GPUCanvasContext : public CanvasRenderingContext,
 
  private:
   void DetachSwapBuffers();
-  GPUTexture* ReplaceCurrentTexture();
-  void ResizeSwapbuffers(gfx::Size size);
+  void ReplaceDrawingBuffer(bool destroy_swap_buffers);
   void InitializeAlphaModePipeline(WGPUTextureFormat format);
 
   void FinalizeFrame(bool) override;
@@ -137,6 +136,7 @@ class GPUCanvasContext : public CanvasRenderingContext,
       cc::PaintFlags::FilterQuality::kLow;
   Member<GPUDevice> device_;
   Member<GPUTexture> texture_;
+  PredefinedColorSpace color_space_ = PredefinedColorSpace::kSRGB;
   V8GPUCanvasAlphaMode::Enum alpha_mode_;
   scoped_refptr<WebGPUTextureAlphaClearer> alpha_clearer_;
   scoped_refptr<WebGPUSwapBufferProvider> swap_buffers_;
@@ -144,14 +144,12 @@ class GPUCanvasContext : public CanvasRenderingContext,
   bool new_texture_required_ = true;
   bool stopped_ = false;
 
-  // TODO(crbug.com/1326473): Remove after deprecation period.
-  gfx::Size configured_size_;
-
   // Matches [[configuration]] != null in the WebGPU specification.
   bool configured_ = false;
   // Matches [[texture_descriptor]] in the WebGPU specification except that it
   // never becomes null.
   WGPUTextureDescriptor texture_descriptor_;
+  std::unique_ptr<WGPUTextureFormat[]> view_formats_;
 };
 
 }  // namespace blink

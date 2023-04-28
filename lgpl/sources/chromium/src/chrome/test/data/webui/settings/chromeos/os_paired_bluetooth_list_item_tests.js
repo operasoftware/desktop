@@ -7,10 +7,10 @@ import 'chrome://os-settings/strings.m.js';
 import {Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
 import {AudioOutputCapability, DeviceConnectionState, DeviceType} from 'chrome://resources/mojo/chromeos/ash/services/bluetooth_config/public/mojom/cros_bluetooth_config.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {createDefaultBluetoothDevice} from 'chrome://test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
+import {createDefaultBluetoothDevice} from 'chrome://webui-test/cr_components/chromeos/bluetooth/fake_bluetooth_config.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 
-import {assertEquals, assertTrue} from '../../../chai_assert.js';
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 suite('OsPairedBluetoothListItemTest', function() {
   /** @type {!SettingsPairedBluetoothListItemElement|undefined} */
@@ -221,16 +221,15 @@ suite('OsPairedBluetoothListItemTest', function() {
     const assertInDetailSubpage = async () => {
       await flushAsync();
       assertEquals(
-          Router.getInstance().getCurrentRoute(),
-          routes.BLUETOOTH_DEVICE_DETAIL);
+          Router.getInstance().currentRoute, routes.BLUETOOTH_DEVICE_DETAIL);
       assertEquals(id, Router.getInstance().getQueryParameters().get('id'));
 
       Router.getInstance().resetRouteForTesting();
-      assertEquals(Router.getInstance().getCurrentRoute(), routes.BASIC);
+      assertEquals(Router.getInstance().currentRoute, routes.BASIC);
     };
 
     // Simulate clicking item.
-    assertEquals(Router.getInstance().getCurrentRoute(), routes.BASIC);
+    assertEquals(Router.getInstance().currentRoute, routes.BASIC);
     getItemContainer().click();
     await assertInDetailSubpage();
 

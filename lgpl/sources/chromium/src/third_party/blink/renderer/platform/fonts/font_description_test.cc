@@ -85,8 +85,8 @@ TEST_F(FontDescriptionTest, VariationSettingsIdentical) {
   ASSERT_EQ(a, b);
 
   FontFaceCreationParams test_creation_params;
-  FontCacheKey cache_key_a = a.CacheKey(test_creation_params, false);
-  FontCacheKey cache_key_b = b.CacheKey(test_creation_params, false);
+  FontCacheKey cache_key_a = a.CacheKey(test_creation_params, false, false);
+  FontCacheKey cache_key_b = b.CacheKey(test_creation_params, false, false);
 
   ASSERT_EQ(cache_key_a, cache_key_b);
 }
@@ -112,8 +112,8 @@ TEST_F(FontDescriptionTest, VariationSettingsDifferent) {
 
   FontFaceCreationParams test_creation_params;
 
-  FontCacheKey cache_key_a = a.CacheKey(test_creation_params, false);
-  FontCacheKey cache_key_b = b.CacheKey(test_creation_params, false);
+  FontCacheKey cache_key_a = a.CacheKey(test_creation_params, false, false);
+  FontCacheKey cache_key_b = b.CacheKey(test_creation_params, false, false);
 
   ASSERT_NE(cache_key_a, cache_key_b);
 
@@ -131,8 +131,10 @@ TEST_F(FontDescriptionTest, VariationSettingsDifferent) {
 
   ASSERT_NE(a, b);
 
-  FontCacheKey second_cache_key_a = a.CacheKey(test_creation_params, false);
-  FontCacheKey second_cache_key_b = b.CacheKey(test_creation_params, false);
+  FontCacheKey second_cache_key_a =
+      a.CacheKey(test_creation_params, false, false);
+  FontCacheKey second_cache_key_b =
+      b.CacheKey(test_creation_params, false, false);
 
   ASSERT_NE(second_cache_key_a, second_cache_key_b);
 }
@@ -156,10 +158,36 @@ TEST_F(FontDescriptionTest, PaletteDifferent) {
 
   FontFaceCreationParams test_creation_params;
 
-  FontCacheKey cache_key_a = a.CacheKey(test_creation_params, false);
-  FontCacheKey cache_key_b = b.CacheKey(test_creation_params, false);
+  FontCacheKey cache_key_a = a.CacheKey(test_creation_params, false, false);
+  FontCacheKey cache_key_b = b.CacheKey(test_creation_params, false, false);
 
   ASSERT_NE(cache_key_a, cache_key_b);
+}
+
+TEST_F(FontDescriptionTest, VariantAlternatesDifferent) {
+  FontDescription a;
+  FontDescription b(a);
+
+  scoped_refptr<FontVariantAlternates> variants_a =
+      FontVariantAlternates::Create();
+  variants_a->SetHistoricalForms();
+
+  scoped_refptr<FontVariantAlternates> variants_b =
+      FontVariantAlternates::Create();
+  variants_b->SetStyleset({"foo", "bar"});
+
+  ASSERT_NE(*variants_a, *variants_b);
+  ASSERT_EQ(*variants_a, *variants_a);
+  a.SetFontVariantAlternates(variants_a);
+  b.SetFontVariantAlternates(variants_b);
+
+  ASSERT_NE(a, b);
+
+  FontFaceCreationParams test_creation_params;
+  FontCacheKey key_a = a.CacheKey(test_creation_params, false, false);
+  FontCacheKey key_b = b.CacheKey(test_creation_params, false, false);
+
+  ASSERT_NE(key_a, key_b);
 }
 
 TEST_F(FontDescriptionTest, ToString) {
@@ -217,7 +245,8 @@ TEST_F(FontDescriptionTest, ToString) {
       "numeric_spacing=NormalSpacing, numeric_fraction=Normal, ordinal=Off, "
       "slashed_zero=Off], variant_east_asian=[form=Normal, width=Normal, "
       "ruby=false], font_optical_sizing=Auto, font_synthesis_weight=Auto, "
-      "font_synthesis_style=Auto",
+      "font_synthesis_style=Auto, font_synthesis_small_caps=Auto, "
+      "font_variant_position=Normal",
       description.ToString());
 }
 

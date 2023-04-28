@@ -26,8 +26,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_CANVAS_RENDERING_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_CANVAS_RENDERING_CONTEXT_H_
 
-#include "base/callback_forward.h"
 #include "base/containers/span.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/notreached.h"
 #include "cc/paint/paint_flags.h"
@@ -272,6 +272,9 @@ class CORE_EXPORT CanvasRenderingContext
   }
 
   // WebGL & WebGPU-specific interface
+  virtual void SetHDRConfiguration(
+      gfx::HDRMode hdr_mode,
+      absl::optional<gfx::HDRMetadata> hdr_metadata) {}
   virtual void SetFilterQuality(cc::PaintFlags::FilterQuality) { NOTREACHED(); }
   virtual void Reshape(int width, int height) {}
   virtual int ExternallyAllocatedBufferCountPerPixel() {
@@ -283,6 +286,8 @@ class CORE_EXPORT CanvasRenderingContext
   virtual bool PushFrame() { return false; }
   virtual ImageBitmap* TransferToImageBitmap(ScriptState*) { return nullptr; }
 
+  // Notification the color scheme of the HTMLCanvasElement may have changed.
+  virtual void ColorSchemeMayHaveChanged() {}
 
   bool WouldTaintOrigin(CanvasImageSource*);
   void DidMoveToNewDocument(Document*);
@@ -310,6 +315,8 @@ class CORE_EXPORT CanvasRenderingContext
   virtual bool IdentifiabilityEncounteredPartiallyDigestedImage() const {
     return false;
   }
+
+  bool did_print_in_current_task() const { return did_print_in_current_task_; }
 
  protected:
   CanvasRenderingContext(CanvasRenderingContextHost*,

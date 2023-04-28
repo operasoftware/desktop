@@ -6,8 +6,7 @@
  * @fileoverview Tests for the passkeys subpage.
  */
 
-import {CrInputElement} from 'chrome://resources/cr_elements/cr_input/cr_input.js';
-import {Passkey, PasskeysBrowserProxy, PasskeysBrowserProxyImpl, SettingsPasskeysSubpageElement} from 'chrome://settings/lazy_load.js';
+import {CrInputElement, Passkey, PasskeysBrowserProxy, PasskeysBrowserProxyImpl, SettingsPasskeysSubpageElement} from 'chrome://settings/lazy_load.js';
 import {assertDeepEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
@@ -140,8 +139,7 @@ suite('PasskeysSubpage', function() {
   setup(async function() {
     browserProxy = new TestPasskeysBrowserProxy();
     PasskeysBrowserProxyImpl.setInstance(browserProxy);
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     page = document.createElement('settings-passkeys-subpage');
   });
 

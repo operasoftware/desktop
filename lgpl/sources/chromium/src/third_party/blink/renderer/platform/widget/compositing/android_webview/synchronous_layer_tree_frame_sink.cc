@@ -7,13 +7,12 @@
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/bind.h"
 #include "base/check.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/notreached.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "cc/trees/layer_tree_frame_sink_client.h"
 #include "components/power_scheduler/power_mode.h"
 #include "components/power_scheduler/power_mode_arbiter.h"
@@ -35,6 +34,7 @@
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
+#include "gpu/command_buffer/common/swap_buffers_complete_params.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/geometry/rect_conversions.h"
@@ -86,7 +86,10 @@ class SoftwareCompositorFrameSinkClient
     DCHECK(resources.empty());
   }
   void OnBeginFrame(const viz::BeginFrameArgs& args,
-                    const viz::FrameTimingDetailsMap& timing_details) override {
+                    const viz::FrameTimingDetailsMap& timing_details,
+                    bool frame_ack,
+                    std::vector<viz::ReturnedResource> resources) override {
+    DCHECK(resources.empty());
   }
   void ReclaimResources(std::vector<viz::ReturnedResource> resources) override {
     DCHECK(resources.empty());
@@ -377,7 +380,10 @@ void SynchronousLayerTreeFrameSink::SubmitCompositorFrame(
     // expects that every frame will receive a swap ack and presentation
     // feedback so we send null signals here.
     now = base::TimeTicks::Now();
-    display_->DidReceiveSwapBuffersAck({now, now},
+    gpu::SwapBuffersCompleteParams params;
+    params.swap_response.timings = {now, now};
+    params.swap_response.result = gfx::SwapResult::SWAP_ACK;
+    display_->DidReceiveSwapBuffersAck(params,
                                        /*release_fence=*/gfx::GpuFenceHandle());
     display_->DidReceivePresentationFeedback(
         gfx::PresentationFeedback::Failure());
@@ -584,8 +590,17 @@ void SynchronousLayerTreeFrameSink::DidReceiveCompositorFrameAck(
 
 void SynchronousLayerTreeFrameSink::OnBeginFrame(
     const viz::BeginFrameArgs& args,
-    const HashMap<uint32_t, viz::FrameTimingDetails>& timing_details) {
+    const HashMap<uint32_t, viz::FrameTimingDetails>& timing_details,
+    bool frame_ack,
+    Vector<viz::ReturnedResource> resources) {
   DCHECK(viz_frame_submission_enabled_);
+  if (features::IsOnBeginFrameAcksEnabled()) {
+    if (frame_ack) {
+      DidReceiveCompositorFrameAck(std::move(resources));
+    } else if (!resources.empty()) {
+      ReclaimResources(std::move(resources));
+    }
+  }
 
   // We do not receive BeginFrames via CompositorFrameSink, so we do not forward
   // it to cc. We still might get one with FrameTimingDetailsMap, so we report

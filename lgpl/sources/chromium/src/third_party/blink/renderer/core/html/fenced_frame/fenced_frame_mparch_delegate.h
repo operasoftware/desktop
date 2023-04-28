@@ -14,10 +14,9 @@ namespace blink {
 
 class KURL;
 
-// This is one of the underlying implementations of the `HTMLFencedFrameElement`
+// This is the underlying implementations of the `HTMLFencedFrameElement`
 // interface. It can be activated by enabling the
-// `blink::features::kFencedFrames` feature, and setting its feature param value
-// to `FencedFramesImplementationType::kMPArch`. See the documentation above
+// `blink::features::kFencedFrames` feature. See the documentation above
 // `FencedFrameDelegate`.
 class CORE_EXPORT FencedFrameMPArchDelegate
     : public HTMLFencedFrameElement::FencedFrameDelegate {
@@ -28,7 +27,8 @@ class CORE_EXPORT FencedFrameMPArchDelegate
   void Dispose() override;
   void AttachLayoutTree() override;
   bool SupportsFocus() override;
-  void FreezeFrameSize() override;
+  void MarkFrozenFrameSizeStale() override;
+  void DidChangeFramePolicy(const FramePolicy&) override;
 
  private:
   mojo::AssociatedRemote<mojom::blink::FencedFrameOwnerHost> remote_;

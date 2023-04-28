@@ -4,8 +4,8 @@
 
 #include "third_party/blink/renderer/platform/widget/input/scroll_predictor.h"
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
@@ -146,13 +146,13 @@ class ScrollPredictorTest : public testing::Test {
       const std::string& filter_type) {
     base::FieldTrialParams pred_field_params;
     pred_field_params["predictor"] = predictor_type;
-    base::test::ScopedFeatureList::FeatureAndParams prediction_params = {
-        pred_feature, pred_field_params};
+    base::test::FeatureRefAndParams prediction_params = {pred_feature,
+                                                         pred_field_params};
 
     base::FieldTrialParams filter_field_params;
     filter_field_params["filter"] = filter_type;
-    base::test::ScopedFeatureList::FeatureAndParams filter_params = {
-        filter_feature, filter_field_params};
+    base::test::FeatureRefAndParams filter_params = {filter_feature,
+                                                     filter_field_params};
 
     scoped_feature_list_.Reset();
     scoped_feature_list_.InitWithFeaturesAndParameters(
@@ -177,7 +177,7 @@ class ScrollPredictorTest : public testing::Test {
   void InitLinearResamplingTest(bool use_frames_based_experimental_prediction) {
     base::FieldTrialParams params;
     params["filter"] = ::features::kPredictorNameLinearResampling;
-    base::test::ScopedFeatureList::FeatureAndParams prediction_params = {
+    base::test::FeatureRefAndParams prediction_params = {
         features::kResamplingScrollEvents, params};
 
     base::FieldTrialParams prediction_type_params;
@@ -185,10 +185,9 @@ class ScrollPredictorTest : public testing::Test {
         use_frames_based_experimental_prediction
             ? ::features::kPredictionTypeFramesBased
             : ::features::kPredictionTypeTimeBased;
-    base::test::ScopedFeatureList::FeatureAndParams
-        experimental_prediction_params = {
-            ::features::kResamplingScrollEventsExperimentalPrediction,
-            prediction_type_params};
+    base::test::FeatureRefAndParams experimental_prediction_params = {
+        ::features::kResamplingScrollEventsExperimentalPrediction,
+        prediction_type_params};
 
     scoped_feature_list_.Reset();
     scoped_feature_list_.InitWithFeaturesAndParameters(

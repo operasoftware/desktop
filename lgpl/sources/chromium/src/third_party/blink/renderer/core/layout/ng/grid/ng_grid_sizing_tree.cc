@@ -1,71 +1,59 @@
-// Copyright 2021 The Chromium Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Copyright 2023 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be found
+// in the LICENSE file.
 
 #include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_sizing_tree.h"
 
 namespace blink {
 
-bool NGGridProperties::HasBaseline(
-    const GridTrackSizingDirection track_direction) const {
-  return (track_direction == kForColumns)
-             ? (has_baseline_column ||
-                (has_orthogonal_item && has_baseline_row))
-             : (has_baseline_row ||
-                (has_orthogonal_item && has_baseline_column));
+NGGridItemSizingData::NGGridItemSizingData(
+    const GridItemData& item_data_in_parent,
+    const NGGridLayoutData& parent_layout_data)
+    : item_data_in_parent(&item_data_in_parent),
+      parent_layout_data(&parent_layout_data) {
+  DCHECK_LE(item_data_in_parent.column_set_indices.end,
+            parent_layout_data.Columns().GetSetCount());
+  DCHECK_LE(item_data_in_parent.row_set_indices.end,
+            parent_layout_data.Rows().GetSetCount());
 }
 
-bool NGGridProperties::HasFlexibleTrack(
-    const GridTrackSizingDirection track_direction) const {
-  return (track_direction == kForColumns)
-             ? column_properties.HasProperty(
-                   TrackSpanProperties::kHasFlexibleTrack)
-             : row_properties.HasProperty(
-                   TrackSpanProperties::kHasFlexibleTrack);
+std::unique_ptr<NGGridLayoutTrackCollection>
+NGGridItemSizingData::CreateSubgridCollection(
+    GridTrackSizingDirection track_direction) const {
+  DCHECK(item_data_in_parent->IsSubgrid());
+
+  const bool is_for_columns_in_parent =
+      item_data_in_parent->is_parallel_with_root_grid
+          ? track_direction == kForColumns
+          : track_direction == kForRows;
+
+  const auto& parent_track_collection = is_for_columns_in_parent
+                                            ? parent_layout_data->Columns()
+                                            : parent_layout_data->Rows();
+  const auto& range_indices = is_for_columns_in_parent
+                                  ? item_data_in_parent->column_range_indices
+                                  : item_data_in_parent->row_range_indices;
+
+  return std::make_unique<NGGridLayoutTrackCollection>(
+      parent_track_collection.CreateSubgridCollection(
+          range_indices.begin, range_indices.end, track_direction));
 }
 
-bool NGGridProperties::HasIntrinsicTrack(
-    const GridTrackSizingDirection track_direction) const {
-  return (track_direction == kForColumns)
-             ? column_properties.HasProperty(
-                   TrackSpanProperties::kHasIntrinsicTrack)
-             : row_properties.HasProperty(
-                   TrackSpanProperties::kHasIntrinsicTrack);
-}
+NGGridSizingTree NGGridSizingTree::CopySubtree(wtf_size_t subtree_root) const {
+  DCHECK_LT(subtree_root, sizing_data_.size());
 
-bool NGGridProperties::IsDependentOnAvailableSize(
-    const GridTrackSizingDirection track_direction) const {
-  return (track_direction == kForColumns)
-             ? column_properties.HasProperty(
-                   TrackSpanProperties::kIsDependentOnAvailableSize)
-             : row_properties.HasProperty(
-                   TrackSpanProperties::kIsDependentOnAvailableSize);
-}
+  const wtf_size_t subtree_size = sizing_data_[subtree_root]->subtree_size;
+  DCHECK_LE(subtree_root + subtree_size, sizing_data_.size());
 
-bool NGGridProperties::IsSpanningOnlyDefiniteTracks(
-    const GridTrackSizingDirection track_direction) const {
-  return (track_direction == kForColumns)
-             ? !column_properties.HasProperty(
-                   TrackSpanProperties::kHasNonDefiniteTrack)
-             : !row_properties.HasProperty(
-                   TrackSpanProperties::kHasNonDefiniteTrack);
-}
+  NGGridSizingTree subtree_copy(subtree_size);
+  for (wtf_size_t i = 0; i < subtree_size; ++i) {
+    auto& copy_data = subtree_copy.CreateSizingData();
+    const auto& original_data = *sizing_data_[subtree_root + i];
 
-NGGridSizingData& NGGridSizingTree::CreateSizingData(
-    const NGGridNode& grid,
-    const NGGridSizingData* parent_sizing_data,
-    const GridItemData* subgrid_data_in_parent) {
-  auto* new_sizing_data = MakeGarbageCollected<NGGridSizingData>(
-      parent_sizing_data, subgrid_data_in_parent);
-
-  data_lookup_map_.insert(grid.GetLayoutBox(), new_sizing_data);
-  sizing_data_.emplace_back(new_sizing_data);
-  return *new_sizing_data;
-}
-
-NGGridSizingData& NGGridSizingTree::operator[](wtf_size_t index) {
-  DCHECK_LT(index, sizing_data_.size());
-  return *sizing_data_[index];
+    copy_data.subtree_size = original_data.subtree_size;
+    copy_data.layout_data = original_data.layout_data;
+  }
+  return subtree_copy;
 }
 
 }  // namespace blink

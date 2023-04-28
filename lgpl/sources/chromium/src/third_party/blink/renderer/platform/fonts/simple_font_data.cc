@@ -105,7 +105,7 @@ void SimpleFontData::PlatformInit(bool subpixel_ascent_descent,
   float x_height;
   if (metrics.fXHeight) {
     x_height = metrics.fXHeight;
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
     // Mac OS CTFontGetXHeight reports the bounding box height of x,
     // including parts extending below the baseline and apparently no x-height
     // value from the OS/2 table. However, the CSS ex unit
@@ -146,7 +146,7 @@ void SimpleFontData::PlatformInit(bool subpixel_ascent_descent,
   // arbitrary but comes pretty close to the expected value in most cases.
   if (max_char_width_ < 1)
     max_char_width_ = ascent * 2;
-#elif BUILDFLAG(IS_MAC)
+#elif BUILDFLAG(IS_APPLE)
   // FIXME: The current avg/max character width calculation is not ideal,
   // it should check either the OS2 table or, better yet, query FontMetrics.
   // Sadly FontMetrics provides incorrect data on Mac at the moment.
@@ -159,7 +159,7 @@ void SimpleFontData::PlatformInit(bool subpixel_ascent_descent,
 
 #endif
 
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_APPLE)
   if (metrics.fAvgCharWidth) {
     avg_char_width_ = SkScalarToFloat(metrics.fAvgCharWidth);
   } else {
@@ -169,7 +169,7 @@ void SimpleFontData::PlatformInit(bool subpixel_ascent_descent,
     if (x_glyph) {
       avg_char_width_ = WidthForGlyph(x_glyph);
     }
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_APPLE)
   }
 #endif
 
@@ -269,7 +269,6 @@ bool SimpleFontData::IsSegmented() const {
 
 scoped_refptr<SimpleFontData> SimpleFontData::SmallCapsFontData(
     const FontDescription& font_description) const {
-  AutoLockForParallelTextShaping guard(derived_font_data_lock_);
   if (!derived_font_data_)
     derived_font_data_ = std::make_unique<DerivedFontData>();
   if (!derived_font_data_->small_caps) {
@@ -282,7 +281,6 @@ scoped_refptr<SimpleFontData> SimpleFontData::SmallCapsFontData(
 
 scoped_refptr<SimpleFontData> SimpleFontData::EmphasisMarkFontData(
     const FontDescription& font_description) const {
-  AutoLockForParallelTextShaping guard(derived_font_data_lock_);
   if (!derived_font_data_)
     derived_font_data_ = std::make_unique<DerivedFontData>();
   if (!derived_font_data_->emphasis_mark) {

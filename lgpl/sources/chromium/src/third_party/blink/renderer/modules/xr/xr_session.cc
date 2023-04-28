@@ -62,8 +62,8 @@
 #include "third_party/blink/renderer/platform/bindings/enumeration_base.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace blink {
 
@@ -76,6 +76,15 @@ const char kReferenceSpaceNotSupported[] =
 
 const char kIncompatibleLayer[] =
     "XRWebGLLayer was created with a different session.";
+
+const char kBaseLayerAndLayers[] =
+    "Both baseLayer and layers should not be set at the same time when "
+    "updating render state.";
+
+const char kMultiLayersNotEnabled[] =
+    "This session does not support multiple layers.";
+
+const char kDuplicateLayer[] = "All layers in render state must be unique.";
 
 const char kInlineVerticalFOVNotSupported[] =
     "This session does not support inlineVerticalFieldOfView";
@@ -136,7 +145,7 @@ absl::optional<device::mojom::XRSessionFeature> MapReferenceSpaceTypeToFeature(
   return absl::nullopt;
 }
 
-std::unique_ptr<TransformationMatrix> getPoseMatrix(
+std::unique_ptr<gfx::Transform> getPoseMatrix(
     const device::mojom::blink::VRPosePtr& pose) {
   if (!pose)
     return nullptr;
@@ -145,7 +154,7 @@ std::unique_ptr<TransformationMatrix> getPoseMatrix(
       device::Pose(pose->position.value_or(gfx::Point3F()),
                    pose->orientation.value_or(gfx::Quaternion()));
 
-  return std::make_unique<TransformationMatrix>(device_pose.ToTransform());
+  return std::make_unique<gfx::Transform>(device_pose.ToTransform());
 }
 
 absl::optional<device::mojom::blink::EntityTypeForHitTest>
@@ -296,6 +305,8 @@ void XRSession::MetricsReporter::ReportFeatureUsed(
     case XRSessionFeature::IMAGE_TRACKING:
     case XRSessionFeature::HAND_INPUT:
     case XRSessionFeature::SECONDARY_VIEWS:
+    case XRSessionFeature::LAYERS:
+    case XRSessionFeature::FRONT_FACING:
       // Not recording metrics for these features currently.
       break;
   }
@@ -422,6 +433,15 @@ const String XRSession::visibilityState() const {
   }
 }
 
+Vector<String> XRSession::enabledFeatures() const {
+  Vector<String> enabled_features;
+  for (const auto& feature : enabled_features_) {
+    enabled_features.push_back(XRSessionFeatureToString(feature));
+  }
+
+  return enabled_features;
+}
+
 XRAnchorSet* XRSession::TrackedAnchors() const {
   DVLOG(3) << __func__;
 
@@ -477,6 +497,42 @@ void XRSession::updateRenderState(XRRenderStateInit* init,
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       kIncompatibleLayer);
     return;
+  }
+
+  if (RuntimeEnabledFeatures::WebXRLayersEnabled() && init->hasLayers() &&
+      init->layers() && !init->layers()->empty()) {
+    // Validate that we don't have both layers and baseLayer set.
+    if (init->hasBaseLayer() && init->baseLayer()) {
+      exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                        kBaseLayerAndLayers);
+      return;
+    }
+
+    // Validate that the session was created with the layers feature enabled
+    // when the user wishes to render multiple layers at once.
+    if (init->layers()->size() > 1 &&
+        !IsFeatureEnabled(device::mojom::XRSessionFeature::LAYERS)) {
+      exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                        kMultiLayersNotEnabled);
+      return;
+    }
+
+    HeapHashSet<Member<const XRLayer>> unique_layers;
+    for (const XRLayer* layer : *init->layers()) {
+      // Check for duplicate layers.
+      if (!unique_layers.insert(layer).is_new_entry) {
+        exception_state.ThrowException(ToExceptionCode(ESErrorType::kTypeError),
+                                       kDuplicateLayer);
+        return;
+      }
+
+      // Validate that all layers were created with this session.
+      if (layer->session() != this) {
+        exception_state.ThrowException(ToExceptionCode(ESErrorType::kTypeError),
+                                       kIncompatibleLayer);
+        return;
+      }
+    }
   }
 
   pending_render_state_.push_back(init);
@@ -614,15 +670,12 @@ ScriptPromise XRSession::requestReferenceSpace(
   ScriptPromise promise = resolver->Promise();
   resolver->Resolve(reference_space);
 
-  UMA_HISTOGRAM_ENUMERATION("XR.WebXR.ReferenceSpace.Succeeded",
-                            requested_type);
-
   return promise;
 }
 
 ScriptPromise XRSession::CreateAnchorHelper(
     ScriptState* script_state,
-    const blink::TransformationMatrix& native_origin_from_anchor,
+    const gfx::Transform& native_origin_from_anchor,
     const device::mojom::blink::XRNativeOriginInformationPtr&
         native_origin_information,
     absl::optional<uint64_t> maybe_plane_id,
@@ -793,7 +846,7 @@ ScriptPromise XRSession::requestHitTestSource(
   // device (for example any space containing origin-offset).
   // Null checks not needed since native origin wouldn't be set if options_init
   // or space() were null.
-  TransformationMatrix native_from_offset =
+  gfx::Transform native_from_offset =
       options_init->space()->NativeFromOffsetMatrix();
 
   if (RuntimeEnabledFeatures::WebXRHitTestEntityTypesEnabled() &&
@@ -806,7 +859,7 @@ ScriptPromise XRSession::requestHitTestSource(
   auto entity_types = GetEntityTypesForHitTest(options_init);
 
   DVLOG(3) << __func__
-           << ": native_from_offset = " << native_from_offset.ToString(true);
+           << ": native_from_offset = " << native_from_offset.ToString();
 
   // Transformation from passed in pose to |space|.
 
@@ -816,11 +869,8 @@ ScriptPromise XRSession::requestHitTestSource(
   auto space_from_ray = offsetRay->RawMatrix();
   auto origin_from_ray = native_from_offset * space_from_ray;
 
-  DVLOG(3) << __func__
-           << ": space_from_ray = " << space_from_ray.ToString(true);
-
-  DVLOG(3) << __func__
-           << ": origin_from_ray = " << origin_from_ray.ToString(true);
+  DVLOG(3) << __func__ << ": space_from_ray = " << space_from_ray.ToString();
+  DVLOG(3) << __func__ << ": origin_from_ray = " << origin_from_ray.ToString();
 
   device::mojom::blink::XRRayPtr ray_mojo = device::mojom::blink::XRRay::New();
 
@@ -1912,7 +1962,7 @@ bool XRSession::CanEnableAntiAliasing() const {
   return enable_anti_aliasing_;
 }
 
-absl::optional<TransformationMatrix> XRSession::GetMojoFrom(
+absl::optional<gfx::Transform> XRSession::GetMojoFrom(
     device::mojom::blink::XRReferenceSpaceType space_type) const {
   if (!CanReportPoses()) {
     DVLOG(2) << __func__ << ": cannot report poses, returning nullopt";
@@ -1923,7 +1973,7 @@ absl::optional<TransformationMatrix> XRSession::GetMojoFrom(
     case device::mojom::blink::XRReferenceSpaceType::kViewer:
       if (!mojo_from_viewer_) {
         if (sensorless_session_) {
-          return TransformationMatrix();
+          return gfx::Transform();
         }
 
         return absl::nullopt;
@@ -1933,11 +1983,11 @@ absl::optional<TransformationMatrix> XRSession::GetMojoFrom(
     case device::mojom::blink::XRReferenceSpaceType::kLocal:
       // TODO(https://crbug.com/1070380): This assumes that local space is
       // equivalent to mojo space! Remove the assumption once the bug is fixed.
-      return TransformationMatrix();
+      return gfx::Transform();
     case device::mojom::blink::XRReferenceSpaceType::kUnbounded:
       // TODO(https://crbug.com/1070380): This assumes that unbounded space is
       // equivalent to mojo space! Remove the assumption once the bug is fixed.
-      return TransformationMatrix();
+      return gfx::Transform();
     case device::mojom::blink::XRReferenceSpaceType::kLocalFloor:
     case device::mojom::blink::XRReferenceSpaceType::kBoundedFloor:
       // Information about -floor spaces is currently stored elsewhere (in
@@ -1977,7 +2027,7 @@ void XRSession::UpdateCanvasDimensions(Element* element) {
 void XRSession::OnButtonEvent(
     device::mojom::blink::XRInputSourceStatePtr input_state) {
   DCHECK(uses_input_eventing_);
-  auto input_states = base::make_span(&input_state, 1);
+  auto input_states = base::make_span(&input_state, 1u);
   OnInputStateChangeInternal(last_frame_id_, input_states);
   ProcessInputSourceEvents(input_states);
 }

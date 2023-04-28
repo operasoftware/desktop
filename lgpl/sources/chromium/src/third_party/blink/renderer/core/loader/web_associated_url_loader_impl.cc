@@ -35,6 +35,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "services/network/public/cpp/request_destination.h"
 #include "services/network/public/cpp/request_mode.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -88,7 +89,7 @@ class HTTPRequestHeaderValidator : public WebHTTPHeaderVisitor {
 void HTTPRequestHeaderValidator::VisitHeader(const WebString& name,
                                              const WebString& value) {
   is_safe_ = is_safe_ && IsValidHTTPToken(name) &&
-             !cors::IsForbiddenHeaderName(name) &&
+             !cors::IsForbiddenRequestHeader(name, value) &&
              IsValidHTTPHeaderValue(value);
 }
 
@@ -384,7 +385,7 @@ void WebAssociatedURLLoaderImpl::LoadAsynchronously(
       // consult it separately, if set.
       if (request.ReferrerString() !=
           blink::WebString(Referrer::ClientReferrerString())) {
-        DCHECK(cors::IsForbiddenHeaderName("Referer"));
+        DCHECK(cors::IsForbiddenRequestHeader("Referer", ""));
         // `Referer` is a forbidden header name, so we must disallow this to
         // load.
         allow_load = false;
@@ -516,9 +517,8 @@ void WebAssociatedURLLoaderImpl::DisposeObserver() {
   // ThreadState::current() is null. However, the fact we reached here
   // without cancelling the loader means that it's possible there're some
   // non-Blink non-on-heap objects still facing on-heap Blink objects. E.g.
-  // there could be a WebURLLoader instance behind the
-  // ThreadableLoader instance. So, for safety, we chose to just
-  // crash here.
+  // there could be a URLLoader instance behind the ThreadableLoader instance.
+  // So, for safety, we chose to just crash here.
   CHECK(ThreadState::Current());
 
   observer_->Dispose();

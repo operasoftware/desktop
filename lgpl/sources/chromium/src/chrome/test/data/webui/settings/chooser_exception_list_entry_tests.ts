@@ -6,11 +6,12 @@
 import 'chrome://webui-test/cr_elements/cr_policy_strings.js';
 
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {ChooserException, ChooserExceptionListEntryElement, ChooserType, ContentSetting,ContentSettingsTypes, SiteException, SiteSettingsPrefsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
+import {ChooserExceptionListEntryElement, ChooserType, SiteSettingsPrefsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 
 import {TestSiteSettingsPrefsBrowserProxy} from './test_site_settings_prefs_browser_proxy.js';
+import {assertTooltipIsHidden, createChooserException, createSiteException} from './test_util.js';
 // clang-format on
 
 /**
@@ -32,42 +33,10 @@ suite('ChooserExceptionListEntry', function() {
   setup(function() {
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     SiteSettingsPrefsBrowserProxyImpl.setInstance(browserProxy);
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     testElement = document.createElement('chooser-exception-list-entry');
     document.body.appendChild(testElement);
   });
-
-  function createSiteException(
-      origin: string, override?: Partial<SiteException>): SiteException {
-    return Object.assign(
-        {
-          category: ContentSettingsTypes.USB_DEVICES,
-          embeddingOrigin: origin,
-          incognito: false,
-          origin: origin,
-          displayName: origin,
-          setting: ContentSetting.DEFAULT,
-          settingDetail: null,
-          enforcement: null,
-          controlledBy: chrome.settingsPrivate.ControlledBy.PRIMARY_USER,
-          isEmbargoed: false,
-        },
-        override || {});
-  }
-
-  function createChooserException(
-      chooserType: ChooserType, sites: SiteException[],
-      override?: Partial<ChooserException>): ChooserException {
-    return Object.assign(
-        {
-          chooserType: chooserType,
-          displayName: '',
-          object: {},
-          sites: sites,
-        },
-        override || {});
-  }
 
   test(
       'User granted chooser exceptions should show the reset button',
@@ -211,10 +180,7 @@ suite('ChooserExceptionListEntry', function() {
 
         // This tooltip is never shown since a common tooltip will be used.
         assertTrue(!!paperTooltip);
-        assertEquals(
-            'none',
-            (paperTooltip!.computedStyleMap().get('display') as
-             {value: string})!.value);
+        assertTooltipIsHidden(paperTooltip);
         assertFalse(paperTooltip!._showing);
 
         const wait = eventToPromise('show-tooltip', document);
@@ -222,10 +188,7 @@ suite('ChooserExceptionListEntry', function() {
             new MouseEvent('mouseenter', {bubbles: true, composed: true}));
         return wait.then(() => {
           assertTrue(paperTooltip!._showing);
-          assertEquals(
-              'none',
-              (paperTooltip!.computedStyleMap().get('display') as
-               {value: string})!.value);
+          assertTooltipIsHidden(paperTooltip);
         });
       });
 
@@ -256,11 +219,9 @@ suite('ChooserExceptionListEntry', function() {
         const args =
             await browserProxy.whenCalled('resetChooserExceptionForSite');
 
-        // The args should be the chooserType, origin, embeddingOrigin,
-        // and object.
+        // The args should be the chooserType, origin, and object.
         assertEquals(ChooserType.USB_DEVICES, args[0]);
         assertEquals('https://foo.com', args[1]);
-        assertEquals('https://foo.com', args[2]);
-        assertEquals('object', typeof args[3]);
+        assertEquals('object', typeof args[2]);
       });
 });

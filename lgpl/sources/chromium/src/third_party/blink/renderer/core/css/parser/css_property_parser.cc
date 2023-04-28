@@ -8,7 +8,6 @@
 #include "third_party/blink/renderer/core/css/css_unicode_range_value.h"
 #include "third_party/blink/renderer/core/css/css_variable_reference_value.h"
 #include "third_party/blink/renderer/core/css/hash_tools.h"
-#include "third_party/blink/renderer/core/css/known_exposed_properties.h"
 #include "third_party/blink/renderer/core/css/parser/at_rule_descriptor_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_local_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
@@ -16,6 +15,7 @@
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/css/properties/shorthand.h"
+#include "third_party/blink/renderer/core/css/property_bitsets.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 
@@ -33,8 +33,9 @@ const CSSValue* MaybeConsumeCSSWideKeyword(CSSParserTokenRange& range) {
   CSSParserTokenRange original_range = range;
 
   if (CSSValue* value = css_parsing_utils::ConsumeCSSWideKeyword(range)) {
-    if (range.AtEnd())
+    if (range.AtEnd()) {
       return value;
+    }
   }
 
   range = original_range;
@@ -89,47 +90,54 @@ bool CSSPropertyParser::ParseValue(
   }
 
   // This doesn't count UA style sheets
-  if (parse_success)
+  if (parse_success) {
     context->Count(context->Mode(), unresolved_property);
+  }
 
-  if (!parse_success)
+  if (!parse_success) {
     parsed_properties.Shrink(parsed_properties_size);
+  }
 
   return parse_success;
 }
 
 const CSSValue* CSSPropertyParser::ParseSingleValue(
     CSSPropertyID property,
-    const CSSParserTokenRange& range,
+    CSSParserTokenRange range,
     const CSSParserContext* context) {
   DCHECK(context);
-  CSSPropertyParser parser(range, context, nullptr);
+  range.ConsumeWhitespace();
 
-  if (const CSSValue* value = MaybeConsumeCSSWideKeyword(parser.range_))
+  if (const CSSValue* value = MaybeConsumeCSSWideKeyword(range)) {
     return value;
+  }
 
-  const CSSValue* value = ParseLonghand(property, CSSPropertyID::kInvalid,
-                                        *parser.context_, parser.range_);
-  if (!value || !parser.range_.AtEnd())
+  const CSSValue* value =
+      ParseLonghand(property, CSSPropertyID::kInvalid, *context, range);
+  if (!value || !range.AtEnd()) {
     return nullptr;
+  }
   return value;
 }
 
 bool CSSPropertyParser::ParseValueStart(CSSPropertyID unresolved_property,
                                         StyleRule::RuleType rule_type,
                                         bool important) {
-  if (ConsumeCSSWideKeyword(unresolved_property, important, rule_type))
+  if (ConsumeCSSWideKeyword(unresolved_property, important, rule_type)) {
     return true;
+  }
 
   CSSParserTokenRange original_range = range_;
   CSSPropertyID property_id = ResolveCSSPropertyID(unresolved_property);
   const CSSProperty& property = CSSProperty::Get(property_id);
   // If a CSSPropertyID is only a known descriptor (@fontface, @property), not a
   // style property, it will not be a valid declaration.
-  if (!property.IsProperty())
+  if (!property.IsProperty()) {
     return false;
-  if (!IsPropertyAllowedInRule(property, rule_type))
+  }
+  if (!IsPropertyAllowedInRule(property, rule_type)) {
     return false;
+  }
   bool is_shorthand = property.IsShorthand();
   DCHECK(context_);
   if (is_shorthand) {
@@ -140,8 +148,9 @@ bool CSSPropertyParser::ParseValueStart(CSSPropertyID unresolved_property,
     // Variable references will fail to parse here and will fall out to the
     // variable ref parser below.
     if (To<Shorthand>(property).ParseShorthand(
-            important, range_, *context_, local_context, *parsed_properties_))
+            important, range_, *context_, local_context, *parsed_properties_)) {
       return true;
+    }
   } else {
     if (const CSSValue* parsed_value = ParseLonghand(
             unresolved_property, CSSPropertyID::kInvalid, *context_, range_)) {
@@ -178,7 +187,7 @@ bool CSSPropertyParser::ParseValueStart(CSSPropertyID unresolved_property,
 }
 
 static inline bool IsExposedInMode(const ExecutionContext* execution_context,
-                                   const CSSProperty& property,
+                                   const CSSUnresolvedProperty& property,
                                    CSSParserMode mode) {
   return mode == kUASheetMode ? property.IsUAExposed(execution_context)
                               : property.IsWebExposed(execution_context);
@@ -196,8 +205,9 @@ static inline bool QuasiLowercaseIntoBuffer(const UChar* src,
                                             char* dst) {
   for (unsigned i = 0; i < length; ++i) {
     UChar c = src[i];
-    if (c == 0 || c >= 0x7F)  // illegal character
+    if (c == 0 || c >= 0x7F) {  // illegal character
       return false;
+    }
     dst[i] = ToASCIILower(c);
   }
   dst[length] = '\0';
@@ -235,18 +245,48 @@ static inline bool QuasiLowercaseIntoBuffer(const LChar* src,
   return true;
 }
 
+// The "exposed" property is different from the incoming property in the
+// following cases:
+//
+//  - The property has an alternative property [1] which is enabled. Note that
+//    alternative properties also can have alternative properties.
+//  - The property is not enabled. This is represented by
+//    CSSPropertyID::kInvalid.
+//
+// [1] See documentation near "alternative_of" in css_properties.json5.
+static CSSPropertyID ExposedProperty(CSSPropertyID property_id,
+                                     const ExecutionContext* execution_context,
+                                     CSSParserMode mode) {
+  const CSSUnresolvedProperty& property =
+      CSSUnresolvedProperty::Get(property_id);
+  CSSPropertyID alternative_id = property.GetAlternative();
+  if (alternative_id != CSSPropertyID::kInvalid) {
+    if (CSSPropertyID exposed_id =
+            ExposedProperty(alternative_id, execution_context, mode);
+        exposed_id != CSSPropertyID::kInvalid) {
+      return exposed_id;
+    }
+  }
+  return IsExposedInMode(execution_context, property, mode)
+             ? property_id
+             : CSSPropertyID::kInvalid;
+}
+
 template <typename CharacterType>
 static CSSPropertyID UnresolvedCSSPropertyID(
     const ExecutionContext* execution_context,
     const CharacterType* property_name,
     unsigned length,
     CSSParserMode mode) {
-  if (length == 0)
+  if (length == 0) {
     return CSSPropertyID::kInvalid;
-  if (length >= 3 && property_name[0] == '-' && property_name[1] == '-')
+  }
+  if (length >= 3 && property_name[0] == '-' && property_name[1] == '-') {
     return CSSPropertyID::kVariable;
-  if (length > kMaxCSSPropertyNameLength)
+  }
+  if (length > kMaxCSSPropertyNameLength) {
     return CSSPropertyID::kInvalid;
+  }
 
   char buffer[kMaxCSSPropertyNameLength + 1];  // 1 for null character
   if (!QuasiLowercaseIntoBuffer(property_name, length, buffer)) {
@@ -268,22 +308,15 @@ static CSSPropertyID UnresolvedCSSPropertyID(
 
   CSSPropertyID property_id = static_cast<CSSPropertyID>(hash_table_entry->id);
   if (kKnownExposedProperties.Has(property_id)) {
-#if DCHECK_IS_ON()
-    const CSSProperty& property =
-        CSSProperty::Get(ResolveCSSPropertyID(property_id));
-    DCHECK(IsExposedInMode(execution_context, property, mode));
-#endif
-  } else {
-    // The property is behind a runtime flag, so we need to go ahead
-    // and actually do the resolution to see if that flag is on or not.
-    // This should happen only occasionally.
-    const CSSProperty& property =
-        CSSProperty::Get(ResolveCSSPropertyID(property_id));
-    if (!IsExposedInMode(execution_context, property, mode)) {
-      return CSSPropertyID::kInvalid;
-    }
+    DCHECK_EQ(property_id,
+              ExposedProperty(property_id, execution_context, mode));
+    return property_id;
   }
-  return property_id;
+
+  // The property is behind a runtime flag, so we need to go ahead
+  // and actually do the resolution to see if that flag is on or not.
+  // This should happen only occasionally.
+  return ExposedProperty(property_id, execution_context, mode);
 }
 
 CSSPropertyID UnresolvedCSSPropertyID(const ExecutionContext* execution_context,
@@ -324,10 +357,12 @@ static CSSValueID CssValueKeywordID(const CharacterType* value_keyword,
 
 CSSValueID CssValueKeywordID(StringView string) {
   unsigned length = string.length();
-  if (!length)
+  if (!length) {
     return CSSValueID::kInvalid;
-  if (length > maxCSSValueKeywordLength)
+  }
+  if (length > maxCSSValueKeywordLength) {
     return CSSValueID::kInvalid;
+  }
 
   return string.Is8Bit() ? CssValueKeywordID(string.Characters8(), length)
                          : CssValueKeywordID(string.Characters16(), length);
@@ -339,20 +374,23 @@ bool CSSPropertyParser::ConsumeCSSWideKeyword(CSSPropertyID unresolved_property,
   CSSParserTokenRange range_copy = range_;
 
   const CSSValue* value = MaybeConsumeCSSWideKeyword(range_copy);
-  if (!value)
+  if (!value) {
     return false;
+  }
 
   if (value->IsRevertValue() || value->IsRevertLayerValue()) {
     // Declarations in @try are not cascaded and cannot be reverted.
-    if (rule_type == StyleRule::kTry)
+    if (rule_type == StyleRule::kTry) {
       return false;
+    }
   }
 
   CSSPropertyID property = ResolveCSSPropertyID(unresolved_property);
   const StylePropertyShorthand& shorthand = shorthandForProperty(property);
   if (!shorthand.length()) {
-    if (!CSSProperty::Get(property).IsProperty())
+    if (!CSSProperty::Get(property).IsProperty()) {
       return false;
+    }
     AddProperty(property, CSSPropertyID::kInvalid, *value, important,
                 IsImplicitProperty::kNotImplicit, *parsed_properties_);
   } else {
@@ -368,12 +406,14 @@ bool CSSPropertyParser::ParseFontFaceDescriptor(
   // TODO(meade): This function should eventually take an AtRuleDescriptorID.
   const AtRuleDescriptorID id =
       CSSPropertyIDAsAtRuleDescriptor(resolved_property);
-  if (id == AtRuleDescriptorID::Invalid)
+  if (id == AtRuleDescriptorID::Invalid) {
     return false;
+  }
   CSSValue* parsed_value =
       AtRuleDescriptorParser::ParseFontFaceDescriptor(id, range_, *context_);
-  if (!parsed_value)
+  if (!parsed_value) {
     return false;
+  }
 
   AddProperty(resolved_property,
               CSSPropertyID::kInvalid /* current_shorthand */, *parsed_value,

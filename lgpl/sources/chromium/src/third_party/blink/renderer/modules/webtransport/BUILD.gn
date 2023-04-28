@@ -23,11 +23,9 @@ blink_modules_sources("webtransport") {
     "web_transport_error.cc",
     "web_transport_error.h",
   ]
-
-  jumbo_excluded_sources = [ "send_stream.cc" ]
 }
 
-jumbo_source_set("unit_tests") {
+source_set("unit_tests") {
   testonly = true
   sources = [
     "bidirectional_stream_test.cc",
@@ -39,8 +37,6 @@ jumbo_source_set("unit_tests") {
     "web_transport_error_test.cc",
     "web_transport_test.cc",
   ]
-
-  jumbo_excluded_sources = [ "datagram_duplex_stream_test.cc" ]
 
   configs += [
     "//third_party/blink/renderer:config",

@@ -50,6 +50,7 @@
 #include "third_party/blink/renderer/core/css/box_shadow_paint_image_generator.h"
 #include "third_party/blink/renderer/core/css/clip_path_paint_image_generator.h"
 #include "third_party/blink/renderer/core/css/properties/computed_style_utils.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -418,9 +419,17 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
           continue;
       }
 
+      // The compositor animation for clip path animations do not snapshot the
+      // individual keyframes. Instead the keyframes are interpolated within the
+      // worklet based on the overall animation progress.
+      // TODO(crbug.com/1399323): Do this for composited background color
+      // animations as well.
+      const bool needs_compositor_keyframe_value =
+          property.GetCSSProperty().PropertyID() != CSSPropertyID::kClipPath;
       // If an element does not have style, then it will never have taken a
       // snapshot of its (non-existent) value for the compositor to use.
-      if (!keyframe->GetCompositorKeyframeValue()) {
+      if (needs_compositor_keyframe_value &&
+          !keyframe->GetCompositorKeyframeValue()) {
         reasons |= kInvalidAnimationOrEffect;
       }
     }
@@ -434,6 +443,13 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
           target_element.GetElementAnimations();
       DCHECK(element_animations &&
              element_animations->CompositedBackgroundColorStatus() !=
+                 ElementAnimations::CompositedPaintStatus::kComposited);
+    }
+    if (effect.Affects(PropertyHandle(GetCSSPropertyClipPath()))) {
+      ElementAnimations* element_animations =
+          target_element.GetElementAnimations();
+      DCHECK(element_animations &&
+             element_animations->CompositedClipPathStatus() !=
                  ElementAnimations::CompositedPaintStatus::kComposited);
     }
 #endif
@@ -495,7 +511,7 @@ bool CompositorAnimations::CompositorPropertyAnimationsHaveNoEffect(
             const auto* shader_operation =
                 To<GpuShaderFilterOperation>(operation.Get());
             const auto* resource = shader_operation->Resource();
-            if (!resource->IsLoaded()) {
+            if (resource && !resource->IsLoaded()) {
               return true;
             }
           }
@@ -882,7 +898,22 @@ void AddKeyframesToCurve(PlatformAnimationCurveType& curve,
   }
 }
 
+void AddKeyframesForPaintWorkletAnimation(
+    gfx::KeyframedFloatAnimationCurve& curve) {
+  curve.AddKeyframe(gfx::FloatKeyframe::Create(
+      base::Seconds(0.0), 0.0, gfx::LinearTimingFunction::Create()));
+  curve.AddKeyframe(gfx::FloatKeyframe::Create(
+      base::Seconds(1.0), 1.0, gfx::LinearTimingFunction::Create()));
+}
+
 }  // namespace
+
+bool CompositorAnimations::CompositedPropertyRequiresSnapshot(
+    const PropertyHandle& property) {
+  // TODO(crbug.com/1374390): Refactor composited animations so that
+  // custom timing functions work for bgcolor animations as well
+  return property.GetCSSProperty().PropertyID() != CSSPropertyID::kClipPath;
+}
 
 void CompositorAnimations::GetAnimationOnCompositor(
     const Element& target_element,
@@ -994,7 +1025,13 @@ void CompositorAnimations::GetAnimationOnCompositor(
                       kBackgroundColor
                 : CompositorPaintWorkletInput::NativePropertyType::kClipPath;
         auto float_curve = gfx::KeyframedFloatAnimationCurve::Create();
-        AddKeyframesToCurve(*float_curve, values);
+
+        if (CompositedPropertyRequiresSnapshot(property)) {
+          AddKeyframesToCurve(*float_curve, values);
+        } else {
+          AddKeyframesForPaintWorkletAnimation(*float_curve);
+        }
+
         float_curve->SetTimingFunction(timing.timing_function->CloneToCC());
         float_curve->set_scaled_duration(scale);
         curve = std::move(float_curve);

@@ -4,11 +4,12 @@
 
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_metrics_helper.h"
 
-#include "base/bind.h"
 #include "base/cpu_reduction_experiment.h"
+#include "base/functional/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/platform/scheduler/web_renderer_process_type.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/renderer_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
@@ -22,8 +23,11 @@ namespace scheduler {
   MAIN_THREAD_LOAD_METRIC_NAME ".Extension"
 #define DURATION_PER_TASK_TYPE_METRIC_NAME \
   "RendererScheduler.TaskDurationPerTaskType2"
-#define QUEUEING_TIME_PER_QUEUE_TYPE_METRIC_NAME \
-  "RendererScheduler.QueueingDurationPerQueueType"
+
+#define QUEUEING_DELAY_HISTOGRAM_INIT(name)                       \
+  "RendererScheduler.QueueingDuration." name "Priority",          \
+      kTimeBasedHistogramMinSample, kTimeBasedHistogramMaxSample, \
+      kTimeBasedHistogramBucketCount
 
 enum class MainThreadTaskLoadState { kLow, kHigh, kUnknown };
 
@@ -64,21 +68,19 @@ MainThreadMetricsHelper::MainThreadMetricsHelper(
               &MainThreadMetricsHelper::RecordForegroundMainThreadTaskLoad,
               base::Unretained(this)),
           kThreadLoadTrackerReportingInterval),
-      per_task_type_duration_reporter_(DURATION_PER_TASK_TYPE_METRIC_NAME),
       no_use_case_per_task_type_duration_reporter_(
           DURATION_PER_TASK_TYPE_METRIC_NAME ".UseCaseNone"),
       loading_per_task_type_duration_reporter_(
           DURATION_PER_TASK_TYPE_METRIC_NAME ".UseCaseLoading"),
       input_handling_per_task_type_duration_reporter_(
           DURATION_PER_TASK_TYPE_METRIC_NAME ".UseCaseInputHandling"),
-      foreground_per_task_type_duration_reporter_(
-          DURATION_PER_TASK_TYPE_METRIC_NAME ".Foreground"),
-      background_per_task_type_duration_reporter_(
-          DURATION_PER_TASK_TYPE_METRIC_NAME ".Background"),
-      background_after_fifth_minute_per_task_type_duration_reporter_(
-          DURATION_PER_TASK_TYPE_METRIC_NAME ".Background.AfterFifthMinute"),
-      background_after_tenth_minute_per_task_type_duration_reporter_(
-          DURATION_PER_TASK_TYPE_METRIC_NAME ".Background.AfterTenthMinute"),
+      queueing_delay_histograms_{{QUEUEING_DELAY_HISTOGRAM_INIT("Control")},
+                                 {QUEUEING_DELAY_HISTOGRAM_INIT("Highest")},
+                                 {QUEUEING_DELAY_HISTOGRAM_INIT("VeryHigh")},
+                                 {QUEUEING_DELAY_HISTOGRAM_INIT("High")},
+                                 {QUEUEING_DELAY_HISTOGRAM_INIT("Normal")},
+                                 {QUEUEING_DELAY_HISTOGRAM_INIT("Low")},
+                                 {QUEUEING_DELAY_HISTOGRAM_INIT("BestEffort")}},
       total_task_time_reporter_(
           "Scheduler.Experimental.Renderer.TotalTime.Wall.MainThread.Positive",
           "Scheduler.Experimental.Renderer.TotalTime.Wall.MainThread.Negative"),
@@ -160,6 +162,13 @@ void MainThreadMetricsHelper::RecordTaskMetrics(
   background_main_thread_load_tracker_.RecordTaskTime(task_timing.start_time(),
                                                       task_timing.end_time());
 
+  if (queue && base::TimeTicks::IsHighResolution()) {
+    base::TimeDelta elapsed =
+        task_timing.start_time() - task.GetDesiredExecutionTime();
+    queueing_delay_histograms_[static_cast<size_t>(queue->GetQueuePriority())]
+        .CountMicroseconds(elapsed);
+  }
+
   // Don't log the metrics to evaluate impact of CPU reduction.
   // This code is deemed not useful anymore (crbug.com/1181870).
   // TODO(crbug.com/1295441: Fully remove the code once the experiment is over.
@@ -173,9 +182,10 @@ void MainThreadMetricsHelper::RecordTaskMetrics(
       task_timing.wall_duration());
 
   // WARNING: All code below must be compatible with down-sampling.
-  constexpr double kSamplingProbabily = .01;
-  if (!metrics_subsampler_.ShouldSample(kSamplingProbabily))
+  constexpr double kSamplingProbability = .01;
+  if (!metrics_subsampler_.ShouldSample(kSamplingProbability)) {
     return;
+  }
 
   base::TimeDelta duration = task_timing.wall_duration();
   UMA_HISTOGRAM_CUSTOM_COUNTS("RendererScheduler.TaskTime2",

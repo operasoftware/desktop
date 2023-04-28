@@ -86,6 +86,7 @@
 #include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/document_resource_coordinator.h"
 
 namespace blink {
 
@@ -864,7 +865,8 @@ void CompositeEditCommand::DeleteInsignificantText(Text* text_node,
 
   if (text_layout_object->IsInLayoutNGInlineFormattingContext()) {
     const String string = PlainText(
-        EphemeralRange(Position(*text_node, start), Position(*text_node, end)));
+        EphemeralRange(Position(*text_node, start), Position(*text_node, end)),
+        TextIteratorBehavior::Builder().SetEmitsOriginalText(true).Build());
     if (string.empty())
       return DeleteTextFromNode(text_node, start, end - start);
     // Replace the text between start and end with collapsed version.
@@ -2156,6 +2158,10 @@ void CompositeEditCommand::AppliedEditing() {
   }
 
   editor.RespondToChangedContents(new_selection.Base());
+
+  if (auto* rc = GetDocument().GetResourceCoordinator()) {
+    rc->SetHadUserEdits();
+  }
 }
 
 }  // namespace blink

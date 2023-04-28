@@ -32,6 +32,7 @@
 #include "base/feature_list.h"
 #include "base/numerics/checked_math.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -539,19 +540,20 @@ WebGLRenderingContextBase::CreateContextProviderInternal(
   Platform::ContextAttributes context_attributes = ToPlatformContextAttributes(
       attributes, context_type, SupportOwnOffscreenSurface(execution_context));
 
-  std::unique_ptr<WebGraphicsContext3DProvider> context_provider;
-  const auto& url = execution_context->Url();
-  if (IsMainThread()) {
-    context_provider =
-        Platform::Current()->CreateOffscreenGraphicsContext3DProvider(
-            context_attributes, url, graphics_info);
-  } else {
-    context_provider = CreateContextProviderOnWorkerThread(context_attributes,
-                                                           graphics_info, url);
+  // To run our tests with Chrome rendering on the low power GPU and WebGL on
+  // the high performance GPU, we need to force the power preference attribute.
+  if (base::FeatureList::IsEnabled(
+          blink::features::kForceHighPerformanceGPUForWebGL)) {
+    context_attributes.prefer_low_power_gpu = false;
   }
-  if (context_provider && !context_provider->BindToCurrentThread()) {
+
+  const auto& url = execution_context->Url();
+  std::unique_ptr<WebGraphicsContext3DProvider> context_provider =
+      CreateOffscreenGraphicsContext3DProvider(context_attributes,
+                                               graphics_info, url);
+  if (context_provider && !context_provider->BindToCurrentSequence()) {
     context_provider = nullptr;
-    graphics_info->error_message = String("bindToCurrentThread failed: " +
+    graphics_info->error_message = String("BindToCurrentSequence failed: " +
                                           String(graphics_info->error_message));
   }
   if (!context_provider || g_should_fail_context_creation_for_testing) {
@@ -632,7 +634,70 @@ void WebGLRenderingContextBase::drawingBufferStorage(GLenum sizedformat,
   if (!GetDrawingBuffer())
     return;
 
-  NOTIMPLEMENTED();
+  const char* function_name = "drawingBufferStorage";
+  const CanvasContextCreationAttributesCore& attrs = CreationAttributes();
+
+  // Ensure that the width and height are valid.
+  if (width <= 0) {
+    SynthesizeGLError(GL_INVALID_VALUE, function_name, "width < 0");
+    return;
+  }
+  if (height <= 0) {
+    SynthesizeGLError(GL_INVALID_VALUE, function_name, "height < 0");
+    return;
+  }
+  if (width > max_renderbuffer_size_) {
+    SynthesizeGLError(GL_INVALID_VALUE, function_name,
+                      "width > MAX_RENDERBUFFER_SIZE");
+    return;
+  }
+  if (height > max_renderbuffer_size_) {
+    SynthesizeGLError(GL_INVALID_VALUE, function_name,
+                      "height > MAX_RENDERBUFFER_SIZE");
+    return;
+  }
+
+  // Ensure that the format is supported, and set the corresponding alpha
+  // type.
+  SkAlphaType alpha_type =
+      attrs.premultiplied_alpha ? kPremul_SkAlphaType : kUnpremul_SkAlphaType;
+  switch (sizedformat) {
+    case GL_RGB8:
+      alpha_type = kOpaque_SkAlphaType;
+      break;
+    case GL_RGBA8:
+      break;
+    case GL_SRGB8_ALPHA8:
+      if (!IsWebGL2() && !ExtensionEnabled(kEXTsRGBName)) {
+        SynthesizeGLError(GL_INVALID_ENUM, function_name,
+                          "EXT_sRGB not enabled");
+        return;
+      }
+      break;
+    case GL_RGBA16F:
+      if (IsWebGL2()) {
+        if (!ExtensionEnabled(kEXTColorBufferFloatName) &&
+            !ExtensionEnabled(kEXTColorBufferHalfFloatName)) {
+          SynthesizeGLError(
+              GL_INVALID_ENUM, function_name,
+              "EXT_color_buffer_float/EXT_color_buffer_half_float not enabled");
+          return;
+        } else {
+          if (!ExtensionEnabled(kEXTColorBufferHalfFloatName)) {
+            SynthesizeGLError(GL_INVALID_ENUM, function_name,
+                              "EXT_color_buffer_half_float not enabled");
+            return;
+          }
+        }
+      }
+      break;
+    default:
+      SynthesizeGLError(GL_INVALID_ENUM, function_name, "invalid sizedformat");
+      return;
+  }
+
+  GetDrawingBuffer()->ResizeWithFormat(sizedformat, alpha_type,
+                                       gfx::Size(width, height));
 }
 
 void WebGLRenderingContextBase::commit() {
@@ -1066,13 +1131,6 @@ WebGLRenderingContextBase::WebGLRenderingContextBase(
                                              max_viewport_dims_);
   InitializeWebGLContextLimits(context_provider.get());
 
-  // TODO(https://crbug.com/1208480): Move color space to being a read-write
-  // attribute instead of a context creation attribute.
-  if (RuntimeEnabledFeatures::CanvasColorManagementV2Enabled()) {
-    drawing_buffer_color_space_ = requested_attributes.color_space;
-    pixel_format_deprecated_ = requested_attributes.pixel_format;
-  }
-
   scoped_refptr<DrawingBuffer> buffer =
       CreateDrawingBuffer(std::move(context_provider), graphics_info);
   if (!buffer) {
@@ -1153,7 +1211,7 @@ scoped_refptr<DrawingBuffer> WebGLRenderingContextBase::CreateDrawingBuffer(
       ClampedCanvasSize(), premultiplied_alpha, want_alpha_channel,
       want_depth_buffer, want_stencil_buffer, want_antialiasing, desynchronized,
       preserve, web_gl_version, chromium_image_usage, Host()->FilterQuality(),
-      drawing_buffer_color_space_, pixel_format_deprecated_,
+      drawing_buffer_color_space_,
       PowerPreferenceToGpuPreference(attrs.power_preference));
 }
 
@@ -1174,6 +1232,7 @@ void WebGLRenderingContextBase::InitializeNewContext() {
   framebuffer_binding_ = nullptr;
   renderbuffer_binding_ = nullptr;
   depth_mask_ = true;
+  depth_enabled_ = false;
   stencil_enabled_ = false;
   stencil_mask_ = 0xFFFFFFFF;
   stencil_mask_back_ = 0xFFFFFFFF;
@@ -1631,14 +1690,8 @@ bool WebGLRenderingContextBase::IsOriginTopLeft() const {
 }
 
 void WebGLRenderingContextBase::SetIsInHiddenPage(bool hidden) {
-  is_hidden_ = hidden;
   if (GetDrawingBuffer())
     GetDrawingBuffer()->SetIsInHiddenPage(hidden);
-
-  if (!hidden && isContextLost() && restore_allowed_ &&
-      auto_recovery_method_ == kAuto && !restore_timer_.IsActive()) {
-    restore_timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
-  }
 }
 
 bool WebGLRenderingContextBase::PaintRenderingResultsToCanvas(
@@ -2424,6 +2477,11 @@ void WebGLRenderingContextBase::compressedTexImage2D(
   GLsizei data_length;
   if (!ExtractDataLengthIfValid("compressedTexImage2D", data, &data_length))
     return;
+  if (static_cast<size_t>(data_length) > kMaximumSupportedArrayBufferSize) {
+    SynthesizeGLError(GL_INVALID_VALUE, "compressedTexImage2D",
+                      "ArrayBufferView size exceeds the supported range");
+    return;
+  }
   ContextGL()->CompressedTexImage2D(target, level, internalformat, width,
                                     height, border, data_length,
                                     data->BaseAddressMaybeShared());
@@ -2447,6 +2505,11 @@ void WebGLRenderingContextBase::compressedTexSubImage2D(
   GLsizei data_length;
   if (!ExtractDataLengthIfValid("compressedTexSubImage2D", data, &data_length))
     return;
+  if (static_cast<size_t>(data_length) > kMaximumSupportedArrayBufferSize) {
+    SynthesizeGLError(GL_INVALID_VALUE, "compressedTexImage2D",
+                      "ArrayBufferView size exceeds the supported range");
+    return;
+  }
   ContextGL()->CompressedTexSubImage2D(target, level, xoffset, yoffset, width,
                                        height, format, data_length,
                                        data->BaseAddressMaybeShared());
@@ -2760,7 +2823,12 @@ void WebGLRenderingContextBase::disable(GLenum cap) {
     return;
   if (cap == GL_STENCIL_TEST) {
     stencil_enabled_ = false;
-    ApplyStencilTest();
+    ApplyDepthAndStencilTest();
+    return;
+  }
+  if (cap == GL_DEPTH_TEST) {
+    depth_enabled_ = false;
+    ApplyDepthAndStencilTest();
     return;
   }
   if (cap == GL_SCISSOR_TEST)
@@ -2915,7 +2983,12 @@ void WebGLRenderingContextBase::enable(GLenum cap) {
     return;
   if (cap == GL_STENCIL_TEST) {
     stencil_enabled_ = true;
-    ApplyStencilTest();
+    ApplyDepthAndStencilTest();
+    return;
+  }
+  if (cap == GL_DEPTH_TEST) {
+    depth_enabled_ = true;
+    ApplyDepthAndStencilTest();
     return;
   }
   if (cap == GL_SCISSOR_TEST)
@@ -2987,7 +3060,7 @@ void WebGLRenderingContextBase::framebufferRenderbuffer(
   }
   framebuffer_binding->SetAttachmentForBoundFramebuffer(target, attachment,
                                                         buffer);
-  ApplyStencilTest();
+  ApplyDepthAndStencilTest();
 }
 
 void WebGLRenderingContextBase::framebufferTexture2D(GLenum target,
@@ -3019,7 +3092,7 @@ void WebGLRenderingContextBase::framebufferTexture2D(GLenum target,
   }
   framebuffer_binding->SetAttachmentForBoundFramebuffer(
       target, attachment, textarget, texture, level, 0, 0);
-  ApplyStencilTest();
+  ApplyDepthAndStencilTest();
 }
 
 void WebGLRenderingContextBase::frontFace(GLenum mode) {
@@ -3267,7 +3340,6 @@ ScriptValue WebGLRenderingContextBase::getExtension(ScriptState* script_state,
   if (name == WebGLDebugRendererInfo::ExtensionName()) {
     ExecutionContext* context = ExecutionContext::From(script_state);
     UseCounter::Count(context, WebFeature::kWebGLDebugRendererInfo);
-    Dactyloscoper::Record(context, WebFeature::kWebGLDebugRendererInfo);
   }
 
   WebGLExtension* extension = EnableExtensionIfSupported(name);
@@ -3284,19 +3356,20 @@ ScriptValue WebGLRenderingContextBase::getFramebufferAttachmentParameter(
     GLenum target,
     GLenum attachment,
     GLenum pname) {
+  const char kFunctionName[] = "getFramebufferAttachmentParameter";
   if (isContextLost() ||
-      !ValidateFramebufferFuncParameters("getFramebufferAttachmentParameter",
-                                         target, attachment))
+      !ValidateFramebufferFuncParameters(kFunctionName, target, attachment)) {
     return ScriptValue::CreateNull(script_state->GetIsolate());
+  }
 
   if (!framebuffer_binding_ || !framebuffer_binding_->Object()) {
-    SynthesizeGLError(GL_INVALID_OPERATION, "getFramebufferAttachmentParameter",
+    SynthesizeGLError(GL_INVALID_OPERATION, kFunctionName,
                       "no framebuffer bound");
     return ScriptValue::CreateNull(script_state->GetIsolate());
   }
 
   if (framebuffer_binding_ && framebuffer_binding_->Opaque()) {
-    SynthesizeGLError(GL_INVALID_OPERATION, "getFramebufferAttachmentParameter",
+    SynthesizeGLError(GL_INVALID_OPERATION, kFunctionName,
                       "cannot query parameters of an opaque framebuffer");
     return ScriptValue::CreateNull(script_state->GetIsolate());
   }
@@ -3308,62 +3381,60 @@ ScriptValue WebGLRenderingContextBase::getFramebufferAttachmentParameter(
       return WebGLAny(script_state, GL_NONE);
     // OpenGL ES 2.0 specifies INVALID_ENUM in this case, while desktop GL
     // specifies INVALID_OPERATION.
-    SynthesizeGLError(GL_INVALID_ENUM, "getFramebufferAttachmentParameter",
-                      "invalid parameter name");
+    SynthesizeGLError(GL_INVALID_ENUM, kFunctionName, "invalid parameter name");
     return ScriptValue::CreateNull(script_state->GetIsolate());
   }
 
   DCHECK(attachment_object->IsTexture() || attachment_object->IsRenderbuffer());
-  if (attachment_object->IsTexture()) {
-    switch (pname) {
-      case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
+  switch (pname) {
+    case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
+      if (attachment_object->IsTexture()) {
         return WebGLAny(script_state, GL_TEXTURE);
-      case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:
-        return WebGLAny(script_state, attachment_object);
-      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
-      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE: {
+      }
+      return WebGLAny(script_state, GL_RENDERBUFFER);
+    case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:
+      return WebGLAny(script_state, attachment_object);
+    case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
+    case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
+      if (attachment_object->IsTexture()) {
         GLint value = 0;
         ContextGL()->GetFramebufferAttachmentParameteriv(target, attachment,
                                                          pname, &value);
         return WebGLAny(script_state, value);
       }
-      case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:
-        if (ExtensionEnabled(kEXTsRGBName)) {
-          GLint value = 0;
-          ContextGL()->GetFramebufferAttachmentParameteriv(target, attachment,
-                                                           pname, &value);
-          return WebGLAny(script_state, static_cast<unsigned>(value));
+      break;
+    case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:
+      if (ExtensionEnabled(kEXTsRGBName)) {
+        GLint value = 0;
+        ContextGL()->GetFramebufferAttachmentParameteriv(target, attachment,
+                                                         pname, &value);
+        return WebGLAny(script_state, static_cast<unsigned>(value));
+      }
+      SynthesizeGLError(GL_INVALID_ENUM, kFunctionName,
+                        "invalid parameter name, EXT_sRGB not enabled");
+      return ScriptValue::CreateNull(script_state->GetIsolate());
+    case GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE_EXT:
+      if (ExtensionEnabled(kEXTColorBufferHalfFloatName) ||
+          ExtensionEnabled(kWebGLColorBufferFloatName)) {
+        if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
+          SynthesizeGLError(
+              GL_INVALID_OPERATION, kFunctionName,
+              "component type cannot be queried for DEPTH_STENCIL_ATTACHMENT");
+          return ScriptValue::CreateNull(script_state->GetIsolate());
         }
-        SynthesizeGLError(GL_INVALID_ENUM, "getFramebufferAttachmentParameter",
-                          "invalid parameter name for renderbuffer attachment");
-        return ScriptValue::CreateNull(script_state->GetIsolate());
-      default:
-        SynthesizeGLError(GL_INVALID_ENUM, "getFramebufferAttachmentParameter",
-                          "invalid parameter name for texture attachment");
-        return ScriptValue::CreateNull(script_state->GetIsolate());
-    }
-  } else {
-    switch (pname) {
-      case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
-        return WebGLAny(script_state, GL_RENDERBUFFER);
-      case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:
-        return WebGLAny(script_state, attachment_object);
-      case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:
-        if (ExtensionEnabled(kEXTsRGBName)) {
-          GLint value = 0;
-          ContextGL()->GetFramebufferAttachmentParameteriv(target, attachment,
-                                                           pname, &value);
-          return WebGLAny(script_state, value);
-        }
-        SynthesizeGLError(GL_INVALID_ENUM, "getFramebufferAttachmentParameter",
-                          "invalid parameter name for renderbuffer attachment");
-        return ScriptValue::CreateNull(script_state->GetIsolate());
-      default:
-        SynthesizeGLError(GL_INVALID_ENUM, "getFramebufferAttachmentParameter",
-                          "invalid parameter name for renderbuffer attachment");
-        return ScriptValue::CreateNull(script_state->GetIsolate());
-    }
+        GLint value = 0;
+        ContextGL()->GetFramebufferAttachmentParameteriv(target, attachment,
+                                                         pname, &value);
+        return WebGLAny(script_state, static_cast<unsigned>(value));
+      }
+      SynthesizeGLError(
+          GL_INVALID_ENUM, kFunctionName,
+          "invalid parameter name, EXT_color_buffer_half_float or "
+          "WEBGL_color_buffer_float not enabled");
+      return ScriptValue::CreateNull(script_state->GetIsolate());
   }
+  SynthesizeGLError(GL_INVALID_ENUM, kFunctionName, "invalid parameter name");
+  return ScriptValue::CreateNull(script_state->GetIsolate());
 }
 
 namespace {
@@ -3521,7 +3592,7 @@ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
     case GL_DEPTH_RANGE:
       return GetWebGLFloatArrayParameter(script_state, pname);
     case GL_DEPTH_TEST:
-      return GetBooleanParameter(script_state, pname);
+      return WebGLAny(script_state, depth_enabled_);
     case GL_DEPTH_WRITEMASK:
       return GetBooleanParameter(script_state, pname);
     case GL_DITHER:
@@ -4448,8 +4519,12 @@ bool WebGLRenderingContextBase::isContextLost() const {
 GLboolean WebGLRenderingContextBase::isEnabled(GLenum cap) {
   if (isContextLost() || !ValidateCapability("isEnabled", cap))
     return 0;
-  if (cap == GL_STENCIL_TEST)
+  if (cap == GL_DEPTH_TEST) {
+    return depth_enabled_;
+  }
+  if (cap == GL_STENCIL_TEST) {
     return stencil_enabled_;
+  }
   return ContextGL()->IsEnabled(cap);
 }
 
@@ -4901,7 +4976,7 @@ void WebGLRenderingContextBase::renderbufferStorage(GLenum target,
     return;
   RenderbufferStorageImpl(target, 0, internalformat, width, height,
                           function_name);
-  ApplyStencilTest();
+  ApplyDepthAndStencilTest();
 }
 
 void WebGLRenderingContextBase::sampleCoverage(GLfloat value,
@@ -5438,8 +5513,12 @@ SkColorInfo WebGLRenderingContextBase::CanvasRenderingContextSkColorInfo()
   // have been intentional.
   const SkAlphaType alpha_type =
       CreationAttributes().alpha ? kPremul_SkAlphaType : kOpaque_SkAlphaType;
+  SkColorType color_type = kN32_SkColorType;
+  if (drawing_buffer_ && drawing_buffer_->StorageFormat() == GL_RGBA16F) {
+    color_type = kRGBA_F16_SkColorType;
+  }
   return SkColorInfo(
-      CanvasPixelFormatToSkColorType(pixel_format_deprecated_), alpha_type,
+      color_type, alpha_type,
       PredefinedColorSpaceToSkColorSpace(drawing_buffer_color_space_));
 }
 
@@ -7230,6 +7309,14 @@ cc::Layer* WebGLRenderingContextBase::CcLayer() const {
   return isContextLost() ? nullptr : GetDrawingBuffer()->CcLayer();
 }
 
+void WebGLRenderingContextBase::SetHDRConfiguration(
+    gfx::HDRMode hdr_mode,
+    absl::optional<gfx::HDRMetadata> hdr_metadata) {
+  if (!isContextLost() && GetDrawingBuffer()) {
+    GetDrawingBuffer()->SetHDRConfiguration(hdr_mode, hdr_metadata);
+  }
+}
+
 void WebGLRenderingContextBase::SetFilterQuality(
     cc::PaintFlags::FilterQuality filter_quality) {
   if (!isContextLost() && GetDrawingBuffer()) {
@@ -8094,10 +8181,16 @@ bool WebGLRenderingContextBase::ValidateTexFuncData(
   total *= pixels->TypeSize();
   total += total_bytes_required;
   total += skip_bytes;
-  if (!total.IsValid() ||
-      pixels->byteLength() < static_cast<size_t>(total.ValueOrDie())) {
+  uint32_t total_val;
+  if (!total.AssignIfValid(&total_val) ||
+      pixels->byteLength() < static_cast<size_t>(total_val)) {
     SynthesizeGLError(GL_INVALID_OPERATION, function_name,
                       "ArrayBufferView not big enough for request");
+    return false;
+  }
+  if (static_cast<size_t>(total_val) > kMaximumSupportedArrayBufferSize) {
+    SynthesizeGLError(GL_INVALID_VALUE, function_name,
+                      "ArrayBufferView size exceeds the supported range");
     return false;
   }
   return true;
@@ -8442,13 +8535,11 @@ void WebGLRenderingContextBase::DispatchContextLostEvent(TimerBase*) {
       WebGLContextEvent::Create(event_type_names::kWebglcontextlost, "");
   Host()->HostDispatchEvent(event);
   restore_allowed_ = event->defaultPrevented();
-  if (restore_allowed_ && !is_hidden_) {
-    if (auto_recovery_method_ == kAuto) {
-      // Defer the restore timer to give the context loss
-      // notifications time to propagate through the system: in
-      // particular, to the browser process.
-      restore_timer_.StartOneShot(kDurationBetweenRestoreAttempts, FROM_HERE);
-    }
+  if (restore_allowed_ && auto_recovery_method_ == kAuto) {
+    // Defer the restore timer to give the context loss
+    // notifications time to propagate through the system: in
+    // particular, to the browser process.
+    restore_timer_.StartOneShot(kDurationBetweenRestoreAttempts, FROM_HERE);
   }
 
   if (!restore_allowed_) {
@@ -8509,19 +8600,12 @@ void WebGLRenderingContextBase::MaybeRestoreContext(TimerBase*) {
       CreationAttributes(), context_type_,
       SupportOwnOffscreenSurface(execution_context));
   Platform::GraphicsInfo gl_info;
-  std::unique_ptr<WebGraphicsContext3DProvider> context_provider;
   const auto& url = Host()->GetExecutionContextUrl();
 
-  if (IsMainThread()) {
-    context_provider =
-        Platform::Current()->CreateOffscreenGraphicsContext3DProvider(
-            attributes, url, &gl_info);
-  } else {
-    context_provider =
-        CreateContextProviderOnWorkerThread(attributes, &gl_info, url);
-  }
+  std::unique_ptr<WebGraphicsContext3DProvider> context_provider =
+      CreateOffscreenGraphicsContext3DProvider(attributes, &gl_info, url);
   scoped_refptr<DrawingBuffer> buffer;
-  if (context_provider && context_provider->BindToCurrentThread()) {
+  if (context_provider && context_provider->BindToCurrentSequence()) {
     // Construct a new drawing buffer with the new GL context.
     buffer = CreateDrawingBuffer(std::move(context_provider), gl_info);
     // If DrawingBuffer::create() fails to allocate a fbo, |drawingBuffer| is
@@ -8681,15 +8765,20 @@ void WebGLRenderingContextBase::EmitGLWarning(const char* function_name,
   NotifyWebGLWarning();
 }
 
-void WebGLRenderingContextBase::ApplyStencilTest() {
+void WebGLRenderingContextBase::ApplyDepthAndStencilTest() {
   bool have_stencil_buffer = false;
+  bool have_depth_buffer = false;
 
   if (framebuffer_binding_) {
+    have_depth_buffer = framebuffer_binding_->HasDepthBuffer();
     have_stencil_buffer = framebuffer_binding_->HasStencilBuffer();
   } else {
+    have_depth_buffer = !isContextLost() && CreationAttributes().depth &&
+                        GetDrawingBuffer()->HasDepthBuffer();
     have_stencil_buffer = !isContextLost() && CreationAttributes().stencil &&
                           GetDrawingBuffer()->HasStencilBuffer();
   }
+  EnableOrDisable(GL_DEPTH_TEST, depth_enabled_ && have_depth_buffer);
   EnableOrDisable(GL_STENCIL_TEST, stencil_enabled_ && have_stencil_buffer);
 }
 
@@ -8747,7 +8836,7 @@ void WebGLRenderingContextBase::SetFramebuffer(GLenum target,
 
   if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) {
     framebuffer_binding_ = buffer;
-    ApplyStencilTest();
+    ApplyDepthAndStencilTest();
   }
   if (!buffer) {
     // Instead of binding fb 0, bind the drawing buffer.

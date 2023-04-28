@@ -5,11 +5,12 @@
 import 'chrome://webui-test/mojo_webui_test_support.js';
 import 'chrome://new-tab-page/new_tab_page.js';
 
-import {LensUploadDialogElement} from 'chrome://new-tab-page/lazy_load.js';
+import {LensErrorType, LensSubmitType, LensUploadDialogAction, LensUploadDialogElement, LensUploadDialogError} from 'chrome://new-tab-page/lazy_load.js';
 import {WindowProxy} from 'chrome://new-tab-page/new_tab_page.js';
-import {assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {fakeMetricsPrivate, MetricsTracker} from 'chrome://webui-test/metrics_test_support.js';
 import {waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
-import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
+import {TestMock} from 'chrome://webui-test/test_mock.js';
 
 import {installMock} from './test_support.js';
 
@@ -17,10 +18,15 @@ suite('LensUploadDialogTest', () => {
   let uploadDialog: LensUploadDialogElement;
   let wrapperElement: HTMLDivElement;
   let outsideClickTarget: HTMLDivElement;
-  let windowProxy: TestBrowserProxy;
+  let windowProxy: TestMock<WindowProxy>;
+  let metrics: MetricsTracker;
 
-  setup(() => {
-    document.body.innerHTML = '';
+  let submitUrlCalled = false;
+  let submittedUrl: string|null = null;
+
+  setup(async () => {
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
+    metrics = fakeMetricsPrivate();
     windowProxy = installMock(WindowProxy);
     windowProxy.setResultFor('onLine', true);
 
@@ -42,25 +48,30 @@ suite('LensUploadDialogTest', () => {
 
     uploadDialog = document.createElement('ntp-lens-upload-dialog');
     wrapperElement.appendChild(uploadDialog);
+    await waitAfterNextRender(uploadDialog);
+
+    uploadDialog.$.lensForm.submitUrl = (url: string) => {
+      submitUrlCalled = true;
+      submittedUrl = url;
+    };
   });
 
-  test('hidden be default', () => {
-    // Assert.
-    assertTrue(uploadDialog.$.dialog.hidden);
+  teardown(() => {
+    submitUrlCalled = false;
+    submittedUrl = null;
   });
 
-  test('shows when openDialog is called', () => {
-    // Act.
-    uploadDialog.openDialog();
-
+  test('creating ntp lens dialog opens containing dialog element', () => {
     // Assert.
     assertFalse(uploadDialog.$.dialog.hidden);
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogAction',
+            LensUploadDialogAction.DIALOG_OPENED));
   });
 
-  test('hides when close button is clicked', () => {
-    // Arrange.
-    uploadDialog.openDialog();
-
+  test('hides when close button is clicked', async () => {
     // Act.
     const closeButton =
       uploadDialog.shadowRoot!.querySelector('#closeButton') as HTMLElement;
@@ -68,26 +79,113 @@ suite('LensUploadDialogTest', () => {
 
     // Assert.
     assertTrue(uploadDialog.$.dialog.hidden);
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogAction',
+            LensUploadDialogAction.DIALOG_CLOSED));
   });
 
-  test('clicking outside the upload dialog closes the dialog', async () => {
+  test('focusing outside the upload dialog closes the dialog', async () => {
     // Arrange.
-    uploadDialog.openDialog();
-    await waitAfterNextRender(uploadDialog);
+    const event =
+        new FocusEvent('focusout', {relatedTarget: outsideClickTarget});
 
     // Act.
-    outsideClickTarget.click();
+    uploadDialog.$.dialog.dispatchEvent(event);
 
     // Assert.
     assertTrue(uploadDialog.$.dialog.hidden);
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogAction',
+            LensUploadDialogAction.DIALOG_CLOSED));
+  });
+
+  test(
+      'focusing inside the upload dialog does not close the dialog',
+      async () => {
+        // Arrange.
+        const event = new FocusEvent(
+            'focusout', {relatedTarget: uploadDialog.$.closeButton});
+
+        // Act.
+        uploadDialog.$.dialog.dispatchEvent(event);
+
+        // Assert.
+        assertFalse(uploadDialog.$.dialog.hidden);
+        assertEquals(
+            0,
+            metrics.count(
+                'NewTabPage.Lens.UploadDialog.DialogAction',
+                LensUploadDialogAction.DIALOG_CLOSED));
+      });
+
+  test(
+      'focusout with null related target closes the dialog when doc has focus',
+      async () => {
+        // Arrange.
+        const event = new FocusEvent('focusout', {relatedTarget: null});
+
+        // Act.
+        (document.activeElement as HTMLElement).focus();
+        uploadDialog.$.dialog.dispatchEvent(event);
+
+        // Assert.
+        assertTrue(uploadDialog.$.dialog.hidden);
+        assertEquals(
+            1,
+            metrics.count(
+                'NewTabPage.Lens.UploadDialog.DialogAction',
+                LensUploadDialogAction.DIALOG_CLOSED));
+      });
+
+  test(
+      'focusout with null related target closes the dialog when doc does not have focus',
+      async () => {
+        // Arrange.
+        const event = new FocusEvent('focusout', {relatedTarget: null});
+
+        // Act.
+        const nativeHasFocus = document.hasFocus;
+        document.hasFocus = () => {
+          return false;
+        };
+        uploadDialog.$.dialog.dispatchEvent(event);
+
+        // Assert.
+        assertFalse(uploadDialog.$.dialog.hidden);
+        assertEquals(
+            0,
+            metrics.count(
+                'NewTabPage.Lens.UploadDialog.DialogAction',
+                LensUploadDialogAction.DIALOG_CLOSED));
+
+        document.hasFocus = nativeHasFocus;
+      });
+
+  test('clicking esc key closes the dialog', async () => {
+    // Act.
+    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+
+    // Assert.
+    assertTrue(uploadDialog.$.dialog.hidden);
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogAction',
+            LensUploadDialogAction.DIALOG_CLOSED));
   });
 
   test('opening dialog while offline shows offline UI', async () => {
     // Arrange.
+    uploadDialog.remove();
     windowProxy.setResultFor('onLine', false);
 
     // Act.
-    uploadDialog.openDialog();
+    uploadDialog = document.createElement('ntp-lens-upload-dialog');
+    wrapperElement.appendChild(uploadDialog);
     await waitAfterNextRender(uploadDialog);
 
     // Assert.
@@ -101,10 +199,12 @@ suite('LensUploadDialogTest', () => {
       'clicking try again in offline state when online updates UI',
       async () => {
         // Arrange.
+        uploadDialog.remove();
         windowProxy.setResultFor('onLine', false);
 
         // Act.
-        uploadDialog.openDialog();
+        uploadDialog = document.createElement('ntp-lens-upload-dialog');
+        wrapperElement.appendChild(uploadDialog);
         await waitAfterNextRender(uploadDialog);
 
         // Assert. (consistency check)
@@ -121,4 +221,190 @@ suite('LensUploadDialogTest', () => {
         // Assert.
         assertFalse(uploadDialog.hasAttribute('is-offline_'));
       });
+
+  test('submit url does not submit with empty url', async () => {
+    // Act.
+    clickInputSubmit();
+
+    // Assert.
+    assertFalse(submitUrlCalled);
+  });
+
+  test(
+      'submit valid url by clicking submit button should submit ', async () => {
+        // Arrange.
+        const url = 'http://google.com/image.png';
+
+        // Act.
+        setInputBoxValue(url);
+        clickInputSubmit();
+
+        // Assert.
+        assertTrue(submitUrlCalled);
+        assertEquals(url, submittedUrl);
+      });
+
+  test('pressing enter in input box should submit valid url', async () => {
+    // Arrange.
+    const url = 'http://google.com/image.png';
+
+    // Act.
+    setInputBoxValue(url);
+    getInputBox().dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+
+    // Assert.
+    assertTrue(submitUrlCalled);
+    assertEquals(url, submittedUrl);
+  });
+
+  test('pressing enter in search button should submit valid url', async () => {
+    // Arrange.
+    const url = 'http://google.com/image.png';
+
+    // Act.
+    setInputBoxValue(url);
+    getInputSubmit().dispatchEvent(
+        new KeyboardEvent('keydown', {key: 'Enter'}));
+
+    // Assert.
+    assertTrue(submitUrlCalled);
+    assertEquals(url, submittedUrl);
+  });
+
+  test('pressing space in search button should submit valid url', async () => {
+    // Arrange.
+    const url = 'http://google.com/image.png';
+
+    // Act.
+    setInputBoxValue(url);
+    getInputSubmit().dispatchEvent(new KeyboardEvent('keydown', {key: ' '}));
+
+    // Assert.
+    assertTrue(submitUrlCalled);
+    assertEquals(url, submittedUrl);
+  });
+
+  // TODO (crbug/1399340): De-flake this test.
+  // test('dragenter event should transition to dragging state', async () => {
+  //   // Arrange.
+  //   uploadDialog.openDialog();
+  //   await waitAfterNextRender(uploadDialog);
+  //   // Act.
+  //   uploadDialog.$.dragDropArea.dispatchEvent(new DragEvent('dragenter'));
+  //   await waitAfterNextRender(uploadDialog);
+  //   // Assert.
+  //   assertTrue(uploadDialog.hasAttribute('is-dragging_'));
+  // });
+
+  test(
+      'dragenter then dragleave event should transition to normal state',
+      async () => {
+        // Arrange.
+        uploadDialog.$.dragDropArea.dispatchEvent(new DragEvent('dragenter'));
+        await waitAfterNextRender(uploadDialog);
+        // Act.
+        uploadDialog.$.dragDropArea.dispatchEvent(new DragEvent('dragleave'));
+        await waitAfterNextRender(uploadDialog);
+        // Assert.
+        assertTrue(uploadDialog.hasAttribute('is-normal-or-error_'));
+      });
+
+  test('drop event should submit files', async () => {
+    // Arrange.
+    let submitFileListCalled = false;
+    uploadDialog.$.lensForm.submitFileList = (_fileList: FileList) => {
+      submitFileListCalled = true;
+    };
+    // Act.
+    const dataTransfer = new DataTransfer();
+    const file = new File([], 'image-file.png', {type: 'image/png'});
+    dataTransfer.items.add(file);
+    uploadDialog.$.dragDropArea.dispatchEvent(
+        new DragEvent('drop', {dataTransfer}));
+    await waitAfterNextRender(uploadDialog);
+    // Assert.
+    assertTrue(submitFileListCalled);
+  });
+
+  test('shows error state when FILE_TYPE error is dispatched', async () => {
+    // Act.
+    uploadDialog.$.lensForm.dispatchEvent(new CustomEvent('error', {
+      detail: LensErrorType.FILE_TYPE,
+    }));
+
+    // Assert.
+    assertTrue(uploadDialog.hasAttribute('is-error_'));
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogAction',
+            LensUploadDialogAction.ERROR_SHOWN));
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogError',
+            LensUploadDialogError.FILE_TYPE));
+  });
+
+  test('clears error state when NO_FILE error is dispatched', async () => {
+    // Act.
+    uploadDialog.$.lensForm.dispatchEvent(new CustomEvent('error', {
+      detail: LensErrorType.FILE_TYPE,
+    }));
+    uploadDialog.$.lensForm.dispatchEvent(new CustomEvent('error', {
+      detail: LensErrorType.NO_FILE,
+    }));
+
+    // Assert.
+    assertFalse(uploadDialog.hasAttribute('is-error_'));
+  });
+
+  test('shows loading state when file is submitted', async () => {
+    // Act.
+    uploadDialog.$.lensForm.dispatchEvent(new CustomEvent('loading', {
+      detail: LensSubmitType.FILE,
+    }));
+
+    // Assert.
+    assertTrue(uploadDialog.hasAttribute('is-loading_'));
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogAction',
+            LensUploadDialogAction.FILE_SUBMITTED));
+  });
+
+  test('shows loading state when URL is submitted', async () => {
+    // Act.
+    uploadDialog.$.lensForm.dispatchEvent(new CustomEvent('loading', {
+      detail: LensSubmitType.URL,
+    }));
+
+    // Assert.
+    assertTrue(uploadDialog.hasAttribute('is-loading_'));
+    assertEquals(
+        1,
+        metrics.count(
+            'NewTabPage.Lens.UploadDialog.DialogAction',
+            LensUploadDialogAction.URL_SUBMITTED));
+  });
+
+  function getInputBox(): HTMLInputElement {
+    return uploadDialog.shadowRoot!.querySelector('#inputBox')!;
+  }
+
+  function setInputBoxValue(value: string) {
+    const inputBox = getInputBox();
+    inputBox.value = value;
+    inputBox.dispatchEvent(new InputEvent('input'));
+  }
+
+  function getInputSubmit(): HTMLInputElement {
+    return uploadDialog.shadowRoot!.querySelector('#inputSubmit')!;
+  }
+
+  function clickInputSubmit() {
+    const inputSubmit = getInputSubmit();
+    inputSubmit.click();
+  }
 });

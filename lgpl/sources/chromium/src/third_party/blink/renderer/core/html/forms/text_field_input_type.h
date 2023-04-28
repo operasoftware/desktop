@@ -68,7 +68,7 @@ class TextFieldInputType : public InputType,
                 TextFieldEventBehavior,
                 TextControlSetValueSelection) override;
   void UpdateView() override;
-  void CustomStyleForLayoutObject(ComputedStyle& style) override;
+  void AdjustStyle(ComputedStyleBuilder&) override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&,
                                    LegacyLayout) const override;
   ControlPart AutoAppearance() const override;

@@ -86,6 +86,7 @@ void checkasm_check_vf_eq(void);
 void checkasm_check_vf_gblur(void);
 void checkasm_check_vf_hflip(void);
 void checkasm_check_vf_threshold(void);
+void checkasm_check_vf_sobel(void);
 void checkasm_check_vp8dsp(void);
 void checkasm_check_vp9dsp(void);
 void checkasm_check_videodsp(void);
@@ -203,6 +204,16 @@ void checkasm_checked_call(void *func, ...);
                                               CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB),\
                       checked_call(func_new, 0, 0, 0, 0, 0, 0, 0, __VA_ARGS__,\
                                    7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0))
+#elif ARCH_RISCV
+void checkasm_set_function(void *);
+void *checkasm_get_wrapper(void);
+
+#if (__riscv_xlen == 64) && defined (__riscv_d)
+#define declare_new(ret, ...) \
+    ret (*checked_call)(__VA_ARGS__) = checkasm_get_wrapper();
+#define call_new(...) \
+    (checkasm_set_function(func_new), checked_call(__VA_ARGS__))
+#endif
 #else
 #define declare_new(ret, ...)
 #define declare_new_float(ret, ...)
@@ -286,6 +297,7 @@ int checkasm_check_##type(const char *const file, const int line, \
 
 DECL_CHECKASM_CHECK_FUNC(uint8_t);
 DECL_CHECKASM_CHECK_FUNC(uint16_t);
+DECL_CHECKASM_CHECK_FUNC(uint32_t);
 DECL_CHECKASM_CHECK_FUNC(int16_t);
 DECL_CHECKASM_CHECK_FUNC(int32_t);
 

@@ -15,7 +15,6 @@
 #include "third_party/blink/renderer/core/display_lock/content_visibility_auto_state_change_event.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_document_state.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
-#include "third_party/blink/renderer/core/document_transition/document_transition_supplement.h"
 #include "third_party/blink/renderer/core/dom/css_toggle.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -34,6 +33,7 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/pre_paint_tree_walk.h"
 #include "third_party/blink/renderer/core/style/toggle_trigger.h"
+#include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -69,7 +69,7 @@ DisplayLockContext::DisplayLockContext(Element* element)
   DetermineIfSubtreeHasFocus();
   DetermineIfSubtreeHasSelection();
   DetermineIfSubtreeHasTopLayerElement();
-  DetermineIfInSharedElementTransitionChain();
+  DetermineIfDescendantIsViewTransitionElement();
 }
 
 void DisplayLockContext::SetRequestedState(EContentVisibility state,
@@ -144,11 +144,16 @@ void DisplayLockContext::SetRequestedState(EContentVisibility state,
       element_.Get());
 }
 
-void DisplayLockContext::AdjustElementStyle(ComputedStyle* style) const {
+scoped_refptr<const ComputedStyle> DisplayLockContext::AdjustElementStyle(
+    const ComputedStyle* style) const {
   if (IsAlwaysVisible())
-    return;
-  if (IsLocked())
-    style->SetSkipsContents();
+    return style;
+  if (IsLocked()) {
+    ComputedStyleBuilder builder(*style);
+    builder.SetSkipsContents();
+    return builder.TakeStyle();
+  }
+  return style;
 }
 
 void DisplayLockContext::RequestLock(uint16_t activation_mask) {
@@ -556,11 +561,33 @@ void DisplayLockContext::UpgradeForcedScope(ForcedPhase old_phase,
 
 void DisplayLockContext::ScheduleStateChangeEventIfNeeded() {
   if (state_ == EContentVisibility::kAuto &&
-      RuntimeEnabledFeatures::ContentVisibilityAutoStateChangeEventEnabled()) {
-    element_->EnqueueEvent(
-        *ContentVisibilityAutoStateChangeEvent::Create(
-            event_type_names::kContentvisibilityautostatechange, is_locked_),
-        TaskType::kMiscPlatformAPI);
+      RuntimeEnabledFeatures::ContentVisibilityAutoStateChangeEventEnabled() &&
+      !state_change_task_pending_) {
+    document_->GetExecutionContext()
+        ->GetTaskRunner(TaskType::kMiscPlatformAPI)
+        ->PostTask(
+            FROM_HERE,
+            WTF::BindOnce(&DisplayLockContext::DispatchStateChangeEventIfNeeded,
+                          WrapPersistent(this)));
+    state_change_task_pending_ = true;
+  }
+}
+
+void DisplayLockContext::DispatchStateChangeEventIfNeeded() {
+  DCHECK(state_change_task_pending_);
+  state_change_task_pending_ = false;
+  // If we're not connected to view, reset the state that we reported so that we
+  // can report it again on insertion.
+  if (!ConnectedToView()) {
+    last_notified_skipped_state_.reset();
+    return;
+  }
+
+  if (!last_notified_skipped_state_ ||
+      *last_notified_skipped_state_ != is_locked_) {
+    last_notified_skipped_state_ = is_locked_;
+    element_->DispatchEvent(*ContentVisibilityAutoStateChangeEvent::Create(
+        event_type_names::kContentvisibilityautostatechange, is_locked_));
   }
 }
 
@@ -860,7 +887,7 @@ void DisplayLockContext::DidMoveToNewDocument(Document& old_document) {
   DetermineIfSubtreeHasFocus();
   DetermineIfSubtreeHasSelection();
   DetermineIfSubtreeHasTopLayerElement();
-  DetermineIfInSharedElementTransitionChain();
+  DetermineIfDescendantIsViewTransitionElement();
 }
 
 void DisplayLockContext::WillStartLifecycleUpdate(const LocalFrameView& view) {
@@ -1135,54 +1162,22 @@ void DisplayLockContext::DetermineIfSubtreeHasTopLayerElement() {
   }
 }
 
-void DisplayLockContext::DetermineIfInSharedElementTransitionChain() {
-  ResetAndDetermineIfAncestorIsSharedElement();
-  if (ConnectedToView())
-    document_->GetDisplayLockDocumentState().UpdateSharedElementAncestorLocks();
-}
-
-void DisplayLockContext::ResetInSharedElementTransitionChain() {
-  SetRenderAffectingState(RenderAffectingState::kSharedElementTransitionChain,
-                          false);
-}
-
-void DisplayLockContext::SetInSharedElementTransitionChain() {
-  SetRenderAffectingState(RenderAffectingState::kSharedElementTransitionChain,
-                          true);
-}
-
-bool DisplayLockContext::IsInSharedElementAncestorChain() const {
-  return render_affecting_state_[static_cast<int>(
-      RenderAffectingState::kSharedElementTransitionChain)];
-}
-
-void DisplayLockContext::ResetAndDetermineIfAncestorIsSharedElement() {
-  ResetInSharedElementTransitionChain();
-  if (!ConnectedToView())
-    return;
-
-  auto* supplement = DocumentTransitionSupplement::FromIfExists(*document_);
-  if (!supplement)
-    return;
-
-  auto* transition = supplement->GetTransition();
-  bool has_shared_element_ancestor = false;
-  for (auto* candidate = element_.Get(); candidate;
-       candidate = FlatTreeTraversal::ParentElement(*candidate)) {
-    // We don't care about document element as the ancestor, since it's common
-    // to have one and it will be clipped by viewport anyway.
-    if (candidate->IsDocumentElement())
-      continue;
-
-    if (auto* layout_object = candidate->GetLayoutObject();
-        layout_object &&
-        transition->IsRepresentedViaPseudoElements(*layout_object)) {
-      has_shared_element_ancestor = true;
-      break;
-    }
+void DisplayLockContext::DetermineIfDescendantIsViewTransitionElement() {
+  ResetDescendantIsViewTransitionElement();
+  if (ConnectedToView()) {
+    document_->GetDisplayLockDocumentState()
+        .UpdateViewTransitionElementAncestorLocks();
   }
-  SetRenderAffectingState(RenderAffectingState::kSharedElementTransitionChain,
-                          has_shared_element_ancestor);
+}
+
+void DisplayLockContext::ResetDescendantIsViewTransitionElement() {
+  SetRenderAffectingState(
+      RenderAffectingState::kDescendantIsViewTransitionElement, false);
+}
+
+void DisplayLockContext::SetDescendantIsViewTransitionElement() {
+  SetRenderAffectingState(
+      RenderAffectingState::kDescendantIsViewTransitionElement, true);
 }
 
 void DisplayLockContext::ClearHasTopLayerElement() {
@@ -1305,7 +1300,7 @@ void DisplayLockContext::NotifyRenderAffectingStateChanged() {
         !state(RenderAffectingState::kAutoStateUnlockedUntilLifecycle) &&
         !state(RenderAffectingState::kAutoUnlockedForPrint) &&
         !state(RenderAffectingState::kSubtreeHasTopLayerElement) &&
-        !state(RenderAffectingState::kSharedElementTransitionChain)));
+        !state(RenderAffectingState::kDescendantIsViewTransitionElement)));
 
   if (should_be_locked && !IsLocked())
     Lock();
@@ -1316,6 +1311,7 @@ void DisplayLockContext::NotifyRenderAffectingStateChanged() {
 void DisplayLockContext::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   visitor->Trace(document_);
+  ElementRareDataField::Trace(visitor);
 }
 
 void DisplayLockContext::SetShouldUnlockAutoForPrint(bool flag) {
@@ -1338,8 +1334,8 @@ const char* DisplayLockContext::RenderAffectingStateName(int state) const {
       return "AutoUnlockedForPrint";
     case RenderAffectingState::kSubtreeHasTopLayerElement:
       return "SubtreeHasTopLayerElement";
-    case RenderAffectingState::kSharedElementTransitionChain:
-      return "SharedElementTransitionChain";
+    case RenderAffectingState::kDescendantIsViewTransitionElement:
+      return "DescendantIsViewTransitionElement";
     case RenderAffectingState::kNumRenderAffectingStates:
       break;
   }

@@ -109,8 +109,8 @@ class PLATFORM_EXPORT DisplayItem {
     kForeignLayerLinkHighlight,
     kForeignLayerViewportScroll,
     kForeignLayerViewportScrollbar,
-    kForeignLayerDocumentTransitionContent,
-    kForeignLayerLast = kForeignLayerDocumentTransitionContent,
+    kForeignLayerViewTransitionContent,
+    kForeignLayerLast = kForeignLayerViewTransitionContent,
 
     kClipPaintPhaseFirst,
     kClipPaintPhaseLast = kClipPaintPhaseFirst + kPaintPhaseMax,
@@ -375,27 +375,19 @@ template <>
 struct HashTraits<blink::DisplayItem::Id::HashKey>
     : GenericHashTraits<blink::DisplayItem::Id::HashKey> {
   using Key = blink::DisplayItem::Id::HashKey;
-  static void ConstructDeletedValue(Key& slot, bool) {
+  static constexpr bool kEmptyValueIsZero = true;
+  static void ConstructDeletedValue(Key& slot) {
     const_cast<wtf_size_t&>(slot.fragment) = kNotFound;
   }
   static bool IsDeletedValue(const Key& id) { return id.fragment == kNotFound; }
-};
 
-template <>
-struct DefaultHash<blink::DisplayItem::Id::HashKey> {
-  struct Hash {
-    STATIC_ONLY(Hash);
-    using Key = blink::DisplayItem::Id::HashKey;
-    static unsigned GetHash(const Key& id) {
-      unsigned hash =
-          IntHash<blink::DisplayItemClientId>::GetHash(id.client_id);
-      WTF::AddIntToHash(hash, id.type);
-      WTF::AddIntToHash(hash, id.fragment);
-      return hash;
-    }
-    static bool Equal(const Key& a, const Key& b) { return a == b; }
-    static const bool safe_to_compare_to_empty_or_deleted = false;
-  };
+  static unsigned GetHash(const Key& id) {
+    unsigned hash = WTF::GetHash(id.client_id);
+    WTF::AddIntToHash(hash, id.type);
+    WTF::AddIntToHash(hash, id.fragment);
+    return hash;
+  }
+  static constexpr bool kSafeToCompareToEmptyOrDeleted = false;
 };
 
 }  // namespace WTF

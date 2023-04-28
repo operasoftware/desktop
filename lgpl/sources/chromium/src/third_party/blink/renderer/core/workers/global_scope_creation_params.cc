@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/feature_list.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
@@ -37,14 +38,15 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
     WorkletModuleResponsesMap* module_responses_map,
     mojo::PendingRemote<mojom::blink::BrowserInterfaceBroker>
         browser_interface_broker,
-    mojo::PendingRemote<blink::mojom::CodeCacheHost> code_cache_host_interface,
+    mojo::PendingRemote<mojom::blink::CodeCacheHost> code_cache_host_interface,
+    mojo::PendingRemote<mojom::blink::BlobURLStore> blob_url_store,
     BeginFrameProviderParams begin_frame_provider_params,
     const PermissionsPolicy* parent_permissions_policy,
     base::UnguessableToken agent_cluster_id,
     ukm::SourceId ukm_source_id,
     const absl::optional<ExecutionContextToken>& parent_context_token,
     bool parent_cross_origin_isolated_capability,
-    bool parent_isolated_application_capability,
+    bool parent_is_isolated_context,
     InterfaceRegistry* interface_registry,
     scoped_refptr<base::SingleThreadTaskRunner>
         agent_group_scheduler_compositor_task_runner)
@@ -70,6 +72,7 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
       module_responses_map(module_responses_map),
       browser_interface_broker(std::move(browser_interface_broker)),
       code_cache_host_interface(std::move(code_cache_host_interface)),
+      blob_url_store(std::move(blob_url_store)),
       begin_frame_provider_params(std::move(begin_frame_provider_params)),
       // At the moment, workers do not support their container policy being set,
       // so it will just be an empty ParsedPermissionsPolicy for now.
@@ -82,8 +85,7 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
       parent_context_token(parent_context_token),
       parent_cross_origin_isolated_capability(
           parent_cross_origin_isolated_capability),
-      parent_isolated_application_capability(
-          parent_isolated_application_capability),
+      parent_is_isolated_context(parent_is_isolated_context),
       interface_registry(interface_registry),
       agent_group_scheduler_compositor_task_runner(
           std::move(agent_group_scheduler_compositor_task_runner)) {

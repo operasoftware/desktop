@@ -38,8 +38,6 @@
 
 namespace WTF {
 
-struct AtomicStringHash;
-
 // An AtomicString instance represents a string, and multiple AtomicString
 // instances can share their string storage if the strings are
 // identical. Comparing two AtomicString instances is much faster than comparing
@@ -235,7 +233,7 @@ class WTF_EXPORT AtomicString {
   }
   static scoped_refptr<StringImpl> AddSlowCase(scoped_refptr<StringImpl>&&);
   static scoped_refptr<StringImpl> AddSlowCase(StringImpl*);
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
   static scoped_refptr<StringImpl> Add(CFStringRef);
 #endif
 };
@@ -285,13 +283,11 @@ WTF_EXPORT extern const AtomicString& g_xlink_atom;
 WTF_EXPORT extern const AtomicString& g_http_atom;
 WTF_EXPORT extern const AtomicString& g_https_atom;
 
-// AtomicStringHash is the default hash for AtomicString
 template <typename T>
-struct DefaultHash;
+struct HashTraits;
+// Defined in atomic_string_hash.h.
 template <>
-struct DefaultHash<AtomicString> {
-  typedef AtomicStringHash Hash;
-};
+struct HashTraits<AtomicString>;
 
 // Pretty printer for gtest and base/logging.*.  It prepends and appends
 // double-quotes, and escapes characters other than ASCII printables.

@@ -59,7 +59,7 @@ class CORE_EXPORT HTMLIFrameElement : public HTMLFrameElementBase,
     return FrameOwnerElementType::kIframe;
   }
 
-  bool Anonymous() const override { return anonymous_; }
+  bool Credentialless() const override { return credentialless_; }
 
   bool IsSupportedByRegionCapture() const override { return true; }
 
@@ -76,7 +76,7 @@ class CORE_EXPORT HTMLIFrameElement : public HTMLFrameElementBase,
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
 
-  bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
+  bool LayoutObjectIsNeeded(const DisplayStyle&) const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   bool IsInteractiveContent() const override;
@@ -107,7 +107,7 @@ class CORE_EXPORT HTMLIFrameElement : public HTMLFrameElementBase,
   bool allow_fullscreen_;
   bool allow_payment_request_;
   bool collapsed_by_client_;
-  bool anonymous_ = false;
+  bool credentialless_ = false;
   Member<HTMLIFrameElementSandbox> sandbox_;
   Member<DOMFeaturePolicy> policy_;
 

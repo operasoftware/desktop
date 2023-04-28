@@ -35,7 +35,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_evaluation_result.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
@@ -67,6 +67,41 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 
 namespace blink {
+
+namespace {
+bool IsTrivialScript(const String& script) {
+  if (script.length() > 25) {
+    return false;
+  }
+
+  DEFINE_STATIC_LOCAL(Vector<String>, trivial_scripts,
+                      ({"void(0)",
+                        "void0",
+                        "void(false)",
+                        "void(null)",
+                        "void(-1)",
+                        "false",
+                        "true",
+                        "",
+                        "''",
+                        "\"\"",
+                        "undefined",
+                        "0",
+                        "1",
+                        "'1'",
+                        "print()",
+                        "window.print()",
+                        "close()",
+                        "window.close()",
+                        "history.back()",
+                        "window.history.back()",
+                        "history.go(-1)",
+                        "window.history.go(-1)"}));
+  String processed_script = script.StripWhiteSpace().Replace(";", "");
+  return trivial_scripts.Contains(processed_script);
+}
+
+}  // namespace
 
 void ScriptController::Trace(Visitor* visitor) const {
   visitor->Trace(window_);
@@ -229,6 +264,17 @@ void ScriptController::ExecuteJavaScriptURL(
   v8::Local<v8::Value> v8_result =
       script->RunScriptAndReturnValue(window_).GetSuccessValueOrEmpty();
   UseCounter::Count(window_.Get(), WebFeature::kExecutedJavaScriptURL);
+
+  // CSPDisposition::CHECK indicate that the JS URL comes from a site (and not
+  // from bookmarks or extensions). Empty v8_result indicate that the script
+  // had a failure at the time of execution.
+  if (csp_disposition == network::mojom::CSPDisposition::CHECK &&
+      !v8_result.IsEmpty()) {
+    if (!IsTrivialScript(script_source)) {
+      UseCounter::Count(window_.Get(),
+                        WebFeature::kExecutedNonTrivialJavaScriptURL);
+    }
+  }
 
   // If executing script caused this frame to be removed from the page, we
   // don't want to try to replace its document!

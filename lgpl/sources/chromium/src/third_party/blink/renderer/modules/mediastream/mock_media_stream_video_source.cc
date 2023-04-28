@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_source.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
@@ -22,9 +22,6 @@ MockMediaStreamVideoSource::MockMediaStreamVideoSource(
     bool respond_to_request_refresh_frame)
     : MediaStreamVideoSource(scheduler::GetSingleThreadTaskRunnerForTesting()),
       respond_to_request_refresh_frame_(respond_to_request_refresh_frame),
-      max_requested_height_(0),
-      max_requested_width_(0),
-      max_requested_frame_rate_(0.0),
       attempted_to_start_(false) {}
 
 MockMediaStreamVideoSource::MockMediaStreamVideoSource(
@@ -33,9 +30,6 @@ MockMediaStreamVideoSource::MockMediaStreamVideoSource(
     : MediaStreamVideoSource(scheduler::GetSingleThreadTaskRunnerForTesting()),
       format_(format),
       respond_to_request_refresh_frame_(respond_to_request_refresh_frame),
-      max_requested_height_(format.frame_size.height()),
-      max_requested_width_(format.frame_size.width()),
-      max_requested_frame_rate_(format.frame_rate),
       attempted_to_start_(false) {}
 
 MockMediaStreamVideoSource::~MockMediaStreamVideoSource() {}
@@ -60,7 +54,7 @@ void MockMediaStreamVideoSource::RequestRefreshFrame() {
         media::VideoFrame::CreateColorFrame(format_.frame_size, 0, 0, 0,
                                             base::TimeDelta());
     PostCrossThreadTask(
-        *io_task_runner(), FROM_HERE,
+        *video_task_runner(), FROM_HERE,
         CrossThreadBindOnce(frame_callback_, frame,
                             std::vector<scoped_refptr<media::VideoFrame>>(),
                             base::TimeTicks()));
@@ -107,7 +101,7 @@ void MockMediaStreamVideoSource::DeliverVideoFrame(
   DCHECK(!is_stopped_for_restart_);
   DCHECK(!frame_callback_.is_null());
   PostCrossThreadTask(
-      *io_task_runner(), FROM_HERE,
+      *video_task_runner(), FROM_HERE,
       CrossThreadBindOnce(frame_callback_, std::move(frame),
                           std::vector<scoped_refptr<media::VideoFrame>>(),
                           base::TimeTicks()));
@@ -117,7 +111,7 @@ void MockMediaStreamVideoSource::DeliverEncodedVideoFrame(
     scoped_refptr<EncodedVideoFrame> frame) {
   DCHECK(!is_stopped_for_restart_);
   DCHECK(!encoded_frame_callback_.is_null());
-  PostCrossThreadTask(*io_task_runner(), FROM_HERE,
+  PostCrossThreadTask(*video_task_runner(), FROM_HERE,
                       CrossThreadBindOnce(encoded_frame_callback_,
                                           std::move(frame), base::TimeTicks()));
 }
@@ -125,7 +119,7 @@ void MockMediaStreamVideoSource::DeliverEncodedVideoFrame(
 void MockMediaStreamVideoSource::DeliverNewCropVersion(uint32_t crop_version) {
   DCHECK(!crop_version_callback_.is_null());
   PostCrossThreadTask(
-      *io_task_runner(), FROM_HERE,
+      *video_task_runner(), FROM_HERE,
       CrossThreadBindOnce(crop_version_callback_, crop_version));
 }
 
@@ -142,6 +136,7 @@ void MockMediaStreamVideoSource::RestartSourceImpl(
     OnRestartDone(false);
     return;
   }
+  ++restart_count_;
   is_stopped_for_restart_ = false;
   format_ = new_format;
   OnRestartDone(true);

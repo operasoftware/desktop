@@ -4,11 +4,10 @@
 
 import {Destination, DestinationOrigin, DuplexMode, makeRecentDestination, MarginsType, PrinterType, PrintPreviewModelElement, PrintTicket, RecentDestination, ScalingType, Size} from 'chrome://print/print_preview.js';
 // <if expr="is_chromeos">
-import {GooglePromotedDestinationId} from 'chrome://print/print_preview.js';
+import {GooglePromotedDestinationId, PrinterStatusReason} from 'chrome://print/print_preview.js';
 // </if>
-import {assert} from 'chrome://resources/js/assert.js';
 // <if expr="is_chromeos">
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 // </if>
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
@@ -37,8 +36,7 @@ suite(model_test.suiteName, function() {
   let model: PrintPreviewModelElement;
 
   setup(function() {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     model = document.createElement('print-preview-model');
     document.body.appendChild(model);
   });
@@ -47,7 +45,7 @@ suite(model_test.suiteName, function() {
    * Tests state restoration with all boolean settings set to true, scaling =
    * 90, dpi = 100, custom square paper, and custom margins.
    */
-  test(assert(model_test.TestNames.SetStickySettings), function() {
+  test(model_test.TestNames.SetStickySettings, function() {
     // Default state of the model.
     const stickySettingsDefault: {[key: string]: any} = {
       version: 2,
@@ -169,7 +167,7 @@ suite(model_test.suiteName, function() {
    * Tests that setSetting() won't change the value if there is already a
    * policy for that setting.
    */
-  test(assert(model_test.TestNames.SetPolicySettings), function() {
+  test(model_test.TestNames.SetPolicySettings, function() {
     model.setSetting('headerFooter', false);
     assertFalse(model.settings.headerFooter.value as boolean);
 
@@ -268,7 +266,7 @@ suite(model_test.suiteName, function() {
    * Tests that toggling each setting results in the expected change to the
    * print ticket.
    */
-  test(assert(model_test.TestNames.GetPrintTicket), function() {
+  test(model_test.TestNames.GetPrintTicket, function() {
     // <if expr="is_chromeos">
     const origin = DestinationOrigin.CROS;
     // </if>
@@ -315,10 +313,12 @@ suite(model_test.suiteName, function() {
       showSystemDialog: false,
       // <if expr="is_chromeos">
       printToGoogleDrive: false,
+      printerManuallySelected: false,
       advancedSettings: {
         printArea: 4,
         paperType: 0,
       },
+      printerStatusReason: PrinterStatusReason.UNKNOWN_REASON,
       // </if>
     };
     assertEquals(JSON.stringify(expectedDefaultTicketObject), defaultTicket);
@@ -353,6 +353,7 @@ suite(model_test.suiteName, function() {
       showSystemDialog: false,
       // <if expr="is_chromeos">
       printToGoogleDrive: false,
+      printerManuallySelected: false,
       // </if>
       marginsCustom: {
         marginTop: 100,
@@ -366,6 +367,7 @@ suite(model_test.suiteName, function() {
         printArea: 6,
         paperType: 1,
       },
+      printerStatusReason: PrinterStatusReason.UNKNOWN_REASON,
       // </if>
     };
 
@@ -376,7 +378,7 @@ suite(model_test.suiteName, function() {
    * Tests that toggling each setting results in the expected change to the
    * cloud job print ticket.
    */
-  test(assert(model_test.TestNames.GetCloudPrintTicket), function() {
+  test(model_test.TestNames.GetCloudPrintTicket, function() {
     initializeModel();
 
     // Create a test extension destination.
@@ -443,7 +445,7 @@ suite(model_test.suiteName, function() {
     assertEquals(expectedNewTicket, newTicket);
   });
 
-  test(assert(model_test.TestNames.RemoveUnsupportedDestinations), function() {
+  test(model_test.TestNames.RemoveUnsupportedDestinations, function() {
     const unsupportedPrivet =
         new Destination('PrivetDevice', DestinationOrigin.PRIVET, 'PrivetName');
     const unsupportedCloud =
@@ -481,7 +483,7 @@ suite(model_test.suiteName, function() {
     assertEquals('FooDevice', recentDestinations[0]!.id);
   });
 
-  test(assert(model_test.TestNames.ChangeDestination), function() {
+  test(model_test.TestNames.ChangeDestination, function() {
     const testDestination =
         new Destination('FooDevice', DestinationOrigin.LOCAL, 'FooName');
     testDestination.capabilities =
@@ -582,7 +584,7 @@ suite(model_test.suiteName, function() {
   // <if expr="is_chromeos">
   // Tests that printToGoogleDrive is set correctly on the print ticket for Save
   // to Drive CrOS.
-  test(assert(model_test.TestNames.PrintToGoogleDriveCros), function() {
+  test(model_test.TestNames.PrintToGoogleDriveCros, function() {
     const driveDestination = new Destination(
         GooglePromotedDestinationId.SAVE_TO_DRIVE_CROS, DestinationOrigin.LOCAL,
         'Save to Google Drive');
@@ -602,7 +604,7 @@ suite(model_test.suiteName, function() {
    * - if `reset_to_default`=false, the value of the setting will always be read
    * from the sticky settings.
    */
-  test(assert(model_test.TestNames.CddResetToDefault), function() {
+  test(model_test.TestNames.CddResetToDefault, function() {
     const cddColorEnabled = true;
     const stickyColorEnabled = false;
     const cddDuplexEnabled = false;

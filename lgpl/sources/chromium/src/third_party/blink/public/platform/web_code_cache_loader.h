@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_CODE_CACHE_LOADER_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_CODE_CACHE_LOADER_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom-shared.h"
@@ -28,7 +28,7 @@ class BLINK_PLATFORM_EXPORT WebCodeCacheLoader {
 
   static std::unique_ptr<WebCodeCacheLoader> Create(
       CodeCacheHost* code_cache_host);
-  virtual void FetchFromCodeCache(blink::mojom::CodeCacheType cache_type,
+  virtual void FetchFromCodeCache(mojom::CodeCacheType cache_type,
                                   const WebURL& url,
                                   FetchCodeCacheCallback) = 0;
 

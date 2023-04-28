@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/paint/highlight_painting_utils.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/editing/dom_selection.h"
@@ -17,6 +18,7 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 namespace {
@@ -34,7 +36,13 @@ Color SelectionWebkitTextFillColor(const Document& document,
 
 }  // namespace
 
-class HighlightPaintingUtilsTest : public SimTest {};
+class HighlightPaintingUtilsTest : public SimTest,
+                                   private ScopedHighlightInheritanceForTest {
+ public:
+  // TODO(crbug.com/1024156) remove CachedPseudoStyles tests, but keep
+  // SelectedTextInputShadow, when HighlightInheritance becomes stable
+  HighlightPaintingUtilsTest() : ScopedHighlightInheritanceForTest(false) {}
+};
 
 TEST_F(HighlightPaintingUtilsTest, CachedPseudoStylesWindowInactive) {
   // Test that we are only caching active selection styles as so that we don't

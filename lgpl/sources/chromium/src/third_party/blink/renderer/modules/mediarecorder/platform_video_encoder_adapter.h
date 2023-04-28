@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIARECORDER_PLATFORM_VIDEO_ENCODER_ADAPTER_H_
 
 #include "base/containers/queue.h"
+#include "base/memory/weak_ptr.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_encoder.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -24,12 +25,15 @@ class MODULES_EXPORT PlatformVideoEncoderAdapter final
       const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
       const VideoTrackRecorder::OnErrorCB& on_error_cb,
       uint32_t bits_per_second,
-      const gfx::Size& frame_size,
-      scoped_refptr<base::SequencedTaskRunner> main_task_runner);
+      const gfx::Size& frame_size);
 
   PlatformVideoEncoderAdapter(const PlatformVideoEncoderAdapter&) = delete;
   PlatformVideoEncoderAdapter& operator=(const PlatformVideoEncoderAdapter&) =
       delete;
+
+  ~PlatformVideoEncoderAdapter() override;
+
+  base::WeakPtr<Encoder> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
  private:
   // A frame that hasn't been (fully) encoded yet.
@@ -39,9 +43,8 @@ class MODULES_EXPORT PlatformVideoEncoderAdapter final
   };
 
   // VideoTrackRecorder::Encoder implementation:
-  ~PlatformVideoEncoderAdapter() override;
-  void EncodeOnEncodingTaskRunner(scoped_refptr<media::VideoFrame> frame,
-                                  base::TimeTicks capture_timestamp) override;
+  void EncodeFrame(scoped_refptr<media::VideoFrame> frame,
+                   base::TimeTicks capture_timestamp) override;
 
   // Initializes or reinitializes the encoder. The latter happens on frame size
   // change.
@@ -82,6 +85,8 @@ class MODULES_EXPORT PlatformVideoEncoderAdapter final
 
   // The last frame size configured in `encoder_`, if any.
   absl::optional<gfx::Size> frame_size_;
+
+  base::WeakPtrFactory<PlatformVideoEncoderAdapter> weak_factory_{this};
 };
 
 }  // namespace blink

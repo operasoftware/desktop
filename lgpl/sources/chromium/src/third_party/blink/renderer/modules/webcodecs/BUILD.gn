@@ -10,6 +10,7 @@ import("//third_party/protobuf/proto_library.gni")
 
 blink_modules_sources("webcodecs") {
   sources = [
+    "allow_shared_buffer_source_util.cc",
     "allow_shared_buffer_source_util.h",
     "audio_data.cc",
     "audio_data.h",
@@ -91,14 +92,6 @@ blink_modules_sources("webcodecs") {
     "video_frame_transfer_list.h",
     "webcodecs_logger.cc",
     "webcodecs_logger.h",
-  ]
-  jumbo_excluded_sources = [
-    "decoder_template.cc",
-    "encoder_base.cc",
-    "gpu_factories_retriever.cc",
-    "video_decoder.cc",
-    "video_decoder_broker.cc",
-    "video_encoder.cc",
   ]
   deps = [
     "//build:chromeos_buildflags",

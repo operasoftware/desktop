@@ -7,22 +7,21 @@ import 'chrome://webui-test/mojo_webui_test_support.js';
 import {CartHandlerRemote} from 'chrome://new-tab-page/chrome_cart.mojom-webui.js';
 import {ChromeCartProxy, chromeCartV2Descriptor, ChromeCartV2ModuleElement, ModuleHeight} from 'chrome://new-tab-page/lazy_load.js';
 import {$$, CrAutoImgElement} from 'chrome://new-tab-page/new_tab_page.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {fakeMetricsPrivate, MetricsTracker} from 'chrome://webui-test/metrics_test_support.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
-import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
+import {TestMock} from 'chrome://webui-test/test_mock.js';
 import {eventToPromise, isVisible} from 'chrome://webui-test/test_util.js';
 
-import {fakeMetricsPrivate, MetricsTracker} from '../../metrics_test_support.js';
 import {assertNotStyle, installMock} from '../../test_support.js';
 
 suite('NewTabPageModulesChromeCartModuleTest', () => {
-  let handler: TestBrowserProxy;
+  let handler: TestMock<CartHandlerRemote>;
   let metrics: MetricsTracker;
 
   setup(() => {
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
 
     handler = installMock(CartHandlerRemote, ChromeCartProxy.setHandler);
     metrics = fakeMetricsPrivate();
@@ -795,7 +794,8 @@ suite('NewTabPageModulesChromeCartModuleTest', () => {
       cartCarousel.removeEventListener('scroll', onScroll);
     });
 
-    test('click on cart item', async () => {
+    // b/270225100: Flaky
+    test.skip('click on cart item', async () => {
       const carts = [
         {
           merchant: 'Amazon',
@@ -892,7 +892,8 @@ suite('NewTabPageModulesChromeCartModuleTest', () => {
       loadTimeData.overrideValues({ruleBasedDiscountEnabled: true});
     });
 
-    test('click on cart item with rule-based discount', async () => {
+    // b/270225100: Flaky
+    test.skip('click on cart item with rule-based discount', async () => {
       const carts = [
         {
           merchant: 'Amazon',

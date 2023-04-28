@@ -31,13 +31,13 @@
 #include "third_party/blink/renderer/core/loader/resource/image_resource.h"
 
 #include <memory>
+#include "base/task/single_thread_task_runner.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/loader/referrer_utils.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -68,11 +68,13 @@
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_frame_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
+#include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 #include "third_party/blink/renderer/platform/testing/mock_context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/scoped_mocked_url.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/base64.h"
 
@@ -235,7 +237,7 @@ TEST_F(ImageResourceTest, MultipartImage) {
   ScopedMockedURLLoad scoped_mocked_url_load(test_url, GetTestFilePath());
 
   // Emulate starting a real load, but don't expect any "real"
-  // WebURLLoaderClient callbacks.
+  // URLLoaderClient callbacks.
   ImageResource* image_resource = ImageResource::CreateForTest(test_url);
   fetcher->StartLoad(image_resource);
 
@@ -459,9 +461,7 @@ TEST_F(ImageResourceTest, DecodedDataRemainsWhileHasClients) {
   image_resource->ResponseReceived(resource_response);
   image_resource->AppendData(reinterpret_cast<const char*>(kJpegImage),
                              sizeof(kJpegImage));
-  EXPECT_NE(0u, image_resource->EncodedSizeMemoryUsageForTesting());
   image_resource->FinishForTest();
-  EXPECT_EQ(0u, image_resource->EncodedSizeMemoryUsageForTesting());
   EXPECT_FALSE(image_resource->ErrorOccurred());
   ASSERT_TRUE(image_resource->GetContent()->HasImage());
   EXPECT_FALSE(image_resource->GetContent()->GetImage()->IsNull());
@@ -1176,6 +1176,69 @@ TEST_F(ImageResourceCounterTest, InstanceCounters_UserAgent) {
   // Check the instance counters have been updated.
   EXPECT_EQ(++current_count, GetResourceCount());
   EXPECT_EQ(++current_ua_count, GetUACSSResourceCount());
+}
+
+TEST_F(ImageResourceCounterTest, RevalidationPolicyMetrics) {
+  blink::HistogramTester histogram_tester;
+  auto* fetcher = CreateFetcher();
+
+  KURL test_url("http://127.0.0.1:8000/img.png");
+  ScopedMockedURLLoad url_load(test_url, GetTestFilePath());
+
+  // Test image preloads are immediately loaded.
+  FetchParameters fetch_params =
+      FetchParameters::CreateForTest(ResourceRequest(test_url));
+  fetch_params.SetLinkPreload(true);
+
+  Resource* resource = ImageResource::Fetch(fetch_params, fetcher);
+  ASSERT_TRUE(resource);
+  EXPECT_TRUE(MemoryCache::Get()->Contains(resource));
+
+  Resource* new_resource = ImageResource::Fetch(fetch_params, fetcher);
+  EXPECT_EQ(resource, new_resource);
+
+  // Test histograms.
+  histogram_tester.ExpectTotalCount(
+      "Blink.MemoryCache.RevalidationPolicy.Preload.Image", 2);
+  histogram_tester.ExpectBucketCount(
+      "Blink.MemoryCache.RevalidationPolicy.Preload.Image",
+      static_cast<int>(ResourceFetcher::RevalidationPolicyForMetrics::kLoad),
+      1);
+  histogram_tester.ExpectBucketCount(
+      "Blink.MemoryCache.RevalidationPolicy.Preload.Image",
+      static_cast<int>(ResourceFetcher::RevalidationPolicyForMetrics::kUse), 1);
+
+  KURL test_url_deferred("http://127.0.0.1:8000/img_deferred.ttf");
+  ScopedMockedURLLoad url_load_deferred(test_url_deferred, GetTestFilePath());
+
+  // Test deferred image loads are correctly counted.
+  FetchParameters fetch_params_deferred =
+      FetchParameters::CreateForTest(ResourceRequest(test_url_deferred));
+  fetch_params_deferred.SetLazyImageDeferred();
+  resource = ImageResource::Fetch(fetch_params_deferred, fetcher);
+  ASSERT_TRUE(resource);
+  histogram_tester.ExpectTotalCount(
+      "Blink.MemoryCache.RevalidationPolicy.Image", 1);
+  histogram_tester.ExpectBucketCount(
+      "Blink.MemoryCache.RevalidationPolicy.Image",
+      static_cast<int>(ResourceFetcher::RevalidationPolicyForMetrics::kDefer),
+      1);
+  fetcher->StartLoad(resource);
+  histogram_tester.ExpectTotalCount(
+      "Blink.MemoryCache.RevalidationPolicy.Image", 2);
+  histogram_tester.ExpectBucketCount(
+      "Blink.MemoryCache.RevalidationPolicy.Image",
+      static_cast<int>(ResourceFetcher::RevalidationPolicyForMetrics::
+                           kPreviouslyDeferredLoad),
+      1);
+  // Load the same deferred image again. Already-loaded resources shall be
+  // counted as kUse.
+  resource = ImageResource::Fetch(fetch_params_deferred, fetcher);
+  histogram_tester.ExpectTotalCount(
+      "Blink.MemoryCache.RevalidationPolicy.Image", 3);
+  histogram_tester.ExpectBucketCount(
+      "Blink.MemoryCache.RevalidationPolicy.Image",
+      static_cast<int>(ResourceFetcher::RevalidationPolicyForMetrics::kUse), 1);
 }
 
 }  // namespace blink

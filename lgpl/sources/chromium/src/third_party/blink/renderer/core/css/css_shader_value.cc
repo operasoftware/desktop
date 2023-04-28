@@ -15,17 +15,22 @@
 #include "third_party/blink/renderer/core/style/gpu_shader_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
+
+CSSShaderValue::CSSShaderValue() : CSSValue(kShaderValueClass) {}
 
 CSSShaderValue::CSSShaderValue(const AtomicString& raw_value,
                                const KURL& url,
                                const Referrer& referrer,
+                               CSSValueList* args,
                                float animation_frame)
     : CSSValue(kShaderValueClass),
       referrer_(referrer),
       relative_url_(raw_value),
       absolute_url_(url.GetString()),
+      args_(args),
       animation_frame_(animation_frame) {}
 
 CSSShaderValue::~CSSShaderValue() = default;
@@ -51,10 +56,17 @@ void CSSShaderValue::ReResolveUrl(const Document& document) const {
   absolute_url_ = url_string;
   resource_ = nullptr;
   animation_frame_ = 0;
+  args_.Clear();
 }
 
 String CSSShaderValue::CustomCSSText() const {
-  return SerializeURI(relative_url_);
+  StringBuilder result;
+  result.Append("shader(");
+  result.Append(SerializeURI(relative_url_));
+  result.Append(" ");
+  result.Append(args_->CssText());
+  result.Append(")");
+  return result.ReleaseString();
 }
 
 bool CSSShaderValue::Equals(const CSSShaderValue& other) const {
@@ -63,11 +75,13 @@ bool CSSShaderValue::Equals(const CSSShaderValue& other) const {
     urls_equal = relative_url_ == other.relative_url_;
   else
     urls_equal = absolute_url_ == other.absolute_url_;
-  return urls_equal && animation_frame_ == other.animation_frame_;
+  return urls_equal && args_ == other.args_ &&
+         animation_frame_ == other.animation_frame_;
 }
 
 void CSSShaderValue::TraceAfterDispatch(blink::Visitor* visitor) const {
   visitor->Trace(resource_);
+  visitor->Trace(args_);
   CSSValue::TraceAfterDispatch(visitor);
 }
 

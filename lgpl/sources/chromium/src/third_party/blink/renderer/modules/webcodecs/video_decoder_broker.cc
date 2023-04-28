@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "build/buildflag.h"
 #include "media/base/decoder_factory.h"
 #include "media/base/decoder_status.h"
@@ -113,7 +114,7 @@ class MediaVideoTaskWrapper {
 
 #if BUILDFLAG(IS_FUCHSIA)
     execution_context.GetBrowserInterfaceBroker().GetInterface(
-        fuchsia_media_resource_provider_.InitWithNewPipeAndPassReceiver());
+        fuchsia_media_codec_provider_.InitWithNewPipeAndPassReceiver());
 #endif
 
     // TODO(sandersd): Target color space is used by DXVA VDA to pick an
@@ -212,9 +213,9 @@ class MediaVideoTaskWrapper {
       external_decoder_factory = std::make_unique<media::MojoDecoderFactory>(
           media_interface_factory_.get());
 #elif BUILDFLAG(IS_FUCHSIA)
-      DCHECK(fuchsia_media_resource_provider_);
+      DCHECK(fuchsia_media_codec_provider_);
       external_decoder_factory = std::make_unique<media::FuchsiaDecoderFactory>(
-          std::move(fuchsia_media_resource_provider_),
+          std::move(fuchsia_media_codec_provider_),
           /*allow_overlays=*/false);
 #endif
     }
@@ -332,8 +333,8 @@ class MediaVideoTaskWrapper {
   bool decoder_factory_needs_update_ = true;
 
 #if BUILDFLAG(IS_FUCHSIA)
-  mojo::PendingRemote<media::mojom::FuchsiaMediaResourceProvider>
-      fuchsia_media_resource_provider_;
+  mojo::PendingRemote<media::mojom::FuchsiaMediaCodecProvider>
+      fuchsia_media_codec_provider_;
 #endif
 
   std::unique_ptr<media::MediaLog> media_log_;
@@ -356,7 +357,13 @@ VideoDecoderBroker::VideoDecoderBroker(
               ? gpu_factories->GetTaskRunner()
               // Otherwise, use a worker task runner to avoid scheduling decoder
               // work on the main thread.
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
+              // The Windows platform decoder may need to load a system
+              // library, hence MayBlock().
+              : worker_pool::CreateSequencedTaskRunner({base::MayBlock()})) {
+#else
               : worker_pool::CreateSequencedTaskRunner({})) {
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
   DVLOG(2) << __func__;
   media_tasks_ = std::make_unique<MediaVideoTaskWrapper>(
       weak_factory_.GetWeakPtr(), execution_context, gpu_factories,

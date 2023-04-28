@@ -84,7 +84,7 @@ class WPTResultsProcessorTest(LoggingTestCase):
                         ],
                         'variant.html': [
                             'b8db5972284d1ac6bbda0da81621d9bca5d04ee7',
-                            ['variant.html?foo=bar/abc', {}],
+                            ['variant.html?foo=bar', {}],
                             ['variant.html?foo=baz', {}],
                         ],
                         'dir': {
@@ -101,6 +101,10 @@ class WPTResultsProcessorTest(LoggingTestCase):
             self.path_finder.path_from_blink_tools('blinkpy', 'web_tests',
                                                    'results.html'),
             'results-viewer-body')
+        self.fs.write_text_file(
+            self.path_finder.path_from_blink_tools('blinkpy', 'web_tests',
+                                                   'results.html.version'),
+            'Version=1.0')
         self.wpt_report = {
             'run_info': {
                 'os': 'linux',
@@ -135,9 +139,9 @@ class WPTResultsProcessorTest(LoggingTestCase):
             self.host,
             port=port,
             web_tests_dir=port.web_tests_dir(),
-            artifacts_dir=self.fs.join('out', 'Default',
+            artifacts_dir=self.fs.join('/mock-checkout', 'out', 'Default',
                                        'layout-test-results'),
-            results_dir=self.fs.join('out', 'Default'),
+            results_dir=self.fs.join('/mock-checkout', 'out', 'Default'),
             sink=MockResultSink(port.typ_host()))
 
     def _create_json_output(self, json_dict):
@@ -318,6 +322,25 @@ class WPTResultsProcessorTest(LoggingTestCase):
                                  },
                              },
                          }])
+
+    def test_result_sink_with_sanitizer(self):
+        self._create_json_output({
+            'tests': {
+                'fail': {
+                    'test.html': {
+                        'expected': 'PASS',
+                        'actual': 'FAIL',
+                    },
+                },
+            },
+            'path_delimiter': '/',
+        })
+        self.processor.run_info['sanitizer_enabled'] = True
+        self.processor.process_wpt_results(OUTPUT_JSON_FILENAME)
+        (request, ) = self.processor.sink.sink_requests
+        self.assertEqual(request['result']['actual'], 'PASS')
+        self.assertEqual(request['result']['expected'], {'PASS'})
+        self.assertEqual(request['result']['unexpected'], False)
 
     def test_result_sink_for_multiple_runs(self):
         json_dict = {
@@ -666,14 +689,18 @@ class WPTResultsProcessorTest(LoggingTestCase):
         # Also create a checked-in metadata file for this test
         checked_in_metadata = textwrap.dedent("""\
             [test.html]
-              expected: OK
+              expected:
+                if flag_specific != "highdpi": OK
               [Assert something]
-                expected: FAIL
+                expected:
+                  if flag_specific != "highdpi": PASS
+                  [FAIL, TIMEOUT]
             """)
         self.fs.write_text_file(
             self.fs.join(self.processor.web_tests_dir, 'external', 'wpt',
                          'test.html.ini'), checked_in_metadata)
 
+        self.processor.run_info['flag_specific'] = 'highdpi'
         with self.fs.patch_builtins():
             self.processor.process_wpt_results(OUTPUT_JSON_FILENAME)
         artifacts_subdir = self.fs.join(self.processor.artifacts_dir)
@@ -687,10 +714,15 @@ class WPTResultsProcessorTest(LoggingTestCase):
                     expected: CRASH
                 """), self.fs.read_text_file(actual_path))
 
-        # The checked-in metadata file gets renamed from .ini to -expected.txt
+        # The checked-in metadata file gets renamed from .ini to -expected.txt.
+        # Any conditions are also evaluated against the test run's properties.
         expected_path = self.fs.join(artifacts_subdir, 'test-expected.txt')
-        self.assertEqual(checked_in_metadata,
-                         self.fs.read_text_file(expected_path))
+        self.assertEqual(
+            textwrap.dedent("""\
+                [test.html]
+                  [Assert something]
+                    expected: [FAIL, TIMEOUT]
+                """), self.fs.read_text_file(expected_path))
 
         # Ensure the artifacts in the json were replaced with the locations of
         # the newly-created files.
@@ -710,7 +742,7 @@ class WPTResultsProcessorTest(LoggingTestCase):
         # validate the entire diff files to avoid checking line numbers/markup.
         diff_lines = self.fs.read_text_file(
             self.fs.join(artifacts_subdir, 'test-diff.txt')).splitlines()
-        self.assertIn('-    expected: FAIL', diff_lines)
+        self.assertIn('-    expected: [FAIL, TIMEOUT]', diff_lines)
         self.assertIn('+    expected: CRASH', diff_lines)
         self.assertEqual(
             [self.fs.join(path_from_out_dir_base, 'test-diff.txt')],
@@ -718,7 +750,7 @@ class WPTResultsProcessorTest(LoggingTestCase):
 
         pretty_diff_contents = self.fs.read_text_file(
             self.fs.join(artifacts_subdir, 'test-pretty-diff.html'))
-        self.assertIn('expected: FAIL', pretty_diff_contents)
+        self.assertIn('expected: [FAIL, TIMEOUT]', pretty_diff_contents)
         self.assertIn('expected: CRASH', pretty_diff_contents)
         self.assertEqual(
             [self.fs.join(path_from_out_dir_base, 'test-pretty-diff.html')],
@@ -778,13 +810,13 @@ class WPTResultsProcessorTest(LoggingTestCase):
         # ini file if it exists for a test
         json_dict = {
             'tests': {
-                'variant.html?foo=bar/abc': {
+                'variant.html?foo=bar': {
                     'expected': 'PASS',
                     'actual': 'FAIL',
                     'artifacts': {
                         'wpt_actual_status': ['OK'],
                         'wpt_actual_metadata': [
-                            '[variant.html?foo=bar/abc]\n  expected: OK\n',
+                            '[variant.html?foo=bar]\n  expected: OK\n',
                         ],
                     },
                 },
@@ -799,7 +831,7 @@ class WPTResultsProcessorTest(LoggingTestCase):
             self.fs.join(self.processor.web_tests_dir, 'external', 'wpt',
                          'variant.html.ini'),
             textwrap.dedent("""\
-                [variant.html?foo=bar/abc]
+                [variant.html?foo=bar]
                   expected: OK
 
                 [variant.html?foo=baz]
@@ -808,16 +840,16 @@ class WPTResultsProcessorTest(LoggingTestCase):
         with self.fs.patch_builtins():
             self.processor.process_wpt_results(OUTPUT_JSON_FILENAME)
         variant_metadata = textwrap.dedent("""\
-            [variant.html?foo=bar/abc]
+            [variant.html?foo=bar]
               expected: OK
             """)
         artifacts_subdir = self.fs.join(self.processor.artifacts_dir)
         actual_path = self.fs.join(artifacts_subdir,
-                                   'variant_foo=bar_abc-actual.txt')
+                                   'variant_foo=bar-actual.txt')
         self.assertEqual(variant_metadata, self.fs.read_text_file(actual_path))
         # The checked-in metadata file gets renamed from .ini to -expected.txt
         expected_path = self.fs.join(artifacts_subdir,
-                                     'variant_foo=bar_abc-expected.txt')
+                                     'variant_foo=bar-expected.txt')
         # Exclude the `foo=baz` variant from the expected text.
         self.assertEqual(variant_metadata,
                          self.fs.read_text_file(expected_path))
@@ -826,12 +858,12 @@ class WPTResultsProcessorTest(LoggingTestCase):
         # the newly-created files.
         updated_json = self._load_json_output()
         test_node_parent = updated_json['tests']
-        test_node = test_node_parent['variant.html?foo=bar/abc']
+        test_node = test_node_parent['variant.html?foo=bar']
         path_from_out_dir_base = self.fs.join('layout-test-results')
         actual_path = self.fs.join(path_from_out_dir_base,
-                                   'variant_foo=bar_abc-actual.txt')
+                                   'variant_foo=bar-actual.txt')
         expected_path = self.fs.join(path_from_out_dir_base,
-                                     'variant_foo=bar_abc-expected.txt')
+                                     'variant_foo=bar-expected.txt')
         self.assertNotIn('wpt_actual_metadata', test_node['artifacts'])
         self.assertEqual([actual_path], test_node['artifacts']['actual_text'])
         self.assertEqual([expected_path],
@@ -914,13 +946,14 @@ class WPTResultsProcessorTest(LoggingTestCase):
         ], test_node['artifacts']['expected_text'])
 
     def test_process_wpt_report(self):
-        report_src = self.fs.join('out', 'Default', 'wpt_report.json')
+        report_src = self.fs.join('/mock-checkout', 'out', 'Default',
+                                  'wpt_report.json')
         self.fs.write_text_file(report_src,
                                 (json.dumps(self.wpt_report) + '\n') * 2)
         self.processor.process_wpt_report(report_src)
         artifacts = self.processor.sink.invocation_level_artifacts
-        report_dest = self.fs.join('out', 'Default', 'layout-test-results',
-                                   'wpt_report.json')
+        report_dest = self.fs.join('/mock-checkout', 'out', 'Default',
+                                   'layout-test-results', 'wpt_report.json')
         self.assertEqual(artifacts['wpt_report.json'], {
             'filePath': report_dest,
         })
@@ -929,13 +962,14 @@ class WPTResultsProcessorTest(LoggingTestCase):
         self.assertEqual(report['results'], self.wpt_report['results'] * 2)
 
     def test_process_wpt_report_compact(self):
-        report_src = self.fs.join('out', 'Default', 'wpt_report.json')
+        report_src = self.fs.join('/mock-checkout', 'out', 'Default',
+                                  'wpt_report.json')
         self.wpt_report['run_info']['used_upstream'] = False
         self.fs.write_text_file(report_src, json.dumps(self.wpt_report))
         self.processor.process_wpt_report(report_src)
         artifacts = self.processor.sink.invocation_level_artifacts
-        report_dest = self.fs.join('out', 'Default', 'layout-test-results',
-                                   'wpt_report.json')
+        report_dest = self.fs.join('/mock-checkout', 'out', 'Default',
+                                   'layout-test-results', 'wpt_report.json')
         self.assertEqual(artifacts['wpt_report.json'], {
             'filePath': report_dest,
         })

@@ -20,8 +20,13 @@ LargestContentfulPaint::LargestContentfulPaint(
     const AtomicString& id,
     const String& url,
     Element* element,
-    uint32_t navigation_id)
-    : PerformanceEntry(g_empty_atom, start_time, start_time, navigation_id),
+    DOMWindow* source,
+    bool is_triggered_by_soft_navigation)
+    : PerformanceEntry(g_empty_atom,
+                       start_time,
+                       start_time,
+                       source,
+                       is_triggered_by_soft_navigation),
       size_(size),
       render_time_(render_time),
       load_time_(load_time),
@@ -32,7 +37,7 @@ LargestContentfulPaint::LargestContentfulPaint(
 
 LargestContentfulPaint::~LargestContentfulPaint() = default;
 
-AtomicString LargestContentfulPaint::entryType() const {
+const AtomicString& LargestContentfulPaint::entryType() const {
   return performance_entry_names::kLargestContentfulPaint;
 }
 

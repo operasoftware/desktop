@@ -4,7 +4,7 @@
 
 import {Action, Store} from 'chrome://resources/js/store_ts.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
-import {assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {assertTrue} from './chai_assert.js';
 
 /**
  * This is a generic test store, designed to replace a real Store instance
@@ -21,7 +21,7 @@ export class TestStore<T> extends Store<T> {
       storeImplReducer: (state: T, action: Action) => T) {
     super(storeImplEmptyState, storeImplReducer);
 
-    this.data = Object.assign(this.data, initialData);
+    this.data = Object.assign(this.data as object, initialData);
     this.initialized_ = true;
   }
 

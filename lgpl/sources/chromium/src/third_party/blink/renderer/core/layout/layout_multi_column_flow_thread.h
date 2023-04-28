@@ -311,7 +311,8 @@ class CORE_EXPORT LayoutMultiColumnFlowThread final
   void AppendNewFragmentainerGroupIfNeeded(LayoutUnit offset_in_flow_thread,
                                            PageBoundaryRule);
 
-  void StartLayoutFromNG(unsigned column_count);
+  void SetColumnCountFromNG(unsigned column_count);
+  void StartLayoutFromNG();
   LayoutMultiColumnSet* PendingColumnSetForNG() const;
   void AppendNewFragmentainerGroupFromNG();
   void SetCurrentColumnBlockSizeFromNG(LayoutUnit);
@@ -334,6 +335,8 @@ class CORE_EXPORT LayoutMultiColumnFlowThread final
   // Note: We call this constructor only in |CreateAnonymous()|, but mark this
   // "public" for |MakeGarbageCollected<T>|.
   explicit LayoutMultiColumnFlowThread(bool needs_paint_layer);
+
+  LayoutSize Size() const override;
 
  private:
   void UpdateLayout() override;
@@ -373,6 +376,7 @@ class CORE_EXPORT LayoutMultiColumnFlowThread final
   bool CanSkipLayout(const LayoutBox&) const final;
   MultiColumnLayoutState GetMultiColumnLayoutState() const final;
   void RestoreMultiColumnLayoutState(const MultiColumnLayoutState&) final;
+  LayoutSize ComputeSize() const;
 
   // The last set we worked on. It's not to be used as the "current set". The
   // concept of a "current set" is difficult, since layout may jump back and

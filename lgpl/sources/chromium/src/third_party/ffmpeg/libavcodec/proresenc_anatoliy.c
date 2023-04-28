@@ -31,7 +31,6 @@
 #include "libavutil/opt.h"
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "dct.h"
 #include "encode.h"
 #include "internal.h"
 #include "profiles.h"
@@ -945,7 +944,8 @@ const FFCodec ff_prores_aw_encoder = {
     CODEC_LONG_NAME("Apple ProRes"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_PRORES,
-    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .p.pix_fmts     = pix_fmts,
     .priv_data_size = sizeof(ProresContext),
     .init           = prores_encode_init,
@@ -961,7 +961,8 @@ const FFCodec ff_prores_encoder = {
     CODEC_LONG_NAME("Apple ProRes"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_PRORES,
-    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .p.pix_fmts     = pix_fmts,
     .priv_data_size = sizeof(ProresContext),
     .init           = prores_encode_init,

@@ -1,0 +1,21 @@
+// Copyright (C) 2022 Opera Norway AS. All rights reserved.
+//
+// This file is an original work developed by Opera
+
+module blink.mojom;
+
+struct OperaColor {
+  int32 color;
+};
+
+struct OperaColors {
+  OperaColor? opera_gx_accent;
+  OperaColor? opera_gx_base;
+};
+
+[EnableIf=opera_feature_blink_browser_colors]
+interface OperaColorsClient {
+  // Sets opera colors for the frame. They will be available to the page
+  // via env(-opera-XXX-color) variables in CSS.
+  SetColors(OperaColors colors);
+};

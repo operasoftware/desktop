@@ -16,8 +16,7 @@ suite('TabSearchItemTest', () => {
   async function setupTest(data: TabData) {
     tabSearchItem = document.createElement('tab-search-item');
     tabSearchItem.data = data;
-    document.body.innerHTML =
-        window.trustedTypes!.emptyHTML as unknown as string;
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
     document.body.appendChild(tabSearchItem);
     await flushTasks();
   }
@@ -85,7 +84,6 @@ suite('TabSearchItemTest', () => {
           tabId: 0,
           title: 'Example.com site',
           url: {url: 'https://example.com'},
-          groupId: undefined,
           lastActiveTime: {internalValue: BigInt(0)},
           lastActiveElapsedText: '',
         } as RecentlyClosedTab,

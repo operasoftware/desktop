@@ -20,10 +20,11 @@
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
-#include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
 
+class DOMException;
+class HistoryItem;
 class NavigationApiNavigation;
 class NavigationUpdateCurrentEntryOptions;
 class NavigationHistoryEntry;
@@ -33,23 +34,16 @@ class NavigationReloadOptions;
 class NavigationResult;
 class NavigationOptions;
 class NavigationTransition;
-class DOMException;
-class HistoryItem;
+class RegisteredEventListener;
 class SerializedScriptValue;
 
 class CORE_EXPORT NavigationApi final
     : public EventTargetWithInlineData,
-      public Supplement<LocalDOMWindow>,
       public ExecutionContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static const char kSupplementName[];
-  static NavigationApi* navigation(LocalDOMWindow&);
-  // Unconditionally creates NavigationApi, even if the RuntimeEnabledFeatures
-  // is disabled.
-  static NavigationApi* From(LocalDOMWindow&);
-  explicit NavigationApi(LocalDOMWindow&);
+  explicit NavigationApi(LocalDOMWindow*);
   ~NavigationApi() final = default;
 
   void InitializeForNewWindow(HistoryItem& current,
@@ -137,8 +131,11 @@ class CORE_EXPORT NavigationApi final
   // EventTargetWithInlineData overrides:
   const AtomicString& InterfaceName() const final;
   ExecutionContext* GetExecutionContext() const final {
-    return GetSupplementable();
+    return ExecutionContextLifecycleObserver::GetExecutionContext();
   }
+  void AddedEventListener(const AtomicString&, RegisteredEventListener&) final;
+  void RemovedEventListener(const AtomicString&,
+                            const RegisteredEventListener&) final;
 
   void Trace(Visitor*) const final;
 
@@ -178,6 +175,7 @@ class CORE_EXPORT NavigationApi final
 
   NavigationHistoryEntry* MakeEntryFromItem(HistoryItem&);
 
+  Member<LocalDOMWindow> window_;
   HeapVector<Member<NavigationHistoryEntry>> entries_;
   HashMap<String, int> keys_to_indices_;
   int current_entry_index_ = -1;
@@ -190,6 +188,8 @@ class CORE_EXPORT NavigationApi final
   Member<NavigationApiNavigation> upcoming_non_traversal_navigation_;
 
   Member<NavigateEvent> ongoing_navigate_event_;
+
+  int navigate_event_handler_count_ = 0;
 };
 
 }  // namespace blink

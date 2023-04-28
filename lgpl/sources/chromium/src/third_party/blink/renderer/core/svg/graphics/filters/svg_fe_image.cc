@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 
 namespace blink {
@@ -87,10 +88,10 @@ static absl::optional<AffineTransform> ComputeViewportAdjustmentTransform(
   // subregion.
   // TODO(crbug/260709): This fixes relative lengths but breaks non-relative
   // ones.
-  SVGLengthContext length_context(element);
-  gfx::SizeF viewport_size;
-  if (!length_context.DetermineViewport(viewport_size))
+  gfx::SizeF viewport_size = SVGLengthContext(element).ResolveViewport();
+  if (viewport_size.IsEmpty()) {
     return absl::nullopt;
+  }
   return MakeMapBetweenRects(gfx::RectF(viewport_size), target_rect);
 }
 
@@ -180,9 +181,8 @@ sk_sp<PaintFilter> FEImage::CreateImageFilterForLayoutObject(
   // cull rect for the paint record.
   gfx::RectF crop_rect = IntersectWithFilterRegion(GetFilter(), dst_rect);
   PaintRecorder paint_recorder;
-  cc::PaintCanvas* canvas =
-      paint_recorder.beginRecording(gfx::RectFToSkRect(crop_rect));
-  canvas->concat(AffineTransformToSkMatrix(transform));
+  cc::PaintCanvas* canvas = paint_recorder.beginRecording();
+  canvas->concat(AffineTransformToSkM44(transform));
   {
     auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
     SVGObjectPainter(layout_object).PaintResourceSubtree(builder->Context());

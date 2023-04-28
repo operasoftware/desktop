@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/modules/webgpu/gpu_query_set.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_render_bundle.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_render_pipeline.h"
+#include "third_party/blink/renderer/modules/webgpu/gpu_supported_features.h"
 
 namespace blink {
 
@@ -71,11 +72,23 @@ void GPURenderPassEncoder::executeBundles(
                                              dawn_bundles.get());
 }
 
-void GPURenderPassEncoder::endPass() {
-  device_->AddConsoleWarning(
-      "endPass() has been deprecated and will soon be "
-      "removed. Use end() instead.");
-  end();
+void GPURenderPassEncoder::writeTimestamp(
+    const DawnObject<WGPUQuerySet>* querySet,
+    uint32_t queryIndex,
+    ExceptionState& exception_state) {
+  V8GPUFeatureName::Enum requiredFeatureEnum =
+      V8GPUFeatureName::Enum::kTimestampQueryInsidePasses;
+
+  if (!device_->features()->has(requiredFeatureEnum)) {
+    exception_state.ThrowTypeError(String::Format(
+        "Use of the writeTimestamp() method on render pass requires the '%s' "
+        "feature to be enabled on %s.",
+        V8GPUFeatureName(requiredFeatureEnum).AsCStr(),
+        device_->formattedLabel().c_str()));
+    return;
+  }
+  GetProcs().renderPassEncoderWriteTimestamp(GetHandle(), querySet->GetHandle(),
+                                             queryIndex);
 }
 
 }  // namespace blink

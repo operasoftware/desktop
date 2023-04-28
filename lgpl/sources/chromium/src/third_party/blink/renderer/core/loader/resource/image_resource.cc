@@ -30,6 +30,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/common/loader/referrer_utils.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -42,6 +43,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
@@ -84,6 +86,13 @@ class ImageResource::ImageResourceInfoImpl final
   const KURL& Url() const override { return resource_->Url(); }
   base::TimeTicks LoadResponseEnd() const override {
     return resource_->LoadResponseEnd();
+  }
+  base::TimeTicks LoadStart() const override {
+    if (ResourceLoadTiming* load_timing =
+            resource_->GetResponse().GetResourceLoadTiming()) {
+      return load_timing->SendStart();
+    }
+    return base::TimeTicks();
   }
   const ResourceResponse& GetResponse() const override {
     return resource_->GetResponse();
@@ -138,6 +147,18 @@ class ImageResource::ImageResourceInfoImpl final
     if (!resource_->Options().unsupported_image_mime_types)
       return nullptr;
     return &resource_->Options().unsupported_image_mime_types->data;
+  }
+
+  absl::optional<WebURLRequest::Priority> RequestPriority() const override {
+    auto priority = resource_->GetResourceRequest().Priority();
+    if (priority == WebURLRequest::Priority::kUnresolved) {
+      // This can happen for image documents (e.g. when `<iframe
+      // src="title.png">` is the LCP), because the `ImageResource` isn't
+      // associated with `ResourceLoader` in such cases. For now, consider the
+      // priority not available for such cases by returning nullopt.
+      return absl::nullopt;
+    }
+    return priority;
   }
 
   const Member<ImageResource> resource_;
@@ -404,9 +425,9 @@ void ImageResource::Finish(base::TimeTicks load_finish_time,
       UpdateImageAndClearBuffer();
   } else {
     UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
-    // As encoded image data can be created from m_image  (see
-    // ImageResource::resourceBuffer(), we don't have to keep m_data. Let's
-    // clear this. As for the lifetimes of m_image and m_data, see this
+    // As encoded image data can be obtained from Image::Data() via `content_`
+    // (see ResourceBuffer()), we don't have to keep `data_`. Let's
+    // clear it. As for the lifetimes of `content_` and `data_`, see this
     // document:
     // https://docs.google.com/document/d/1v0yTAZ6wkqX2U_M6BNIGUJpM1s0TIw1VsqpxoL7aciY/edit?usp=sharing
     ClearData();
@@ -503,7 +524,8 @@ const ImageResourceContent* ImageResource::GetContent() const {
   return content_;
 }
 
-ResourcePriority ImageResource::PriorityFromObservers() {
+std::pair<ResourcePriority, ResourcePriority>
+ImageResource::PriorityFromObservers() {
   return GetContent()->PriorityFromObservers();
 }
 

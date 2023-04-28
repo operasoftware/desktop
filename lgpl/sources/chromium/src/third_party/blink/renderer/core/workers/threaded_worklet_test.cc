@@ -199,14 +199,12 @@ class ThreadedWorkletMessagingProxyForTest
     std::unique_ptr<Vector<char>> cached_meta_data;
     WorkerClients* worker_clients = nullptr;
     std::unique_ptr<WorkerSettings> worker_settings;
+    LocalFrame* frame = To<LocalDOMWindow>(GetExecutionContext())->GetFrame();
     InitializeWorkerThread(
         std::make_unique<GlobalScopeCreationParams>(
             GetExecutionContext()->Url(), mojom::blink::ScriptType::kModule,
             "threaded_worklet", GetExecutionContext()->UserAgent(GetExecutionContext()->Url()),
-            To<LocalDOMWindow>(GetExecutionContext())
-                ->GetFrame()
-                ->Loader()
-                .UserAgentMetadata(GetExecutionContext()->Url()),
+            frame->Loader().UserAgentMetadata(GetExecutionContext()->Url()),
             nullptr /* web_worker_fetch_context */,
             mojo::Clone(GetExecutionContext()
                             ->GetContentSecurityPolicy()
@@ -223,11 +221,9 @@ class ThreadedWorkletMessagingProxyForTest
             mojom::blink::V8CacheOptions::kDefault,
             MakeGarbageCollected<WorkletModuleResponsesMap>(),
             mojo::NullRemote() /* browser_interface_broker */,
-            To<LocalDOMWindow>(GetExecutionContext())
-                ->GetFrame()
-                ->Loader()
-                .CreateWorkerCodeCacheHost(),
-            BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
+            frame->Loader().CreateWorkerCodeCacheHost(),
+            frame->GetBlobUrlStorePendingRemote(), BeginFrameProviderParams(),
+            nullptr /* parent_permissions_policy */,
             GetExecutionContext()->GetAgentClusterID(), ukm::kInvalidSourceId,
             GetExecutionContext()->GetExecutionContextToken()),
         absl::nullopt, absl::nullopt);
@@ -384,7 +380,7 @@ TEST_F(ThreadedWorkletTest, UseCounter) {
   test::EnterRunLoop();
 
   // This feature is randomly selected from Deprecation::deprecationMessage().
-  const WebFeature kFeature2 = WebFeature::kPrefixedStorageInfo;
+  const WebFeature kFeature2 = WebFeature::kPaymentInstruments;
 
   // Deprecated API use on the threaded WorkletGlobalScope should be recorded in
   // UseCounter on the Document.

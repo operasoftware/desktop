@@ -16,6 +16,7 @@
 #include "media/base/video_codecs.h"
 #include "media/base/video_encoder.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/webrtc/api/video_codecs/video_encoder.h"
 
 namespace webrtc {
@@ -74,7 +75,7 @@ class PLATFORM_EXPORT RTCVideoEncoderAdapter final
 
   media::VideoEncoder::Options encoder_options_;
 
-  std::vector<webrtc::VideoFrame> input_frames_;
+  WTF::Vector<webrtc::VideoFrame> input_frames_;
 
   // The sink for encoded video data.
   base::raw_ptr<webrtc::EncodedImageCallback> encoded_image_callback_;

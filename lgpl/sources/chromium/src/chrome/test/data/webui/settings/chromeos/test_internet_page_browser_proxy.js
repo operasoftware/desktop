@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {TestBrowserProxy} from '../../test_browser_proxy.js';
+import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
 /**
  * @implements {InternetPageBrowserProxy}
@@ -12,7 +12,7 @@ export class TestInternetPageBrowserProxy extends TestBrowserProxy {
     super([
       'showCarrierAccountDetail',
       'showPortalSignin',
-      'showCellularSetupUI',
+      'showCellularSetupUi',
       'configureThirdPartyVpn',
       'addThirdPartyVpn',
       'requestGmsCoreNotificationsDisabledDeviceNames',
@@ -31,8 +31,8 @@ export class TestInternetPageBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  showCellularSetupUI(guid) {
-    this.methodCalled('showCellularSetupUI');
+  showCellularSetupUi(guid) {
+    this.methodCalled('showCellularSetupUi');
   }
 
   /** @override */

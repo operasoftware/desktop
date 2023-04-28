@@ -25,13 +25,13 @@ include_rules = [
     "+services/viz/public/cpp/gpu/context_provider_command_buffer.h",
     "+skia/ext/platform_canvas.h",
 
-    "+base/atomicops.h",
     "+base/task/bind_post_task.h",
     "+base/files/file.h",
     "+base/metrics/field_trial.h",
 
     "+base/guid.h",
     "+base/token.h",
+    "+base/sequence_checker.h",
     "+base/trace_event/trace_event.h",
     "+base/unguessable_token.h",
     "+media/audio",
@@ -51,9 +51,10 @@ include_rules = [
     "+third_party/blink/renderer/modules/mediastream",
     "+third_party/blink/renderer/modules/modules_export.h",
     "+third_party/blink/renderer/modules/peerconnection",
-    "+third_party/blink/renderer/modules/screen_enumeration/screen_detailed.h",
-    "+third_party/blink/renderer/modules/screen_enumeration/screen_details.h",
+    "+third_party/blink/renderer/modules/screen_details/screen_detailed.h",
+    "+third_party/blink/renderer/modules/screen_details/screen_details.h",
     "+third_party/blink/renderer/modules/webrtc",
+    "+ui/display/types/display_constants.h",
     "+ui/gfx/geometry/size.h",
 ]
 

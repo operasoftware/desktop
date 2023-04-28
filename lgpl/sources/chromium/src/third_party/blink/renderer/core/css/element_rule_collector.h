@@ -98,6 +98,10 @@ class MatchedRule {
   Member<const CSSStyleSheet> parent_style_sheet_;
 
   friend class ElementRuleCollector;
+  FRIEND_TEST_ALL_PREFIXES(ElementRuleCollectorTest, DirectNesting);
+  FRIEND_TEST_ALL_PREFIXES(ElementRuleCollectorTest,
+                           RuleNotStartingWithAmpersand);
+  FRIEND_TEST_ALL_PREFIXES(ElementRuleCollectorTest, NestedRulesInMediaQuery);
 };
 
 }  // namespace blink
@@ -128,7 +132,6 @@ class CORE_EXPORT ElementRuleCollector {
                        const StyleRecalcContext&,
                        const SelectorFilter&,
                        MatchResult&,
-                       ComputedStyle*,
                        EInsideLink);
   ElementRuleCollector(const ElementRuleCollector&) = delete;
   ElementRuleCollector& operator=(const ElementRuleCollector&) = delete;
@@ -180,9 +183,15 @@ class CORE_EXPORT ElementRuleCollector {
   // aggregated per-rule for the entire style recalc pass.
   static void DumpAndClearRulesPerfMap();
 
+  const HeapVector<MatchedRule, 32>& MatchedRulesForTest() const {
+    return matched_rules_;
+  }
+
   // Temporarily swap the StyleRecalcContext with one which points to the
   // closest query container for matching ::slotted rules for a given slot.
   class SlottedRulesScope {
+    STACK_ALLOCATED();
+
    public:
     SlottedRulesScope(ElementRuleCollector& collector, HTMLSlotElement& slot)
         : context_(&collector.style_recalc_context_,
@@ -195,6 +204,8 @@ class CORE_EXPORT ElementRuleCollector {
   // Temporarily swap the StyleRecalcContext with one which points to the
   // closest query container for matching ::part rules for a given host.
   class PartRulesScope {
+    STACK_ALLOCATED();
+
    public:
     PartRulesScope(ElementRuleCollector& collector, Element& host)
         : context_(&collector.style_recalc_context_,
@@ -240,6 +251,10 @@ class CORE_EXPORT ElementRuleCollector {
                     const CSSStyleSheet* style_sheet,
                     int style_sheet_index);
 
+  // Find the CSSRule within the CSSRuleCollection that corresponds to the
+  // incoming StyleRule. This mapping is needed because Inspector needs to
+  // interact with the CSSOM-wrappers (i.e. CSSRules) of the matched rules, but
+  // ElementRuleCollector's result is a list of StyleRules.
   template <class CSSRuleCollection>
   CSSRule* FindStyleRule(CSSRuleCollection*, StyleRule*);
   void AppendCSSOMWrapperForRule(CSSStyleSheet*, const RuleData*, wtf_size_t);
@@ -256,8 +271,6 @@ class CORE_EXPORT ElementRuleCollector {
   const ElementResolveContext& context_;
   StyleRecalcContext style_recalc_context_;
   const SelectorFilter& selector_filter_;
-  scoped_refptr<ComputedStyle>
-      style_;  // FIXME: This can be mutated during matching!
 
   StyleRequest pseudo_style_request_;
   SelectorChecker::Mode mode_;

@@ -395,13 +395,25 @@ TEST_F('CrElementsTreeTest', 'All', function() {
   mocha.run();
 });
 
-var CrElementsWebUIListenerMixinTest = class extends CrElementsBrowserTest {
+var CrElementsWebUiListenerMixinTest = class extends CrElementsBrowserTest {
   /** @override */
   get browsePreload() {
     return 'chrome://webui-test/test_loader.html?module=cr_elements/web_ui_listener_mixin_test.js';
   }
 };
 
-TEST_F('CrElementsWebUIListenerMixinTest', 'All', function() {
+TEST_F('CrElementsWebUiListenerMixinTest', 'All', function() {
+  mocha.run();
+});
+
+
+var CrElementsUrlListItemTest = class extends CrElementsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://webui-test/test_loader.html?module=cr_elements/cr_url_list_item_test.js';
+  }
+};
+
+TEST_F('CrElementsUrlListItemTest', 'All', function() {
   mocha.run();
 });

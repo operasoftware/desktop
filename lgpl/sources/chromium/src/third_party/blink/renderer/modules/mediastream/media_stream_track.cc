@@ -7,7 +7,6 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_stream_constraints.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/mediastream/media_constraints_impl.h"
-#include "third_party/blink/renderer/modules/mediastream/media_error_state.h"
 #include "third_party/blink/renderer/modules/mediastream/transferred_media_stream_track.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_client.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_request.h"
@@ -20,9 +19,12 @@ class GetOpenDeviceRequestCallbacks final : public UserMediaRequest::Callbacks {
  public:
   ~GetOpenDeviceRequestCallbacks() override = default;
 
-  void OnSuccess(const MediaStreamVector& streams) override {}
+  void OnSuccess(const MediaStreamVector& streams,
+                 CaptureController* capture_controller) override {}
   void OnError(ScriptWrappable* callback_this_value,
-               const V8MediaStreamError* error) override {}
+               const V8MediaStreamError* error,
+               CaptureController* capture_controller,
+               UserMediaRequestResult result) override {}
 };
 
 }  // namespace
@@ -82,7 +84,6 @@ MediaStreamTrack* MediaStreamTrack::FromTransferredState(
     return nullptr;
   }
 
-  MediaErrorState error_state;
   // TODO(1288839): Set media_type, options, callbacks, surface appropriately
   MediaConstraints audio = (data.kind == "audio")
                                ? media_constraints_impl::Create()
@@ -94,6 +95,7 @@ MediaStreamTrack* MediaStreamTrack::FromTransferredState(
       window, user_media_client, UserMediaRequestType::kDisplayMedia, audio,
       video, /*should_prefer_current_tab=*/false,
       /*auto_select_all_screens=*/false,
+      /*capture_controller=*/nullptr,
       MakeGarbageCollected<GetOpenDeviceRequestCallbacks>(),
       IdentifiableSurface());
   if (!request) {
@@ -101,8 +103,8 @@ MediaStreamTrack* MediaStreamTrack::FromTransferredState(
   }
 
   // TODO(1288839): Create a TransferredMediaStreamTrack implementing interfaces
-  // supporting BrowserCaptureMediaStreamTrack or FocusableMediaStreamTrack
-  // operations when needed (or support these behaviors in some other way).
+  // supporting BrowserCaptureMediaStreamTrack operations when needed (or
+  // support these behaviors in some other way).
   TransferredMediaStreamTrack* transferred_media_stream_track =
       MakeGarbageCollected<TransferredMediaStreamTrack>(
           ExecutionContext::From(script_state), data);

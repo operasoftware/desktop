@@ -6,8 +6,8 @@
 
 #include <memory>
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/location.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_param_associator.h"
@@ -22,6 +22,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/renderer/platform/scheduler/common/task_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_task_queue_controller.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
@@ -50,10 +51,9 @@ void IncrementCounter(int* counter) {
 std::unique_ptr<PageSchedulerImpl> CreatePageScheduler(
     PageScheduler::Delegate* page_scheduler_delegate,
     MainThreadSchedulerImpl* scheduler,
-    WebAgentGroupScheduler& agent_group_scheduler) {
+    AgentGroupScheduler& agent_group_scheduler) {
   std::unique_ptr<PageScheduler> page_scheduler =
-      agent_group_scheduler.AsAgentGroupScheduler().CreatePageScheduler(
-          page_scheduler_delegate);
+      agent_group_scheduler.CreatePageScheduler(page_scheduler_delegate);
   std::unique_ptr<PageSchedulerImpl> page_scheduler_impl(
       static_cast<PageSchedulerImpl*>(page_scheduler.release()));
   return page_scheduler_impl;
@@ -109,7 +109,10 @@ class PageSchedulerImplTest : public testing::Test {
     test_task_runner_->AdvanceMockTickClock(base::Milliseconds(5));
     scheduler_ = std::make_unique<MainThreadSchedulerImpl>(
         base::sequence_manager::SequenceManagerForTest::Create(
-            nullptr, test_task_runner_, test_task_runner_->GetMockTickClock()));
+            nullptr, test_task_runner_, test_task_runner_->GetMockTickClock(),
+            base::sequence_manager::SequenceManager::Settings::Builder()
+                .SetPrioritySettings(CreatePrioritySettings())
+                .Build()));
     agent_group_scheduler_ = scheduler_->CreateAgentGroupScheduler();
     page_scheduler_delegate_ = std::make_unique<MockPageSchedulerDelegate>();
     page_scheduler_ =
@@ -124,7 +127,7 @@ class PageSchedulerImplTest : public testing::Test {
   void TearDown() override {
     frame_scheduler_.reset();
     page_scheduler_.reset();
-    agent_group_scheduler_.reset();
+    agent_group_scheduler_ = nullptr;
     scheduler_->Shutdown();
     scheduler_.reset();
   }
@@ -257,7 +260,7 @@ class PageSchedulerImplTest : public testing::Test {
 
   scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner_;
   std::unique_ptr<MainThreadSchedulerImpl> scheduler_;
-  std::unique_ptr<WebAgentGroupScheduler> agent_group_scheduler_;
+  Persistent<AgentGroupScheduler> agent_group_scheduler_;
   std::unique_ptr<PageSchedulerImpl> page_scheduler_;
   std::unique_ptr<FrameSchedulerImpl> frame_scheduler_;
   std::unique_ptr<MockPageSchedulerDelegate> page_scheduler_delegate_;

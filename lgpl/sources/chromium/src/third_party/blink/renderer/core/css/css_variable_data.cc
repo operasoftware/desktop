@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/css/css_variable_data.h"
 
 #include "base/containers/span.h"
+#include "base/ranges/algorithm.h"
 #include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
@@ -34,8 +35,9 @@ static void UpdateTokens(const CSSParserTokenRange& range,
 }
 
 static bool IsFontUnitToken(CSSParserToken token) {
-  if (token.GetType() != kDimensionToken)
+  if (token.GetType() != kDimensionToken) {
     return false;
+  }
   switch (token.GetUnitType()) {
     case CSSPrimitiveValue::UnitType::kEms:
     case CSSPrimitiveValue::UnitType::kChs:
@@ -48,8 +50,19 @@ static bool IsFontUnitToken(CSSParserToken token) {
 }
 
 static bool IsRootFontUnitToken(CSSParserToken token) {
-  return token.GetType() == kDimensionToken &&
-         token.GetUnitType() == CSSPrimitiveValue::UnitType::kRems;
+  if (token.GetType() != kDimensionToken) {
+    return false;
+  }
+  switch (token.GetUnitType()) {
+    case CSSPrimitiveValue::UnitType::kRems:
+    case CSSPrimitiveValue::UnitType::kRexs:
+    case CSSPrimitiveValue::UnitType::kRchs:
+    case CSSPrimitiveValue::UnitType::kRics:
+    case CSSPrimitiveValue::UnitType::kRlhs:
+      return true;
+    default:
+      return false;
+  }
 }
 
 static bool IsLineHeightUnitToken(CSSParserToken token) {
@@ -73,15 +86,18 @@ String CSSVariableData::Serialize() const {
       serialized_text.Resize(serialized_text.length() - 1);
       DCHECK_NE(0u, num_tokens_);
       const CSSParserToken& last = TokenInternalPtr()[num_tokens_ - 1];
-      if (last.GetType() != kStringToken)
+      if (last.GetType() != kStringToken) {
         serialized_text.Append(kReplacementCharacter);
+      }
 
       // Certain token types implicitly include terminators when serialized.
       // https://drafts.csswg.org/cssom/#common-serializing-idioms
-      if (last.GetType() == kStringToken)
+      if (last.GetType() == kStringToken) {
         serialized_text.Append('"');
-      if (last.GetType() == kUrlToken)
+      }
+      if (last.GetType() == kUrlToken) {
         serialized_text.Append(')');
+      }
 
       return serialized_text.ReleaseString();
     }
@@ -92,8 +108,7 @@ String CSSVariableData::Serialize() const {
 }
 
 bool CSSVariableData::operator==(const CSSVariableData& other) const {
-  return std::equal(Tokens().begin(), Tokens().end(), other.Tokens().begin(),
-                    other.Tokens().end());
+  return base::ranges::equal(Tokens(), other.Tokens());
 }
 
 void CSSVariableData::ConsumeAndUpdateTokens(const CSSParserTokenRange& range) {
@@ -104,18 +119,20 @@ void CSSVariableData::ConsumeAndUpdateTokens(const CSSParserTokenRange& range) {
 
   while (!local_range.AtEnd()) {
     CSSParserToken token = local_range.Consume();
-    if (token.HasStringBacking())
+    if (token.HasStringBacking()) {
       string_builder.Append(token.Value());
+    }
     has_font_units_ |= IsFontUnitToken(token);
     has_root_font_units_ |= IsRootFontUnitToken(token);
     has_line_height_units_ |= IsLineHeightUnitToken(token);
     ++num_tokens_;
   }
   backing_string_ = string_builder.ToAtomicString();
-  if (backing_string_.Is8Bit())
+  if (backing_string_.Is8Bit()) {
     UpdateTokens<LChar>(range, backing_string_, TokenInternalPtr());
-  else
+  } else {
     UpdateTokens<UChar>(range, backing_string_, TokenInternalPtr());
+  }
 }
 
 #if EXPENSIVE_DCHECKS_ARE_ON()
@@ -134,8 +151,9 @@ bool IsSubspan(base::span<const CharacterType> inner,
 bool TokenValueIsBacked(const CSSParserToken& token,
                         const String& backing_string) {
   StringView value = token.Value();
-  if (value.Is8Bit() != backing_string.Is8Bit())
+  if (value.Is8Bit() != backing_string.Is8Bit()) {
     return false;
+  }
   return value.Is8Bit() ? IsSubspan(value.Span8(), backing_string.Span8())
                         : IsSubspan(value.Span16(), backing_string.Span16());
 }

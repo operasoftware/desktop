@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/css/rule_feature_set.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_rule_counter_style.h"
+#include "third_party/blink/renderer/core/css/style_rule_font_feature_values.h"
 #include "third_party/blink/renderer/core/css/style_rule_font_palette_values.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_stack.h"
@@ -115,7 +116,16 @@ class CORE_EXPORT RuleData {
   const CSSSelector& Selector() const {
     return rule_->SelectorAt(selector_index_);
   }
+  CSSSelector& MutableSelector() {
+    return rule_->MutableSelectorAt(selector_index_);
+  }
   unsigned SelectorIndex() const { return selector_index_; }
+  bool IsEntirelyCoveredByBucketing() const {
+    return is_entirely_covered_by_bucketing_;
+  }
+  void ComputeEntirelyCoveredByBucketing();
+  void ResetEntirelyCoveredByBucketing();
+  bool SelectorIsEasy() const { return is_easy_; }
 
   bool ContainsUncommonAttributeSelector() const {
     return contains_uncommon_attribute_selector_;
@@ -181,7 +191,9 @@ class CORE_EXPORT RuleData {
   unsigned link_match_type_ : 2;
   unsigned has_document_security_origin_ : 1;
   unsigned valid_property_filter_ : 3;
-  // 30 bits above
+  unsigned is_entirely_covered_by_bucketing_ : 1;
+  unsigned is_easy_ : 1;  // See EasySelectorChecker.
+  // 32 bits above
   union {
     // Used by RuleMap before compaction, to hold what bucket this RuleData
     // is to be sorted into. (If the RuleData lives in a RuleMap, the hashes
@@ -240,7 +252,23 @@ class RuleMap {
   DISALLOW_NEW();
 
  private:
-  struct Extent;
+  // A collection of rules that are in the same bucket. Before compaction,
+  // they are scattered around in the bucket vector; after compaction,
+  // each bucket will be contiguous.
+  struct Extent {
+    Extent() : bucket_number(0) {}
+    union {
+      // [0..num_buckets). Valid before compaction.
+      unsigned bucket_number;
+
+      // Into the backing vector. Valid after compaction.
+      unsigned start_index;
+    };
+
+    // How many rules are in this bucket. Will naturally not change
+    // by compaction.
+    wtf_size_t length = 0;
+  };
 
  public:
   void Add(const AtomicString& key, const RuleData& rule_data);
@@ -293,24 +321,6 @@ class RuleMap {
     return {backing.begin() + extent.start_index, extent.length};
   }
 
-  // A collection of rules that are in the same bucket. Before compaction,
-  // they are scattered around in the bucket vector; after compaction,
-  // each bucket will be contiguous.
-  struct Extent {
-    Extent() : bucket_number(0) {}
-    union {
-      // [0..num_buckets). Valid before compaction.
-      unsigned bucket_number;
-
-      // Into the backing vector. Valid after compaction.
-      unsigned start_index;
-    };
-
-    // How many rules are in this bucket. Will naturally not change
-    // by compaction.
-    wtf_size_t length = 0;
-  };
-
   HashMap<AtomicString, Extent> buckets;
 
   // Contains all the rules from all the buckets; after compaction,
@@ -354,7 +364,12 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
                          const MediaQueryEvaluator&,
                          AddRuleFlags = kRuleHasNoSpecialState,
                          CascadeLayer* = nullptr);
-  void AddStyleRule(StyleRule*, AddRuleFlags);
+  void AddStyleRule(StyleRule* style_rule,
+                    const MediaQueryEvaluator& medium,
+                    AddRuleFlags add_rule_flags,
+                    const ContainerQuery* container_query = nullptr,
+                    CascadeLayer* cascade_layer = nullptr,
+                    const StyleScope* style_scope = nullptr);
 
   const RuleFeatureSet& Features() const { return features_; }
 
@@ -393,6 +408,9 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   base::span<const RuleData> SpatialNavigationInterestPseudoClassRules() const {
     return spatial_navigation_interest_class_rules_;
   }
+  base::span<const RuleData> RootElementRules() const {
+    return root_element_rules_;
+  }
   base::span<const RuleData> UniversalRules() const { return universal_rules_; }
   base::span<const RuleData> ShadowHostRules() const {
     return shadow_host_rules_;
@@ -425,6 +443,10 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
       const {
     return font_palette_values_rules_;
   }
+  const HeapVector<Member<StyleRuleFontFeatureValues>>& FontFeatureValuesRules()
+      const {
+    return font_feature_values_rules_;
+  }
   const HeapVector<Member<StyleRulePositionFallback>>& PositionFallbackRules()
       const {
     return position_fallback_rules_;
@@ -442,8 +464,9 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   unsigned RuleCount() const { return rule_count_; }
 
   void CompactRulesIfNeeded() {
-    if (need_compaction_)
+    if (need_compaction_) {
       CompactRules();
+    }
   }
 
   bool HasSlottedRules() const {
@@ -496,6 +519,7 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
 
 #ifndef NDEBUG
   void Show() const;
+  const HeapVector<RuleData>& AllRulesForTest() const { return all_rules_; }
 #endif
 
   void Trace(Visitor*) const;
@@ -516,6 +540,7 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   void AddPropertyRule(StyleRuleProperty*);
   void AddCounterStyleRule(StyleRuleCounterStyle*);
   void AddFontPaletteValuesRule(StyleRuleFontPaletteValues*);
+  void AddFontFeatureValuesRule(StyleRuleFontFeatureValues*);
   void AddPositionFallbackRule(StyleRulePositionFallback*);
 
   bool MatchMediaForAddRules(const MediaQueryEvaluator& evaluator,
@@ -526,7 +551,7 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
                      const ContainerQuery*,
                      CascadeLayer*,
                      const StyleScope*);
-  bool FindBestRuleSetAndAdd(const CSSSelector&, const RuleData&);
+  void FindBestRuleSetAndAdd(CSSSelector&, const RuleData&);
   void AddRule(StyleRule*,
                unsigned selector_index,
                AddRuleFlags,
@@ -546,8 +571,9 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
 #endif
 
   CascadeLayer* EnsureImplicitOuterLayer() {
-    if (!implicit_outer_layer_)
+    if (!implicit_outer_layer_) {
       implicit_outer_layer_ = MakeGarbageCollected<CascadeLayer>();
+    }
     return implicit_outer_layer_;
   }
 
@@ -596,10 +622,12 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   HeapVector<RuleData> slotted_pseudo_element_rules_;
   HeapVector<RuleData> visited_dependent_rules_;
   HeapVector<RuleData> selector_fragment_anchor_rules_;
+  HeapVector<RuleData> root_element_rules_;
   RuleFeatureSet features_;
   HeapVector<Member<StyleRulePage>> page_rules_;
   HeapVector<Member<StyleRuleFontFace>> font_face_rules_;
   HeapVector<Member<StyleRuleFontPaletteValues>> font_palette_values_rules_;
+  HeapVector<Member<StyleRuleFontFeatureValues>> font_feature_values_rules_;
   HeapVector<Member<StyleRuleKeyframes>> keyframes_rules_;
   HeapVector<Member<StyleRuleProperty>> property_rules_;
   HeapVector<Member<StyleRuleCounterStyle>> counter_style_rules_;

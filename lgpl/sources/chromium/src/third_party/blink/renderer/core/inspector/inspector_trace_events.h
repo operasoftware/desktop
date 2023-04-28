@@ -298,6 +298,7 @@ extern const char kSvgChanged[];
 extern const char kScrollbarChanged[];
 extern const char kDisplayLock[];
 extern const char kDevtools[];
+extern const char kAnchorPositioning[];
 }  // namespace layout_invalidation_reason
 
 // LayoutInvalidationReasonForTracing is strictly for tracing. Blink logic must
@@ -458,6 +459,10 @@ void Data(perfetto::TracedValue context,
 }  // namespace inspector_paint_image_event
 
 namespace inspector_commit_load_event {
+void Data(perfetto::TracedValue context, LocalFrame*);
+}
+
+namespace inspector_layerize_event {
 void Data(perfetto::TracedValue context, LocalFrame*);
 }
 

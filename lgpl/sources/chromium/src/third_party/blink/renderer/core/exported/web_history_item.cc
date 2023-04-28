@@ -179,10 +179,8 @@ PageState WebHistoryItem::ToPageState() {
   state.top.item_sequence_number = ItemSequenceNumber();
   state.top.document_sequence_number = DocumentSequenceNumber();
 
-  Vector<String> document_state;
-  private_->GetDocumentState(&document_state);
   state.top.document_state =
-      ToOptionalString16Vector(document_state,
+      ToOptionalString16Vector(private_->GetDocumentState(),
                                std::move(state.top.document_state))
           .ReleaseVector();
 

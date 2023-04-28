@@ -27,7 +27,6 @@
 #include "third_party/blink/renderer/core/paint/filter_effect_builder.h"
 
 #include <algorithm>
-#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_container.h"
 #include "third_party/blink/renderer/core/style/filter_operations.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
@@ -52,8 +51,11 @@
 #include "ui/gfx/geometry/point_conversions.h"
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include <utility>
+#include <vector>
+
+#include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/style/gpu_shader_resource.h"
-#include "third_party/blink/renderer/platform/graphics/gpu_shader.h"
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
@@ -133,13 +135,24 @@ FilterEffectBuilder::FilterEffectBuilder(const gfx::RectF& reference_box,
                                          float zoom,
                                          const cc::PaintFlags* fill_flags,
                                          const cc::PaintFlags* stroke_flags,
-                                         SkTileMode blur_tile_mode)
+                                         SkTileMode blur_tile_mode
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+                                         ,
+                                         SkColor4f root_view_color
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+                                         )
     : reference_box_(reference_box),
       zoom_(zoom),
       shorthand_scale_(1),
       fill_flags_(fill_flags),
       stroke_flags_(stroke_flags),
-      blur_tile_mode_(blur_tile_mode) {}
+      blur_tile_mode_(blur_tile_mode)
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+      ,
+      backdrop_color_(root_view_color)
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+{
+}
 
 FilterEffect* FilterEffectBuilder::BuildFilterEffect(
     const FilterOperations& operations,
@@ -488,10 +501,21 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
         auto* resource = shader_operation.Resource();
         if (resource && resource->IsLoaded()) {
           auto* shader = resource->GetGpuShader();
-          filters.AppendGpuShaderFilter(shader->source(),
-                                        reference_box_.size(),
-                                        shader_operation.AnimationFrame(),
-                                        shader->NeedsMouseInput());
+          std::vector<float> args;
+          args.resize(shader_operation.Args()->length());
+          for (wtf_size_t i = 0; i < shader_operation.Args()->length(); i++) {
+            const auto* arg_value =
+                DynamicTo<CSSPrimitiveValue>(shader_operation.Args()->Item(i));
+            DCHECK(arg_value && arg_value->IsNumber());
+            args[i] = arg_value->GetDoubleValue();
+          }
+
+          filters.AppendGpuShaderFilter(
+              *shader, std::move(args),
+              SkSize::Make(reference_box_.size().width(),
+                           reference_box_.size().height()),
+              shader_operation.AnimationFrame(), SkPoint::Make(0, 0),
+              backdrop_color_);
         }
 
         break;
@@ -529,16 +553,11 @@ Filter* FilterEffectBuilder::BuildReferenceFilter(
     return nullptr;
   if (auto* resource_container = resource->ResourceContainerNoCycleCheck())
     resource_container->ClearInvalidationMask();
+
   gfx::RectF filter_region =
       SVGLengthContext::ResolveRectangle<SVGFilterElement>(
           filter_element, filter_element->filterUnits()->CurrentEnumValue(),
           reference_box_);
-  // TODO(fs): We rely on the presence of a node map here to opt-in to the
-  // check for an empty filter region. The reason for this is that we lack a
-  // viewport to resolve against for HTML content. This is crbug.com/512453.
-  if (node_map && filter_region.IsEmpty())
-    return nullptr;
-
   bool primitive_bounding_box_mode =
       filter_element->primitiveUnits()->CurrentEnumValue() ==
       SVGUnitTypes::kSvgUnitTypeObjectboundingbox;
@@ -546,6 +565,15 @@ Filter* FilterEffectBuilder::BuildReferenceFilter(
       primitive_bounding_box_mode ? Filter::kBoundingBox : Filter::kUserSpace;
   auto* result = MakeGarbageCollected<Filter>(reference_box_, filter_region,
                                               zoom_, unit_scaling);
+  // TODO(fs): We rely on the presence of a node map here to opt-in to the
+  // check for an empty filter region. The reason for this is that we lack a
+  // viewport to resolve against for HTML content. This is crbug.com/512453.
+  // If the filter has an empty region, then return a Filter without any
+  // primitives since the behavior in these two cases (no primitives, empty
+  // region) should match.
+  if (node_map && filter_region.IsEmpty())
+    return result;
+
   if (!previous_effect)
     previous_effect = result->GetSourceGraphic();
   SVGFilterBuilder builder(previous_effect, node_map, fill_flags_,

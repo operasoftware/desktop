@@ -32,6 +32,11 @@
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
+#include "base/features/feature_utils.h"
+#include "base/features/submodule_features.h"
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
+
 using DecoderDetails = blink::AudioDecoderBroker::DecoderDetails;
 
 namespace WTF {
@@ -170,6 +175,11 @@ class MediaAudioTaskWrapper {
 #if BUILDFLAG(ENABLE_MOJO_AUDIO_DECODER)
     external_decoder_factory = std::make_unique<media::MojoDecoderFactory>(
         media_interface_factory_.get());
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
+    if (!base::IsFeatureEnabled(base::kFeaturePlatformAacDecoderInGpu)) {
+      external_decoder_factory.reset();
+    }
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
 #endif
     decoder_factory_ = std::make_unique<media::DefaultDecoderFactory>(
         std::move(external_decoder_factory));
@@ -264,7 +274,14 @@ AudioDecoderBroker::AudioDecoderBroker(media::MediaLog* media_log,
                                        ExecutionContext& execution_context)
     // Use a worker task runner to avoid scheduling decoder
     // work on the main thread.
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
+    // The Windows platform decoder may need to load a system library, hence
+    // MayBlock().
+    : media_task_runner_(
+          worker_pool::CreateSequencedTaskRunner({base::MayBlock()})) {
+#else
     : media_task_runner_(worker_pool::CreateSequencedTaskRunner({})) {
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
   DVLOG(2) << __func__;
   media_tasks_ = std::make_unique<MediaAudioTaskWrapper>(
       weak_factory_.GetWeakPtr(), execution_context, media_log->Clone(),

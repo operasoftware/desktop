@@ -17,11 +17,16 @@
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 #include <string>
+#include <vector>
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 
 class Color;
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+class GpuShader;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 // An ordered list of filter operations.
 class PLATFORM_EXPORT CompositorFilterOperations {
@@ -49,10 +54,12 @@ class PLATFORM_EXPORT CompositorFilterOperations {
 
   void AppendReferenceFilter(sk_sp<PaintFilter>);
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
-  void AppendGpuShaderFilter(std::string source,
-                             const gfx::SizeF& filter_size,
-                             float frame_id,
-                             bool expects_input);
+  void AppendGpuShaderFilter(const GpuShader& shader,
+                             std::vector<float> args,
+                             const SkSize& content_size,
+                             SkScalar frame_id,
+                             const SkPoint& mouse_position,
+                             const SkColor4f& root_view_color);
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   void Clear();

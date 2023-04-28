@@ -152,7 +152,7 @@ bool IsBreakableAtStartOfResumedContainer(const NGConstraintSpace& space,
                                           const NGBoxFragmentBuilder& builder,
                                           bool is_first_for_node) {
   return space.MinBreakAppeal() != kBreakAppealLastResort &&
-         IsResumingLayout(builder.PreviousBreakToken()) && is_first_for_node;
+         IsBreakInside(builder.PreviousBreakToken()) && is_first_for_node;
 }
 
 NGBreakAppeal CalculateBreakAppealBefore(const NGConstraintSpace& space,
@@ -227,7 +227,7 @@ NGBreakAppeal CalculateBreakAppealInside(
     consider_break_inside_avoidance = true;
   } else {
     appeal = layout_result.BreakAppeal();
-    consider_break_inside_avoidance = IsResumingLayout(break_token);
+    consider_break_inside_avoidance = IsBreakInside(break_token);
   }
 
   // We don't let break-inside:avoid affect the child's stored break appeal, but
@@ -242,6 +242,26 @@ NGBreakAppeal CalculateBreakAppealInside(
       IsAvoidBreakValue(space, physical_fragment.Style().BreakInside()))
     appeal = kBreakAppealViolatingBreakAvoid;
   return appeal;
+}
+
+LogicalSize FragmentainerLogicalCapacity(
+    const NGPhysicalBoxFragment& fragmentainer) {
+  DCHECK(fragmentainer.IsFragmentainerBox());
+  LogicalSize logical_size =
+      WritingModeConverter(fragmentainer.Style().GetWritingDirection())
+          .ToLogical(fragmentainer.Size());
+  // TODO(layout-dev): This should really be checking if there are any
+  // descendants that take up block space rather than if it has overflow. In
+  // other words, we would still want to clamp a zero height fragmentainer if
+  // it had content with zero inline size and non-zero block size. This would
+  // likely require us to store an extra flag on NGPhysicalBoxFragment.
+  if (fragmentainer.HasLayoutOverflow()) {
+    // Don't clamp the fragmentainer to a block size of 1 if it is truly a
+    // zero-height column.
+    logical_size.block_size =
+        ClampedToValidFragmentainerCapacity(logical_size.block_size);
+  }
+  return logical_size;
 }
 
 LogicalOffset GetFragmentainerProgression(const NGBoxFragmentBuilder& builder,
@@ -270,8 +290,10 @@ void SetupSpaceBuilderForFragmentation(const NGConstraintSpace& parent_space,
   // fragmentation type (multicol vs. printing). We still need to perform block
   // fragmentation inside inline nodes, though: While the line box itself is
   // monolithic, there may be floats inside, which are fragmentable.
-  if (child.IsMonolithic() && !child.IsInline())
+  if (child.IsMonolithic() && !child.IsInline()) {
+    builder->SetShouldPropagateChildBreakValues(false);
     return;
+  }
 
   builder->SetFragmentainerBlockSize(parent_space.FragmentainerBlockSize());
   LayoutUnit fragmentainer_offset =
@@ -355,7 +377,8 @@ void SetupFragmentBuilderForFragmentation(
     // since captions are not part of the "table box", and any specified
     // block-size pertains to the table box, while the captions are on the
     // outside of the "table box", but still part of the fragment.
-    if (!node.IsTable()) {
+    if (!node.IsTable() &&
+        builder->InitialBorderBoxSize().inline_size != kIndefiniteSize) {
       // Pass an "infinite" intrinsic size to see how the block-size is
       // constrained. If it doesn't affect the block size, it means that we can
       // tell before layout how much more space this node needs.
@@ -364,17 +387,24 @@ void SetupFragmentBuilderForFragmentation(
           builder->InitialBorderBoxSize().inline_size);
       DCHECK(space.HasKnownFragmentainerBlockSize());
 
-      LayoutUnit space_left = FragmentainerSpaceLeft(space);
-      LayoutUnit previously_consumed_block_size;
-      if (previous_break_token) {
-        previously_consumed_block_size =
-            previous_break_token->ConsumedBlockSize();
-      }
+      // If max_block_size is "infinite", we can't tell for sure that it's going
+      // to fit. The calculation below will normally detect that, but it's going
+      // to be incorrect when we have reached the point where space left
+      // incorrectly seems to be enough to contain the remaining fragment when
+      // subtracting previously consumed block-size from its max size.
+      if (max_block_size != LayoutUnit::Max()) {
+        LayoutUnit space_left = FragmentainerSpaceLeft(space);
+        LayoutUnit previously_consumed_block_size;
+        if (previous_break_token) {
+          previously_consumed_block_size =
+              previous_break_token->ConsumedBlockSize();
+        }
 
-      if (max_block_size - previously_consumed_block_size <= space_left) {
-        builder->SetIsKnownToFitInFragmentainer(true);
-        if (builder->MustStayInCurrentFragmentainer())
-          requires_content_before_breaking = true;
+        if (max_block_size - previously_consumed_block_size <= space_left) {
+          builder->SetIsKnownToFitInFragmentainer(true);
+          if (builder->MustStayInCurrentFragmentainer())
+            requires_content_before_breaking = true;
+        }
       }
     }
     builder->SetRequiresContentBeforeBreaking(requires_content_before_breaking);
@@ -390,6 +420,10 @@ void SetupFragmentBuilderForFragmentation(
   }
 
   if (space.IsPaginated()) {
+    // As long as the page name inside doesn't change, we can stay on the same
+    // page as the preceding content.
+    builder->SetPreviousPageName(space.PageName());
+
     if (const AtomicString page_name = node.PageName())
       builder->SetStartPageNameIfNeeded(page_name);
   }
@@ -458,6 +492,19 @@ NGBreakStatus FinishFragmentation(NGBlockNode node,
     final_block_size =
         std::min(final_block_size, desired_intrinsic_block_size) -
         trailing_border_padding;
+
+    // TODO(crbug.com/1381327): We shouldn't get negative sizes here, but this
+    // happens if we have incorrectly added trailing border/padding of a
+    // block-size-restricted container (of a spanner) in a previous fragment, so
+    // that we're past the block-end border edge, in which case
+    // desired_block_size will be zero (because of an overly large
+    // previously_consumed_block_size) - so that subtracting
+    // trailing_border_padding here might result in a negative value. Note that
+    // the code block right below has some subtractable_border_padding logic
+    // that could have saved us here, but it still wouldn't be correct. We
+    // should never add block-end border/padding if we're interrupted by as
+    // spanner. So just clamp to zero, to avoid DCHECK failures.
+    final_block_size = final_block_size.ClampNegativeToZero();
   } else if (space_left != kIndefiniteSize && desired_block_size > space_left &&
              space.HasBlockFragmentation()) {
     // We're taller than what we have room for. We don't want to use more than
@@ -471,13 +518,18 @@ NGBreakStatus FinishFragmentation(NGBlockNode node,
     // different pages, lest it be clipped and lost.
     //
     // There is a last-resort breakpoint before trailing border and padding, so
-    // first check if we can break there and still make progress.
+    // first check if we can break there and still make progress. Don't allow a
+    // break here for table cells, though, as that might disturb the row
+    // stretching machinery, causing an infinite loop. We'd add the stretch
+    // amount to the block-size to the content box of the table cell, even
+    // though we're past it.
     DCHECK_GE(desired_intrinsic_block_size, trailing_border_padding);
     DCHECK_GE(desired_block_size, trailing_border_padding);
 
     LayoutUnit subtractable_border_padding;
-    if (desired_block_size > trailing_border_padding)
+    if (desired_block_size > trailing_border_padding && !node.IsTableCell()) {
       subtractable_border_padding = trailing_border_padding;
+    }
 
     LayoutUnit modified_intrinsic_block_size = std::max(
         space_left, desired_intrinsic_block_size - subtractable_border_padding);
@@ -513,7 +565,7 @@ NGBreakStatus FinishFragmentation(NGBlockNode node,
 
   bool was_broken_by_child = builder->HasInflowChildBreakInside();
   if (!was_broken_by_child && space.IsNewFormattingContext())
-    was_broken_by_child = builder->HasFloatBreakInside();
+    was_broken_by_child = builder->ExclusionSpace().HasFragmentainerBreak();
 
   if (space_left == kIndefiniteSize) {
     // We don't know how space is available (initial column balancing pass), so
@@ -523,12 +575,12 @@ NGBreakStatus FinishFragmentation(NGBlockNode node,
     return NGBreakStatus::kContinue;
   }
 
-  if (builder->HasChildBreakInside()) {
-    // We broke before or inside one of our children. Even if we fit within the
-    // remaining space, and even if the child involved in the break were to be
-    // in a parallel flow, we still need to prepare a break token for this node,
-    // so that we can resume layout of its broken or unstarted children in the
-    // next fragmentainer.
+  if (builder->ShouldBreakInside()) {
+    // We need to break before or inside one of our children (or have already
+    // done so). Even if we fit within the remaining space, and even if the
+    // child involved in the break were to be in a parallel flow, we still need
+    // to prepare a break token for this node, so that we can resume layout of
+    // its broken or unstarted children in the next fragmentainer.
     //
     // If we're at the end of the node, we need to mark the outgoing break token
     // as such. This is a way for the parent algorithm to determine whether we
@@ -555,8 +607,7 @@ NGBreakStatus FinishFragmentation(NGBlockNode node,
       // at the end. If block-size is unconstrained (or at least allowed to grow
       // a bit more), we're only at the end if no in-flow content inside broke.
       if (!was_broken_by_child || builder->IsKnownToFitInFragmentainer()) {
-        if (node.HasNonVisibleBlockOverflow() &&
-            builder->HasChildBreakInside()) {
+        if (node.HasNonVisibleBlockOverflow() && builder->ShouldBreakInside()) {
           // We have reached the end of a fragmentable node that clips overflow
           // in the block direction. If something broke inside at this point, we
           // need to relayout without fragmentation, so that we don't generate
@@ -920,7 +971,7 @@ bool MovePastBreakpoint(const NGConstraintSpace& space,
     // fragments with nothing useful inside, if it's to be resumed in the next
     // fragmentainer.
     must_break_before = !layout_result.ColumnSpannerPath() &&
-                        IsResumingLayout(break_token) &&
+                        IsBreakInside(break_token) &&
                         !break_token->IsAtBlockEnd();
   }
   if (must_break_before) {
@@ -928,9 +979,10 @@ bool MovePastBreakpoint(const NGConstraintSpace& space,
     return false;
   }
 
+  bool move_past = false;
   NGBreakAppeal appeal_inside =
       CalculateBreakAppealInside(space, layout_result);
-  if (IsResumingLayout(break_token) || appeal_inside < kBreakAppealPerfect) {
+  if (IsBreakInside(break_token) || appeal_inside < kBreakAppealPerfect) {
     // The block child broke inside, either in this fragmentation context, or in
     // an inner one. We now need to decide whether to keep that break, or if it
     // would be better to break before it. Allow breaking inside if it has the
@@ -939,20 +991,19 @@ bool MovePastBreakpoint(const NGConstraintSpace& space,
     if (refuse_break_before)
       return true;
     if (appeal_inside >= appeal_before) {
-      if (flex_column_break_info &&
-          (!flex_column_break_info->early_break ||
-           appeal_inside >=
-               flex_column_break_info->early_break->BreakAppeal())) {
-        return true;
+      if (flex_column_break_info) {
+        if (!flex_column_break_info->early_break ||
+            appeal_inside >= flex_column_break_info->early_break->BreakAppeal())
+          move_past = true;
       } else if (!builder || !builder->HasEarlyBreak() ||
                  appeal_inside >= builder->EarlyBreak().BreakAppeal()) {
-        return true;
+        move_past = true;
       }
     }
   } else {
     LayoutUnit block_size =
         BlockSizeForFragmentation(layout_result, space.GetWritingDirection());
-    bool move_past = refuse_break_before;
+    move_past = refuse_break_before;
     if (!move_past) {
       if (block_size <= space_left) {
         // The fragment fits! We can move past.
@@ -967,19 +1018,6 @@ bool MovePastBreakpoint(const NGConstraintSpace& space,
     if (move_past) {
       // The child either fits, or we are not allowed to break. So we can move
       // past this breakpoint.
-      if (child.IsBlock() && builder && !is_row_item) {
-        // We're tentatively not going to break before or inside this child, but
-        // we'll check the appeal of breaking there anyway. It may be the best
-        // breakpoint we'll ever find. (Note that we only do this for block
-        // children, since, when it comes to inline layout, we first need to lay
-        // out all the line boxes, so that we know what do to in order to honor
-        // orphans and widows, if at all possible. We also only do this for
-        // non-row items since items in a row will be parallel to one another.)
-        UpdateEarlyBreakAtBlockChild(space, To<NGBlockNode>(child),
-                                     layout_result, appeal_before, builder,
-                                     flex_column_break_info);
-      }
-
       if (block_size > space_left && builder) {
         // We're moving past the breakpoint even if the child doesn't fit. This
         // may happen with monolithic content at the beginning of the
@@ -987,9 +1025,24 @@ bool MovePastBreakpoint(const NGConstraintSpace& space,
         PropagateSpaceShortage(space, &layout_result,
                                fragmentainer_block_offset, builder);
       }
-
-      return true;
     }
+  }
+
+  if (move_past) {
+    if (child.IsBlock() && builder && !is_row_item) {
+      // We're tentatively not going to break before this child, but we'll check
+      // the appeal of breaking there anyway. It may be the best breakpoint
+      // we'll ever find. (Note that we only do this for block children, since,
+      // when it comes to inline layout, we first need to lay out all the line
+      // boxes, so that we know what do to in order to honor orphans and widows,
+      // if at all possible. We also only do this for non-row items since items
+      // in a row will be parallel to one another.)
+      UpdateEarlyBreakAtBlockChild(space, To<NGBlockNode>(child), layout_result,
+                                   appeal_before, builder,
+                                   flex_column_break_info);
+    }
+
+    return true;
   }
 
   // We don't want to break inside, so we should attempt to break before.
@@ -1003,13 +1056,18 @@ void UpdateEarlyBreakAtBlockChild(
     NGBreakAppeal appeal_before,
     NGBoxFragmentBuilder* builder,
     NGFlexColumnBreakInfo* flex_column_break_info) {
-  // If the child already broke, it's a little too late to look for breakpoints.
-  DCHECK(!IsResumingLayout(
-      To<NGBlockBreakToken>(layout_result.PhysicalFragment().BreakToken())));
-
+  // We may need to create early-breaks even if we have broken inside the child,
+  // in case it establishes a parallel flow, in which case a break inside won't
+  // help honor any break avoidance requests that come after this child. But
+  // breaking *before* the child might help.
+  const auto* break_token =
+      To<NGBlockBreakToken>(layout_result.PhysicalFragment().BreakToken());
   // See if there's a good breakpoint inside the child.
   NGBreakAppeal appeal_inside = kBreakAppealLastResort;
   if (const NGEarlyBreak* breakpoint = layout_result.GetEarlyBreak()) {
+    // If the child broke inside, it shouldn't have any early-break.
+    DCHECK(!IsBreakInside(break_token));
+
     appeal_inside = CalculateBreakAppealInside(space, layout_result,
                                                breakpoint->BreakAppeal());
     if (flex_column_break_info) {
@@ -1279,6 +1337,17 @@ PhysicalOffset OffsetInStitchedFragments(
 #endif
     }
     stitched_block_size += NGFragment(writing_direction, walker).BlockSize();
+
+    // Repeated content isn't stitched, so just stop when we have processed one
+    // fragment.
+    if (walker.BreakToken() && walker.BreakToken()->IsRepeated()) {
+#if DCHECK_IS_ON()
+      // We haven't necessarily found |fragment|, but it doesn't matter in this
+      // case. Just silence the DHCECK below.
+      found_self = true;
+#endif
+      break;
+    }
   }
 #if DCHECK_IS_ON()
   DCHECK(found_self);

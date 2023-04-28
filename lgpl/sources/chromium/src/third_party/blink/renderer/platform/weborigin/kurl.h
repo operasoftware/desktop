@@ -72,8 +72,6 @@ class GURL;
 
 namespace blink {
 
-struct KURLHash;
-
 class PLATFORM_EXPORT KURL {
   USING_FAST_MALLOC(KURL);
 
@@ -174,8 +172,9 @@ class PLATFORM_EXPORT KURL {
   bool ProtocolIsJavaScript() const;
   bool ProtocolIsInHTTPFamily() const;
   bool IsLocalFile() const;
-  bool IsAboutBlankURL() const;   // Is exactly about:blank.
-  bool IsAboutSrcdocURL() const;  // Is exactly about:srcdoc.
+  bool IsAboutBlankURL() const;   // Is about:blank, ignoring query/ref strings.
+  bool IsAboutSrcdocURL() const;  // Is about:srcdoc, ignoring query/ref
+                                  // strings..
 
   bool SetProtocol(const String&);
   void SetHost(const String&);
@@ -230,6 +229,8 @@ class PLATFORM_EXPORT KURL {
 
   void WriteIntoTrace(perfetto::TracedValue context) const;
 
+  bool HasIDNA2008DeviationCharacter() const;
+
  private:
   friend struct WTF::HashTraits<blink::KURL>;
 
@@ -254,6 +255,11 @@ class PLATFORM_EXPORT KURL {
 
   bool is_valid_;
   bool protocol_is_in_http_family_;
+  // Set to true if any part of the URL string contains an IDNA 2008 deviation
+  // character. Only used for logging. The hostname is decoded to IDN and
+  // checked for deviation characters again before logging.
+  // TODO(crbug.com/1396475): Remove once Non-Transitional mode is shipped.
+  bool has_idna2008_deviation_character_;
 
   // Keep a separate string for the protocol to avoid copious copies for
   // protocol().
@@ -312,11 +318,9 @@ PLATFORM_EXPORT String EncodeWithURLEscapeSequences(const String&);
 
 namespace WTF {
 
-// KURLHash is the default hash for String
+// Defined in kurl_hash.h.
 template <>
-struct DefaultHash<blink::KURL> {
-  typedef blink::KURLHash Hash;
-};
+struct HashTraits<blink::KURL>;
 
 template <>
 struct CrossThreadCopier<blink::KURL>

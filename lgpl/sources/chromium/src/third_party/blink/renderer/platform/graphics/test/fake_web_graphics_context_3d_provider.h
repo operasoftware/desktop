@@ -42,7 +42,8 @@ class FakeWebGraphicsContext3DProvider : public WebGraphicsContext3DProvider {
       // created raster interface. Unit tests that want to use something other
       // than RasterImplementationGLES should pas a raster_context_provider.
       raster_interface_ =
-          std::make_unique<gpu::raster::RasterImplementationGLES>(gl_, nullptr);
+          std::make_unique<gpu::raster::RasterImplementationGLES>(
+              gl_, nullptr, capabilities_);
     }
 
     webgpu_interface_ = std::make_unique<gpu::webgpu::WebGPUInterfaceStub>();
@@ -86,8 +87,9 @@ class FakeWebGraphicsContext3DProvider : public WebGraphicsContext3DProvider {
   gpu::webgpu::WebGPUInterface* WebGPUInterface() override {
     return webgpu_interface_.get();
   }
+  gpu::ContextSupport* ContextSupport() override { return nullptr; }
 
-  bool BindToCurrentThread() override { return false; }
+  bool BindToCurrentSequence() override { return false; }
   void SetLostContextCallback(base::RepeatingClosure) override {}
   void SetErrorMessageCallback(
       base::RepeatingCallback<void(const char*, int32_t id)>) override {}

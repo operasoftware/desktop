@@ -124,8 +124,7 @@ inline SkPoint FloatPointToSkPoint(const gfx::PointF& point) {
 }
 
 SkMatrix PLATFORM_EXPORT AffineTransformToSkMatrix(const AffineTransform&);
-SkMatrix PLATFORM_EXPORT
-TransformationMatrixToSkMatrix(const TransformationMatrix&);
+SkM44 PLATFORM_EXPORT AffineTransformToSkM44(const AffineTransform&);
 
 bool NearlyIntegral(float value);
 

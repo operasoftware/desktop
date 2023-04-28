@@ -164,8 +164,7 @@ class CORE_EXPORT PerformanceMonitor final
   using ClientThresholds = HeapHashMap<WeakMember<Client>, base::TimeDelta>;
   HeapHashMap<Violation,
               Member<ClientThresholds>,
-              typename DefaultHash<size_t>::Hash,
-              WTF::UnsignedWithZeroKeyHashTraits<size_t>>
+              IntWithZeroKeyHashTraits<size_t>>
       subscriptions_;
 };
 

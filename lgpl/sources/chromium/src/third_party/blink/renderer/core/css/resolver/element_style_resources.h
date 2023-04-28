@@ -33,9 +33,8 @@
 namespace blink {
 
 class CSSValue;
-class ComputedStyle;
+class ComputedStyleBuilder;
 class Element;
-class PseudoElement;
 class SVGResource;
 class StyleImage;
 
@@ -72,9 +71,7 @@ class ElementStyleResources {
   STACK_ALLOCATED();
 
  public:
-  ElementStyleResources(Element&,
-                        float device_scale_factor,
-                        PseudoElement* pseudo_element);
+  ElementStyleResources(Element&, float device_scale_factor);
   ElementStyleResources(const ElementStyleResources&) = delete;
   ElementStyleResources& operator=(const ElementStyleResources&) = delete;
 
@@ -83,11 +80,11 @@ class ElementStyleResources {
   SVGResource* GetSVGResourceFromValue(CSSPropertyID,
                                        const cssvalue::CSSURIValue&);
 
+  void LoadPendingResources(ComputedStyleBuilder&);
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   GpuShaderResource* GetGpuShaderResourceFromValue(CSSPropertyID,
                                                    const CSSShaderValue&);
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
-  void LoadPendingResources(ComputedStyle&);
 
   void UpdateLengthConversionData(const CSSToLengthConversionData*);
 
@@ -95,10 +92,10 @@ class ElementStyleResources {
   bool IsPending(const CSSValue&) const;
   StyleImage* CachedStyleImage(const CSSValue&) const;
 
-  void LoadPendingSVGResources(ComputedStyle&);
-  void LoadPendingImages(ComputedStyle&);
+  void LoadPendingSVGResources(ComputedStyleBuilder&);
+  void LoadPendingImages(ComputedStyleBuilder&);
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
-  void LoadPendingGpuShaderResources(ComputedStyle&);
+  void LoadPendingGpuShaderResources(ComputedStyleBuilder&);
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   Element& element_;
@@ -108,7 +105,6 @@ class ElementStyleResources {
   HashSet<CSSPropertyID> pending_gpu_shader_resource_properties_;
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   float device_scale_factor_;
-  PseudoElement* pseudo_element_;
   PreCachedContainerSizes pre_cached_container_sizes_;
 };
 

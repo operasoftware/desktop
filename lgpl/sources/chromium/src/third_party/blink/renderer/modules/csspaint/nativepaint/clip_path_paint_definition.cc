@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/cssom/paint_worklet_deferred_image.h"
 #include "third_party/blink/renderer/core/css/cssom/paint_worklet_input.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -27,6 +28,9 @@ namespace blink {
 
 namespace {
 
+InterpolationValue CreateInterpolationValue(const BasicShape& basic_shape,
+                                            float zoom);
+
 // This class includes information that is required by the compositor thread
 // when painting clip path.
 class ClipPathPaintWorkletInput : public PaintWorkletInput {
@@ -38,16 +42,18 @@ class ClipPathPaintWorkletInput : public PaintWorkletInput {
       float zoom,
       const Vector<scoped_refptr<BasicShape>>& animated_shapes,
       const Vector<double>& offsets,
+      Vector<std::unique_ptr<gfx::TimingFunction>> timing_functions,
       const absl::optional<double>& progress,
       cc::PaintWorkletInput::PropertyKeys property_keys)
       : PaintWorkletInput(clip_area_size, worklet_id, std::move(property_keys)),
         zoom_(zoom),
         offsets_(offsets),
+        timing_functions_(std::move(timing_functions)),
         progress_(progress),
         reference_box_(reference_box) {
     for (const auto& basic_shape : animated_shapes) {
       InterpolationValue interpolation_value =
-          CreateInterpolationValue(*basic_shape.get());
+          CreateInterpolationValue(*basic_shape.get(), zoom);
       DCHECK(interpolation_value);
       basic_shape_types_.push_back(basic_shape->GetType());
       interpolation_values_.push_back(std::move(interpolation_value));
@@ -60,6 +66,9 @@ class ClipPathPaintWorkletInput : public PaintWorkletInput {
     return interpolation_values_;
   }
   const Vector<double>& Offsets() const { return offsets_; }
+  double AdjustProgress(int keyframe, double progress) const {
+    return timing_functions_[keyframe]->GetValue(progress);
+  }
   const absl::optional<double>& MainThreadProgress() const { return progress_; }
   const Vector<BasicShape::ShapeType>& BasicShapeTypes() const {
     return basic_shape_types_;
@@ -74,22 +83,29 @@ class ClipPathPaintWorkletInput : public PaintWorkletInput {
   gfx::RectF GetReferenceBox() const { return reference_box_; }
 
  private:
-  InterpolationValue CreateInterpolationValue(const BasicShape& basic_shape) {
-    if (basic_shape.GetType() == BasicShape::kStylePathType) {
-      return PathInterpolationFunctions::ConvertValue(
-          To<StylePath>(&basic_shape),
-          PathInterpolationFunctions::kForceAbsolute);
-    }
-    return basic_shape_interpolation_functions::MaybeConvertBasicShape(
-        &basic_shape, zoom_);
-  }
   float zoom_;
   Vector<BasicShape::ShapeType> basic_shape_types_;
   Vector<InterpolationValue> interpolation_values_;
   Vector<double> offsets_;
+  // TODO(crbug.com/1374390): Refactor composited animations so that
+  // custom timing functions work for bgcolor animations as well
+  // animations. This class should be refactored so that the necessary
+  // properties exist in both this and Background Color paint worklet input
+  Vector<std::unique_ptr<gfx::TimingFunction>> timing_functions_;
   absl::optional<double> progress_;
   gfx::RectF reference_box_;
 };
+
+InterpolationValue CreateInterpolationValue(const BasicShape& basic_shape,
+                                            float zoom) {
+  if (basic_shape.GetType() == BasicShape::kStylePathType) {
+    return PathInterpolationFunctions::ConvertValue(
+        To<StylePath>(&basic_shape),
+        PathInterpolationFunctions::kForceAbsolute);
+  }
+  return basic_shape_interpolation_functions::MaybeConvertBasicShape(
+      &basic_shape, zoom);
+}
 
 bool ShapesAreCompatible(const NonInterpolableValue& a,
                          BasicShape::ShapeType a_type,
@@ -120,10 +136,9 @@ scoped_refptr<BasicShape> CreateBasicShape(
       interpolable_value, untyped_non_interpolable_value, conversion_data);
 }
 
-void GetAnimatedShapesFromKeyframes(
+scoped_refptr<BasicShape> GetAnimatedShapeFromKeyframe(
     const PropertySpecificKeyframe* frame,
     const KeyframeEffectModelBase* model,
-    Vector<scoped_refptr<BasicShape>>* animated_shapes,
     const Element* element) {
   scoped_refptr<BasicShape> basic_shape;
   if (model->IsStringKeyframeEffectModel()) {
@@ -156,14 +171,7 @@ void GetAnimatedShapesFromKeyframes(
         *non_interpolable_value);
   }
   DCHECK(basic_shape);
-  animated_shapes->push_back(basic_shape);
-}
-
-void GetCompositorKeyframeOffset(const PropertySpecificKeyframe* frame,
-                                 Vector<double>& offsets) {
-  const CompositorKeyframeDouble& value =
-      To<CompositorKeyframeDouble>(*(frame->GetCompositorKeyframeValue()));
-  offsets.push_back(value.ToDouble());
+  return basic_shape;
 }
 
 bool ValidateClipPathValue(const Element* element,
@@ -189,6 +197,37 @@ bool ValidateClipPathValue(const Element* element,
     return true;
   }
   return false;
+}
+
+scoped_refptr<ShapeClipPathOperation> InterpolateShapes(
+    const InterpolationValue& from,
+    const BasicShape::ShapeType from_shape_type,
+    const InterpolationValue& to,
+    const BasicShape::ShapeType to_shape_type,
+    const float progress) {
+  scoped_refptr<BasicShape> result_shape;
+  if (ShapesAreCompatible(*from.non_interpolable_value.get(), from_shape_type,
+                          *to.non_interpolable_value.get(), to_shape_type)) {
+    std::unique_ptr<InterpolableValue> result_interpolable_value =
+        from.interpolable_value->Clone();
+    from.interpolable_value->Interpolate(*to.interpolable_value, progress,
+                                         *result_interpolable_value);
+    result_shape = CreateBasicShape(from_shape_type, *result_interpolable_value,
+                                    *from.non_interpolable_value);
+  } else if (progress < 0.5) {
+    result_shape = CreateBasicShape(from_shape_type, *from.interpolable_value,
+                                    *from.non_interpolable_value);
+  } else {
+    result_shape = CreateBasicShape(to_shape_type, *to.interpolable_value,
+                                    *to.non_interpolable_value);
+  }
+  return ShapeClipPathOperation::Create(result_shape);
+}
+
+double GetLocalProgress(double global_progress,
+                        double first_offset,
+                        double next_offset) {
+  return (global_progress - first_offset) / (next_offset - first_offset);
 }
 
 }  // namespace
@@ -225,7 +264,7 @@ ClipPathPaintDefinition::ClipPathPaintDefinition(LocalFrame& local_root)
           &local_root,
           PaintWorkletInput::PaintWorkletInputType::kClipPath) {}
 
-sk_sp<PaintRecord> ClipPathPaintDefinition::Paint(
+PaintRecord ClipPathPaintDefinition::Paint(
     const CompositorPaintWorkletInput* compositor_input,
     const CompositorPaintWorkletJob::AnimatedPropertyValues&
         animated_property_values) {
@@ -237,6 +276,8 @@ sk_sp<PaintRecord> ClipPathPaintDefinition::Paint(
   const Vector<InterpolationValue>& interpolation_values =
       input->InterpolationValues();
   Vector<BasicShape::ShapeType> basic_shape_types = input->BasicShapeTypes();
+  // TODO(crbug.com/1374390): This section is a good candidate as a shared
+  // helper function with bgcolor.
   Vector<double> offsets = input->Offsets();
   DCHECK_GT(interpolation_values.size(), 1u);
   DCHECK_EQ(interpolation_values.size(), offsets.size());
@@ -268,43 +309,26 @@ sk_sp<PaintRecord> ClipPathPaintDefinition::Paint(
   }
   if (result_index == offsets.size() - 1)
     result_index = offsets.size() - 2;
-  // Because the progress is a global one, we need to adjust it with offsets.
-  float adjusted_progress = (progress - offsets[result_index]) /
-                            (offsets[result_index + 1] - offsets[result_index]);
+
+  // Use offsets to calculate for intra-keyframe progress.
+  float local_progress = GetLocalProgress(progress, offsets[result_index],
+                                          offsets[result_index + 1]);
+  // Adjust for that keyframe's timing function
+  float adjusted_progress = input->AdjustProgress(result_index, local_progress);
 
   const InterpolationValue& from = interpolation_values[result_index];
   const InterpolationValue& to = interpolation_values[result_index + 1];
-  scoped_refptr<BasicShape> result_shape;
-
-  if (ShapesAreCompatible(*from.non_interpolable_value.get(),
-                          basic_shape_types[result_index],
-                          *to.non_interpolable_value.get(),
-                          basic_shape_types[result_index + 1])) {
-    std::unique_ptr<InterpolableValue> result_interpolable_value =
-        from.interpolable_value->Clone();
-    from.interpolable_value->Interpolate(
-        *to.interpolable_value, adjusted_progress, *result_interpolable_value);
-    result_shape = CreateBasicShape(basic_shape_types[result_index],
-                                    *result_interpolable_value,
-                                    *from.non_interpolable_value);
-  } else if (adjusted_progress < 0.5) {
-    result_shape = CreateBasicShape(basic_shape_types[result_index],
-                                    *from.interpolable_value,
-                                    *from.non_interpolable_value);
-  } else {
-    result_shape =
-        CreateBasicShape(basic_shape_types[result_index + 1],
-                         *to.interpolable_value, *to.non_interpolable_value);
-  }
 
   scoped_refptr<ShapeClipPathOperation> current_shape =
-      ShapeClipPathOperation::Create(result_shape);
+      InterpolateShapes(from, basic_shape_types[result_index], to,
+                        basic_shape_types[result_index + 1], adjusted_progress);
 
   Path path = current_shape->GetPath(reference_box, input->Zoom());
   PaintRenderingContext2DSettings* context_settings =
       PaintRenderingContext2DSettings::Create();
   auto* rendering_context = MakeGarbageCollected<PaintRenderingContext2D>(
-      gfx::ToRoundedSize(clip_area_size), context_settings, 1, 1);
+      gfx::ToRoundedSize(clip_area_size), context_settings, 1, 1,
+      worker_backing_thread_->BackingThread().GetTaskRunner());
 
   cc::PaintFlags flags;
   flags.setAntiAlias(true);
@@ -322,7 +346,7 @@ scoped_refptr<Image> ClipPathPaintDefinition::Paint(
     const gfx::SizeF& clip_area_size,
     const Node& node) {
   DCHECK(node.IsElementNode());
-  const Element* element = static_cast<Element*>(const_cast<Node*>(&node));
+  const Element* element = To<Element>(&node);
 
   Vector<scoped_refptr<BasicShape>> animated_shapes;
   Vector<double> offsets;
@@ -342,9 +366,20 @@ scoped_refptr<Image> ClipPathPaintDefinition::Paint(
       model->GetPropertySpecificKeyframes(
           PropertyHandle(GetCSSPropertyClipPath()));
 
+  Vector<std::unique_ptr<gfx::TimingFunction>> timing_functions;
+
   for (const auto& frame : *frames) {
-    GetAnimatedShapesFromKeyframes(frame, model, &animated_shapes, element);
-    GetCompositorKeyframeOffset(frame, offsets);
+    animated_shapes.push_back(
+        GetAnimatedShapeFromKeyframe(frame, model, element));
+    offsets.push_back(frame->Offset());
+
+    const TimingFunction& timing_function = frame->Easing();
+    // LinearTimingFunction::CloneToCC() returns nullptr as it is shared.
+    if (timing_function.GetType() == TimingFunction::Type::LINEAR) {
+      timing_functions.push_back(gfx::LinearTimingFunction::Create());
+    } else {
+      timing_functions.push_back(timing_function.CloneToCC());
+    }
   }
   progress = effect->Progress();
 
@@ -359,9 +394,97 @@ scoped_refptr<Image> ClipPathPaintDefinition::Paint(
   scoped_refptr<ClipPathPaintWorkletInput> input =
       base::MakeRefCounted<ClipPathPaintWorkletInput>(
           reference_box, clip_area_size, worklet_id_, zoom, animated_shapes,
-          offsets, progress, std::move(input_property_keys));
+          offsets, std::move(timing_functions), progress,
+          std::move(input_property_keys));
 
   return PaintWorkletDeferredImage::Create(std::move(input), clip_area_size);
+}
+
+gfx::RectF ClipPathPaintDefinition::ClipAreaRect(
+    const Node& node,
+    const gfx::RectF& reference_box,
+    float zoom) {
+  DCHECK(node.IsElementNode());
+  const Element* element = To<Element>(&node);
+
+  const Animation* animation = GetAnimationIfCompositable(element);
+  DCHECK(animation);
+
+  const AnimationEffect* effect = animation->effect();
+  DCHECK(effect->IsKeyframeEffect());
+  const KeyframeEffectModelBase* model =
+      static_cast<const KeyframeEffect*>(effect)->Model();
+  const PropertySpecificKeyframeVector* frames =
+      model->GetPropertySpecificKeyframes(
+          PropertyHandle(GetCSSPropertyClipPath()));
+
+  Vector<scoped_refptr<BasicShape>> animated_shapes;
+
+  for (const auto& frame : *frames) {
+    animated_shapes.push_back(
+        GetAnimatedShapeFromKeyframe(frame, model, element));
+  }
+
+  scoped_refptr<TimingFunction> effect_timing =
+      effect->SpecifiedTiming().timing_function;
+
+  double min_total_progress = 0.0;
+  double max_total_progress = 1.0;
+  effect_timing->Range(&min_total_progress, &max_total_progress);
+
+  gfx::RectF clip_area;
+
+  for (unsigned i = 0; i < frames->size(); i++) {
+    scoped_refptr<BasicShape> cur_shape = animated_shapes[i];
+    scoped_refptr<ShapeClipPathOperation> scpo =
+        ShapeClipPathOperation::Create(cur_shape);
+    Path path = scpo->GetPath(reference_box, zoom);
+    clip_area.Union(path.BoundingRect());
+
+    if (i + 1 == frames->size())
+      break;
+
+    double min_progress =
+        i == 0 ? GetLocalProgress(min_total_progress, frames->at(0)->Offset(),
+                                  frames->at(1)->Offset())
+               : 0.0;
+    double max_progress =
+        (i + 2) == frames->size()
+            ? GetLocalProgress(max_total_progress, frames->at(i)->Offset(),
+                               frames->at(i + 1)->Offset())
+            : 1.0;
+
+    TimingFunction& timing = frames->at(i)->Easing();
+    timing.Range(&min_progress, &max_progress);
+
+    // If the timing function results in values outside [0,1], this will result
+    // in extrapolated values that could potentially be larger than either
+    // keyframe in the pair. Do the extrapolation ourselves for the maximal
+    // value to find the clip area for this keyframe pair.
+
+    if (min_progress < 0) {
+      scoped_refptr<BasicShape> next_shape = animated_shapes[i + 1];
+      scoped_refptr<ShapeClipPathOperation> extrapolated_shape =
+          InterpolateShapes(CreateInterpolationValue(*cur_shape.get(), zoom),
+                            cur_shape->GetType(),
+                            CreateInterpolationValue(*next_shape.get(), zoom),
+                            next_shape->GetType(), min_progress);
+      path = extrapolated_shape->GetPath(reference_box, zoom);
+      clip_area.Union(path.BoundingRect());
+    }
+    if (max_progress > 1) {
+      scoped_refptr<BasicShape> next_shape = animated_shapes[i + 1];
+      scoped_refptr<ShapeClipPathOperation> extrapolated_shape =
+          InterpolateShapes(CreateInterpolationValue(*cur_shape.get(), zoom),
+                            cur_shape->GetType(),
+                            CreateInterpolationValue(*next_shape.get(), zoom),
+                            next_shape->GetType(), max_progress);
+      path = extrapolated_shape->GetPath(reference_box, zoom);
+      clip_area.Union(path.BoundingRect());
+    }
+  }
+
+  return clip_area;
 }
 
 void ClipPathPaintDefinition::Trace(Visitor* visitor) const {

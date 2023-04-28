@@ -2,19 +2,19 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/ui.gni")
 import("//build/config/opera_desktop.gni")
 import("//build/config/product.gni")
+import("//build/config/ui.gni")
 
 declare_args() {
+  # If true adds tracker reporting scripts using web3 object
+  opera_blink_feature_script_tracker = product == "crypto"
+
   # Gpu shader css image filters
   opera_feature_blink_gpu_shader_css_filter = false
 
-  # If true, adds support for JPEG XL image decoding.
-  enable_jxl_decoder = !is_ios
-
-  # If true adds tracker reporting scripts using web3 object
-  opera_blink_feature_script_tracker = product == "crypto"
+  # If true enables env(-opera-XXX-color) variables in CSS
+  opera_feature_blink_browser_colors = false
 }
 
 # Unhandled Tap enable means Contextual Search aka Touch to Search.
@@ -23,4 +23,4 @@ declare_args() {
 enable_unhandled_tap = is_android
 
 # Use Minikin hyphenation engine.
-use_minikin_hyphenation = !is_mac && !opera_desktop
+use_minikin_hyphenation = !is_apple && !opera_desktop

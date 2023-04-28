@@ -22,6 +22,7 @@ BLINK_COMMON_EXPORT extern const char kDefaultTileHeight[];
 BLINK_COMMON_EXPORT extern const char kDefaultTileWidth[];
 BLINK_COMMON_EXPORT extern const char kDisableImageAnimationResync[];
 BLINK_COMMON_EXPORT extern const char kDisableLowResTiling[];
+BLINK_COMMON_EXPORT extern const char kDisableNewBaseUrlInheritanceBehavior[];
 BLINK_COMMON_EXPORT extern const char kDisablePartialRaster[];
 BLINK_COMMON_EXPORT extern const char kDisablePreferCompositingToLCDText[];
 BLINK_COMMON_EXPORT extern const char kDisableRGBA4444Textures[];
@@ -38,6 +39,18 @@ BLINK_COMMON_EXPORT extern const char kEnableZeroCopy[];
 BLINK_COMMON_EXPORT extern const char kEventPathPolicy[];
 BLINK_COMMON_EXPORT extern const char kEventPathPolicy_ForceDisable[];
 BLINK_COMMON_EXPORT extern const char kEventPathPolicy_ForceEnable[];
+BLINK_COMMON_EXPORT extern const char kEventPathEnabledByDefault[];
+BLINK_COMMON_EXPORT extern const char kOffsetParentNewSpecBehaviorPolicy[];
+BLINK_COMMON_EXPORT extern const char
+    kOffsetParentNewSpecBehaviorPolicy_ForceDisable[];
+BLINK_COMMON_EXPORT extern const char
+    kOffsetParentNewSpecBehaviorPolicy_ForceEnable[];
+BLINK_COMMON_EXPORT extern const char
+    kSendMouseEventsDisabledFormControlsPolicy[];
+BLINK_COMMON_EXPORT extern const char
+    kSendMouseEventsDisabledFormControlsPolicy_ForceDisable[];
+BLINK_COMMON_EXPORT extern const char
+    kSendMouseEventsDisabledFormControlsPolicy_ForceEnable[];
 BLINK_COMMON_EXPORT extern const char kGpuRasterizationMSAASampleCount[];
 BLINK_COMMON_EXPORT extern const char
     kIntensiveWakeUpThrottlingPolicy_ForceDisable[];
@@ -50,13 +63,6 @@ BLINK_COMMON_EXPORT extern const char kMaxUntiledLayerWidth[];
 BLINK_COMMON_EXPORT extern const char kMinHeightForGpuRasterTile[];
 BLINK_COMMON_EXPORT extern const char kNetworkQuietTimeout[];
 BLINK_COMMON_EXPORT extern const char kNumRasterThreads[];
-BLINK_COMMON_EXPORT extern const char kPersistentQuotaEnabled[];
-BLINK_COMMON_EXPORT extern const char kPrefixedStorageInfoEnabled[];
-BLINK_COMMON_EXPORT extern const char kSetTimeoutWithout1MsClampPolicy[];
-BLINK_COMMON_EXPORT extern const char
-    kSetTimeoutWithout1MsClampPolicy_ForceDisable[];
-BLINK_COMMON_EXPORT extern const char
-    kSetTimeoutWithout1MsClampPolicy_ForceEnable[];
 BLINK_COMMON_EXPORT extern const char kUnthrottledNestedTimeoutPolicy[];
 BLINK_COMMON_EXPORT extern const char
     kUnthrottledNestedTimeoutPolicy_ForceDisable[];
@@ -65,11 +71,12 @@ BLINK_COMMON_EXPORT extern const char
 BLINK_COMMON_EXPORT extern const char kSharedArrayBufferAllowedOrigins[];
 BLINK_COMMON_EXPORT extern const char kShowLayoutShiftRegions[];
 BLINK_COMMON_EXPORT extern const char kShowPaintRects[];
+BLINK_COMMON_EXPORT extern const char
+    kDisableThrottleNonVisibleCrossOriginIframes[];
 BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy[];
 BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy_Character[];
 BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy_Direction[];
 BLINK_COMMON_EXPORT extern const char kWebSQLAccess[];
-BLINK_COMMON_EXPORT extern const char kWebSQLNonSecureContextEnabled[];
 
 }  // namespace switches
 }  // namespace blink

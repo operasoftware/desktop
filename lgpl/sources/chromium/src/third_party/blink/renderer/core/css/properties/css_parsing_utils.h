@@ -68,7 +68,7 @@ using ConsumeAnimationItemValue = CSSValue* (*)(CSSPropertyID,
                                                 bool use_legacy_parsing);
 using IsPositionKeyword = bool (*)(CSSValueID);
 
-constexpr size_t kMaxNumAnimationLonghands = 9;
+constexpr size_t kMaxNumAnimationLonghands = 10;
 
 void Complete4Sides(CSSValue* side[4]);
 
@@ -155,13 +155,14 @@ CSSIdentifierValue* ConsumeIdent(CSSParserTokenRange&);
 
 CSSCustomIdentValue* ConsumeCustomIdent(CSSParserTokenRange&,
                                         const CSSParserContext&);
-CSSCustomIdentValue* ConsumeCustomIdentConservatively(CSSParserTokenRange&,
-                                                      const CSSParserContext&);
 CSSCustomIdentValue* ConsumeDashedIdent(CSSParserTokenRange&,
                                         const CSSParserContext&);
 CSSStringValue* ConsumeString(CSSParserTokenRange&);
+StringView ConsumeStringAsStringView(CSSParserTokenRange&);
 StringView ConsumeUrlAsStringView(CSSParserTokenRange&,
                                   const CSSParserContext&);
+StringView ConsumeUrlOrStringAsStringView(CSSParserTokenRange&,
+                                          const CSSParserContext&);
 cssvalue::CSSURIValue* ConsumeUrl(CSSParserTokenRange&,
                                   const CSSParserContext&);
 
@@ -309,12 +310,21 @@ CSSValue* ConsumeAnimationIterationCount(CSSParserTokenRange&,
 CSSValue* ConsumeAnimationName(CSSParserTokenRange&,
                                const CSSParserContext&,
                                bool allow_quoted_name);
-CSSValue* ConsumeScroller(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ConsumeScrollFunction(CSSParserTokenRange&, const CSSParserContext&);
+CSSValue* ConsumeViewFunction(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ConsumeAnimationTimeline(CSSParserTokenRange&,
                                    const CSSParserContext&);
 CSSValue* ConsumeAnimationTimingFunction(CSSParserTokenRange&,
                                          const CSSParserContext&);
+CSSValue* ConsumeAnimationDuration(CSSParserTokenRange&,
+                                   const CSSParserContext&);
+// https://drafts.csswg.org/scroll-animations-1/#typedef-timeline-range-name
+CSSValue* ConsumeTimelineRangeName(CSSParserTokenRange&);
+CSSValue* ConsumeTimelineRangeNameAndPercent(CSSParserTokenRange&,
+                                             const CSSParserContext&);
+CSSValue* ConsumeAnimationDelay(CSSParserTokenRange&, const CSSParserContext&);
+CSSValue* ConsumeAnimationRange(CSSParserTokenRange&, const CSSParserContext&);
+
 bool ConsumeAnimationShorthand(
     const StylePropertyShorthand&,
     HeapVector<Member<CSSValueList>, kMaxNumAnimationLonghands>&,
@@ -562,8 +572,9 @@ bool IsCustomIdent(CSSValueID id) {
 template <CSSValueID... names>
 CSSIdentifierValue* ConsumeIdent(CSSParserTokenRange& range) {
   if (range.Peek().GetType() != kIdentToken ||
-      !IdentMatches<names...>(range.Peek().Id()))
+      !IdentMatches<names...>(range.Peek().Id())) {
     return nullptr;
+  }
   return CSSIdentifierValue::Create(range.ConsumeIncludingWhitespace().Id());
 }
 
@@ -577,8 +588,9 @@ CSSValueList* ConsumeCommaSeparatedList(Func callback,
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   do {
     CSSValue* value = callback(range, std::forward<Args>(args)...);
-    if (!value)
+    if (!value) {
       return nullptr;
+    }
     list->Append(*value);
   } while (ConsumeCommaIncludingWhitespace(range));
   DCHECK(list->length());
@@ -591,14 +603,15 @@ CSSValue* ConsumePositionLonghand(CSSParserTokenRange& range,
   if (range.Peek().GetType() == kIdentToken) {
     CSSValueID id = range.Peek().Id();
     int percent;
-    if (id == start)
+    if (id == start) {
       percent = 0;
-    else if (id == CSSValueID::kCenter)
+    } else if (id == CSSValueID::kCenter) {
       percent = 50;
-    else if (id == end)
+    } else if (id == end) {
       percent = 100;
-    else
+    } else {
       return nullptr;
+    }
     range.ConsumeIncludingWhitespace();
     return CSSNumericLiteralValue::Create(
         percent, CSSPrimitiveValue::UnitType::kPercentage);
@@ -614,8 +627,9 @@ inline bool AtIdent(const CSSParserToken& token, const char* ident) {
 
 template <typename T>
 bool ConsumeIfIdent(T& range_or_stream, const char* ident) {
-  if (!AtIdent(range_or_stream.Peek(), ident))
+  if (!AtIdent(range_or_stream.Peek(), ident)) {
     return false;
+  }
   range_or_stream.ConsumeIncludingWhitespace();
   return true;
 }
@@ -626,8 +640,9 @@ inline bool AtDelimiter(const CSSParserToken& token, UChar c) {
 
 template <typename T>
 bool ConsumeIfDelimiter(T& range_or_stream, UChar c) {
-  if (!AtDelimiter(range_or_stream.Peek(), c))
+  if (!AtDelimiter(range_or_stream.Peek(), c)) {
     return false;
+  }
   range_or_stream.ConsumeIncludingWhitespace();
   return true;
 }

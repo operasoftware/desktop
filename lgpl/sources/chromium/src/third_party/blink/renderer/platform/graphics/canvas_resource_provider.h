@@ -9,6 +9,7 @@
 #include "cc/paint/skia_paint_canvas.h"
 #include "cc/raster/playback_image_provider.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_host.h"
 #include "third_party/blink/renderer/platform/graphics/image_orientation.h"
@@ -68,6 +69,8 @@ class PLATFORM_EXPORT CanvasResourceProvider
  public:
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   enum ResourceProviderType {
     kTexture [[deprecated]] = 0,
     kBitmap = 1,
@@ -81,6 +84,7 @@ class PLATFORM_EXPORT CanvasResourceProvider
     kSkiaDawnSharedImage [[deprecated]] = 9,
     kMaxValue = kSkiaDawnSharedImage,
   };
+#pragma GCC diagnostic pop
 
   // The following parameters attempt to reach a compromise between not flushing
   // too often, and not accumulating an unreasonable backlog.  Flushing too
@@ -174,7 +178,8 @@ class PLATFORM_EXPORT CanvasResourceProvider
   // FlushCanvas and do not preserve recordings.
   void FlushCanvas();
   // FlushCanvas and preserve recordings.
-  sk_sp<cc::PaintRecord> FlushCanvasAndMaybePreserveRecording(bool printing);
+  absl::optional<cc::PaintRecord> FlushCanvasAndMaybePreserveRecording(
+      bool printing);
   const SkImageInfo& GetSkImageInfo() const { return info_; }
   SkSurfaceProps GetSkSurfaceProps() const;
   gfx::ColorSpace GetColorSpace() const;
@@ -269,12 +274,8 @@ class PLATFORM_EXPORT CanvasResourceProvider
 
   void FlushIfRecordingLimitExceeded();
 
-  size_t TotalOpCount() const {
-    return recorder_ ? recorder_->TotalOpCount() : 0;
-  }
-  size_t TotalOpBytesUsed() const {
-    return recorder_ ? recorder_->OpBytesUsed() : 0;
-  }
+  size_t TotalOpCount() const { return recorder_.TotalOpCount(); }
+  size_t TotalOpBytesUsed() const { return recorder_.OpBytesUsed(); }
   size_t TotalPinnedImageBytes() const { return total_pinned_image_bytes_; }
 
   void DidPinImage(size_t bytes) override;
@@ -305,7 +306,7 @@ class PLATFORM_EXPORT CanvasResourceProvider
 
   scoped_refptr<StaticBitmapImage> SnapshotInternal(const ImageOrientation&);
   scoped_refptr<CanvasResource> GetImportedResource() const;
-  sk_sp<cc::PaintRecord> FlushCanvasInternal(bool preserve_recording);
+  absl::optional<cc::PaintRecord> FlushCanvasInternal(bool preserve_recording);
 
   CanvasResourceProvider(const ResourceProviderType&,
                          const SkImageInfo&,
@@ -320,11 +321,10 @@ class PLATFORM_EXPORT CanvasResourceProvider
   // decodes/uploads in the cache is invalidated only when the canvas contents
   // change.
   cc::PaintImage MakeImageSnapshot();
-  virtual void RasterRecord(sk_sp<cc::PaintRecord>, bool preserve_recording);
-  void RasterRecordOOP(sk_sp<cc::PaintRecord> last_recording,
+  virtual void RasterRecord(cc::PaintRecord);
+  void RasterRecordOOP(cc::PaintRecord last_recording,
                        bool needs_clear,
-                       gpu::Mailbox mailbox,
-                       bool preserve_recording);
+                       gpu::Mailbox mailbox);
 
   CanvasImageProvider* GetOrCreateCanvasImageProvider();
   void TearDownSkSurface();
@@ -370,7 +370,7 @@ class PLATFORM_EXPORT CanvasResourceProvider
   const bool is_origin_top_left_;
   std::unique_ptr<CanvasImageProvider> canvas_image_provider_;
   std::unique_ptr<cc::SkiaPaintCanvas> skia_canvas_;
-  std::unique_ptr<MemoryManagedPaintRecorder> recorder_;
+  MemoryManagedPaintRecorder recorder_{this};
 
   size_t total_pinned_image_bytes_ = 0;
 
@@ -413,8 +413,8 @@ ALWAYS_INLINE void CanvasResourceProvider::FlushIfRecordingLimitExceeded() {
   // vector mode.
   if (IsPrinting() && clear_frame_)
     return;
-  if (recorder_ && ((TotalOpBytesUsed() > kMaxRecordedOpBytes) ||
-                    total_pinned_image_bytes_ > max_pinned_image_bytes_)) {
+  if (TotalOpBytesUsed() > kMaxRecordedOpBytes ||
+      total_pinned_image_bytes_ > max_pinned_image_bytes_) {
     FlushCanvas();
   }
 }

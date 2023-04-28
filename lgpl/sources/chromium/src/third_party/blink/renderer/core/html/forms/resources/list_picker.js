@@ -263,7 +263,7 @@ class ListPicker extends Picker {
         this.config_.anchorRectInScreen.width * scale, desiredWindowWidth);
     let windowRect = adjustWindowRect(
         desiredWindowWidth / scale, desiredWindowHeight / scale,
-        elementOffsetWidth / scale, 0);
+        elementOffsetWidth / scale, 0, /*allowOverlapWithAnchor=*/ false);
     // If the available screen space is smaller than maxHeight, we will get
     // an unexpected scrollbar.
     if (!expectingScrollbar && windowRect.height < noScrollHeight / scale) {
@@ -471,6 +471,9 @@ class ListPicker extends Picker {
       else element.removeAttribute('aria-label');
       element.style.paddingInlineStart = this.config_.paddingStart + 'px';
       if (inGroup) {
+        const extraPaddingForOptionInsideOptgroup = 20;
+        element.style.paddingInlineStart = Number(this.config_.paddingStart) +
+            extraPaddingForOptionInsideOptgroup + 'px';
         element.style.marginInlineStart = (-this.config_.paddingStart) + 'px';
         // Should be synchronized with padding-end in list_picker.css.
         element.style.marginInlineEnd = '-2px';

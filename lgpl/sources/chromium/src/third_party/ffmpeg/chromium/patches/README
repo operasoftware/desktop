@@ -902,3 +902,34 @@ Date:   Wed Jul 27 13:09:47 2022 -0700
 Affects:
     libavutil/hwcontext_stub.c
 
+------------------------------------------------------------------
+commit 68994b791ea432cbb1ff551ffbe4f40b1b8f93f2
+Author: Frank Liberato <liberato@chromium.org>
+Date:   Fri Oct 28 03:26:22 2022 +0000
+
+    moved ff_ac3_find_syncword out of CONFIG_AC3_PARSER
+
+Affects:
+    libavcodec/ac3_parser.c
+
+------------------------------------------------------------------
+commit c9b87a3225e1422d281ce4454415e5c96b452aa7
+Merge: a249b21db6 2c3107c3e9
+Author: John Rummell <jrummell@chromium.org>
+Date:   Wed Jan 25 16:02:14 2023 -0800
+
+    Merge remote-tracking branch 'upstream/master' into sushi-2023-01-25-15-58-26
+
+Affects:
+    libavutil/tx.c
+
+------------------------------------------------------------------
+commit cbc47d6b462ccd4f431dacad782ac14faba67ab0
+Author: John Rummell <jrummell@chromium.org>
+Date:   Wed Jan 25 16:20:19 2023 -0800
+
+    Update python scripts
+
+Affects:
+    libavutil/tx.c
+

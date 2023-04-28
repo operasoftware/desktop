@@ -2,8 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
+import("//build/config/features.gni")
 import("//build/config/opera_desktop.gni")
+import("//build/config/rust.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
 import("//third_party/blink/renderer/build/scripts/scripts.gni")
@@ -95,11 +96,31 @@ blink_python_runner("make_generated_origin_trials") {
   ]
 }
 
+blink_python_runner("make_runtime_feature_state_contexts_impl") {
+  script =
+      "../renderer/build/scripts/make_runtime_feature_state_contexts_impl.py"
+
+  inputs = scripts_for_json5_files + [
+             "../renderer/platform/runtime_enabled_features.json5",
+             "../renderer/build/scripts/templates/runtime_feature_state_context.cc.tmpl",
+           ]
+
+  outputs = [ "$root_gen_dir/third_party/blink/common/runtime_feature_state/runtime_feature_state_context.cc" ]
+
+  args = [
+    rebase_path("../renderer/platform/runtime_enabled_features.json5",
+                root_build_dir),
+    "--output_dir",
+    rebase_path("$root_gen_dir/third_party/blink/common/runtime_feature_state/",
+                root_build_dir),
+  ]
+}
+
 config("blink_common_implementation") {
   defines = [ "BLINK_COMMON_IMPLEMENTATION=1" ]
 }
 
-jumbo_source_set("common") {
+source_set("common") {
   # No target should directly depend on this target since this is just the
   # source set rather than the actual component that can be linked to.
   # Dependencies instead should be to //third_party/blink/public/common:common.
@@ -133,9 +154,12 @@ jumbo_source_set("common") {
     "dom_storage/session_storage_namespace_id.cc",
     "features.cc",
     "fenced_frame/fenced_frame_utils.cc",
+    "fenced_frame/redacted_fenced_frame_config.cc",
+    "fenced_frame/redacted_fenced_frame_config_mojom_traits.cc",
     "fetch/fetch_api_request_body_mojom_traits.cc",
     "frame/frame_ad_evidence.cc",
     "frame/frame_ad_evidence_mojom_traits.cc",
+    "frame/frame_owner_element_type_mojom_traits.cc",
     "frame/frame_policy.cc",
     "frame/frame_policy_mojom_traits.cc",
     "frame/frame_visual_properties.cc",
@@ -145,6 +169,7 @@ jumbo_source_set("common") {
     "frame/payment_request_token.cc",
     "frame/transient_allow_fullscreen.cc",
     "frame/user_activation_state.cc",
+    "frame/view_transition_state_mojom_traits.cc",
     "indexeddb/indexed_db_default_mojom_traits.cc",
     "indexeddb/indexeddb_key.cc",
     "indexeddb/indexeddb_key_path.cc",
@@ -164,6 +189,7 @@ jumbo_source_set("common") {
     "interest_group/auction_config_mojom_traits.cc",
     "interest_group/interest_group.cc",
     "interest_group/interest_group_mojom_traits.cc",
+    "interest_group/interest_group_utils.cc",
     "link_to_text/link_to_text_mojom_traits.cc",
     "loader/inter_process_time_ticks_converter.cc",
     "loader/loader_constants.cc",
@@ -200,8 +226,6 @@ jumbo_source_set("common") {
     "messaging/web_message_port.cc",
     "metrics/post_message_counter.cc",
     "mime_util/mime_util.cc",
-    "mobile_metrics/mobile_friendliness.cc",
-    "native_io/native_io_utils.cc",
     "navigation/impression_mojom_traits.cc",
     "navigation/navigation_params.cc",
     "navigation/navigation_policy.cc",
@@ -263,17 +287,14 @@ jumbo_source_set("common") {
   sources += get_target_outputs(":make_generated_features")
   sources += get_target_outputs(":make_generated_origin_trials")
   sources += get_target_outputs(":make_generated_permissions_policy_features")
-
-  jumbo_excluded_sources = [
-    "frame/user_activation_state.cc",
-    "user_agent/user_agent_metadata.cc",
-  ]
+  sources += get_target_outputs(":make_runtime_feature_state_contexts_impl")
 
   public_deps = [
     ":make_generated_document_policy_features",
     ":make_generated_features",
     ":make_generated_origin_trials",
     ":make_generated_permissions_policy_features",
+    ":make_runtime_feature_state_contexts_impl",
     "//third_party/blink/common/privacy_budget:privacy_budget",
     "//third_party/blink/public/common:common_export",
     "//third_party/blink/public/common:headers",
@@ -292,7 +313,6 @@ jumbo_source_set("common") {
     "//services/metrics/public/mojom:mojom",
     "//services/network/public/cpp:cpp",
     "//third_party/blink/public/common:buildflags",
-    "//third_party/blink/public/mojom:mobile_metrics_shared",
     "//ui/base:base",
     "//ui/base/dragdrop/mojom:mojom_shared",
     "//ui/display",
@@ -301,8 +321,12 @@ jumbo_source_set("common") {
     "//ui/latency/mojom:shared_mojom_traits",
   ]
 
-  # iOS doesn't use and must not depend on //media
-  if (!is_ios) {
+  if (build_rust_crash) {
+    deps += [ "//third_party/blink/common/rust_crash" ]
+  }
+
+  # If use_blink is used then it needs to depend on //media
+  if (use_blink) {
     deps += [ "//media" ]
   }
 
@@ -321,7 +345,6 @@ jumbo_source_set("common") {
   }
 
   if (is_win) {
-    sources += [ "dwrite_rasterizer_support/dwrite_rasterizer_support.cc" ]
     deps += [ "//ui/gfx/" ]
   }
 
@@ -354,7 +377,7 @@ test("blink_common_unittests") {
   data_deps = [ ":common_unittests_data" ]
 }
 
-jumbo_source_set("common_unittests_sources") {
+source_set("common_unittests_sources") {
   testonly = true
 
   sources = [
@@ -370,6 +393,7 @@ jumbo_source_set("common_unittests_sources") {
     "input/web_input_event_unittest.cc",
     "interest_group/auction_config_mojom_traits_test.cc",
     "interest_group/interest_group_mojom_traits_test.cc",
+    "interest_group/interest_group_utils_unittest.cc",
     "loader/inter_process_time_ticks_converter_unittest.cc",
     "loader/mime_sniffing_throttle_unittest.cc",
     "loader/referrer_utils_unittest.cc",
@@ -382,6 +406,7 @@ jumbo_source_set("common_unittests_sources") {
     "metrics/post_message_counter_unittest.cc",
     "mime_util/mime_util_unittest.cc",
     "notifications/notification_mojom_traits_unittest.cc",
+    "notifications/platform_notification_data_unittest.cc",
     "origin_trials/origin_trials_test.cc",
     "origin_trials/trial_token_unittest.cc",
     "origin_trials/trial_token_validator_unittest.cc",
@@ -455,7 +480,10 @@ group("common_unittests_data") {
 static_library("test_support") {
   testonly = true
 
-  sources = [ "origin_trials/scoped_test_origin_trial_policy.cc" ]
+  sources = [
+    "interest_group/test_interest_group_builder.cc",
+    "origin_trials/scoped_test_origin_trial_policy.cc",
+  ]
 
   deps = [ "//third_party/blink/public:test_headers" ]
 
@@ -463,21 +491,32 @@ static_library("test_support") {
 }
 
 if (use_libfuzzer) {
-  proto_library("storage_key_fuzzer_proto") {
-    testonly = true
-    proto_in_dir = "//"
-    sources = [ "storage_key/storage_key_fuzzer.proto" ]
-    proto_deps = [ "//third_party/blink/public/common:storage_key_proto" ]
-  }
-
-  fuzzer_test("storage_key_fuzzer") {
-    sources = [ "storage_key/storage_key_fuzzer.cc" ]
+  fuzzer_test("storage_key_proto_fuzzer") {
+    sources = [ "storage_key/storage_key_proto_fuzzer.cc" ]
     deps = [
       ":common",
-      ":storage_key_fuzzer_proto",
       "//base/test:test_support",
+      "//third_party/blink/public/common:storage_key_proto",
       "//third_party/blink/public/common:storage_key_proto_converter",
       "//third_party/libprotobuf-mutator",
+    ]
+  }
+
+  fuzzer_test("storage_key_string_fuzzer") {
+    sources = [ "storage_key/storage_key_string_fuzzer.cc" ]
+    deps = [
+      ":common",
+      "//base/test:test_support",
+      "//third_party/blink/public/common",
+    ]
+    seed_corpus = "//third_party/blink/common/storage_key/storage_key_corpus"
+  }
+
+  fuzzer_test("interest_group_parse_size_fuzzer") {
+    sources = [ "interest_group/interest_group_parse_size_fuzzer.cc" ]
+    deps = [
+      ":common",
+      "//content/public/common",
     ]
   }
 }

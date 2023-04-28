@@ -102,6 +102,15 @@
     "ordinal",
     "slashed-zero",
 
+    // font-variant-alternates
+    "stylistic",
+    "historical-forms",
+    "styleset",
+    "character-variant",
+    "swash",
+    "ornaments",
+    "annotation",
+
     //
     // font-weight
     //
@@ -612,8 +621,8 @@
     "thick",
     "thin",
     "underline",
+    "view",
     "wavy",
-    "-webkit-nowrap",
 
     // math-shift
     // normal
@@ -849,6 +858,12 @@
     "visual",
 
     //
+    // animation-composition
+    //
+    "replace",
+    "accumulate",
+
+    //
     // animation-direction
     //
     "alternate",
@@ -1045,6 +1060,10 @@
     "minimal-ui",
     "browser",
     "window-controls-overlay",
+    "tabbed",
+
+    // (overflow-block:) media feature
+    "paged",
 
     // position
     "sticky",
@@ -1224,6 +1243,7 @@
     "-webkit-repeating-linear-gradient",
     "-webkit-repeating-radial-gradient",
     "-webkit-image-set",
+    "image-set",
 
     // deprecated gradients
     "from",
@@ -1274,9 +1294,12 @@
     "brightness",
     "contrast",
     "blur",
-    "shader",
+    "-opera-shader",
     "drop-shadow",
     "url",
+
+    // shader
+    "-opera-args",
 
     // colors
     "rgb",
@@ -1306,10 +1329,11 @@
     "longer",
     "decreasing",
     "increasing",
-    "specified",
 
     // For gradient interpolations in certain color spaces
     "in",
+    // The color-mix function https://www.w3.org/TR/css-color-5/#color-mix
+    "color-mix",
 
     // transform
     "matrix",
@@ -1358,7 +1382,7 @@
     // "tan" - already declared for color value
     "asin",
     "atan",
-    // "atan2",
+    "atan2",
     "acos",
 
     //<calc-constant>
@@ -1366,6 +1390,8 @@
     "infinity",
     "-infinity",
     "nan",
+    "pi",
+    "e",
 
     // scroll-snap-type
     // none
@@ -1481,7 +1507,7 @@
     // (device-posture) media feature
     "continuous",
     "folded",
-    
+
     // scrollbar-gutter
     // auto
     "stable",
@@ -1578,11 +1604,17 @@
     "self-block",
     "self-inline",
 
+    // anchor-scroll
+    "implicit",
+    // none,
+
     // animation-[end-]delay
     // contain
     // cover
-    "enter",
+    "entry",
     "exit",
+    "entry-crossing",
+    "exit-crossing",
 
     // scroll()
     "root",

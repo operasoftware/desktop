@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/ranges/algorithm.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
 #include "media/audio/audio_sink_parameters.h"
@@ -555,6 +556,11 @@ void WebRtcAudioRenderer::SwitchOutputDevice(
     return;
   }
 
+  if (sink_ && output_device_id_ == String::FromUTF8(device_id)) {
+    std::move(callback).Run(media::OUTPUT_DEVICE_STATUS_OK);
+    return;
+  }
+
   media::AudioSinkParameters sink_params(session_id_, device_id);
   scoped_refptr<media::AudioRendererSink> new_sink =
       Platform::Current()->NewAudioRendererSink(
@@ -603,7 +609,7 @@ void WebRtcAudioRenderer::TranscribeAudio(
 
 int WebRtcAudioRenderer::Render(base::TimeDelta delay,
                                 base::TimeTicks delay_timestamp,
-                                int prior_frames_skipped,
+                                const media::AudioGlitchInfo& glitch_info,
                                 media::AudioBus* audio_bus) {
   DCHECK(sink_->CurrentThreadIsRenderingThread());
   DCHECK_LE(sink_params_.channels(), 8);
@@ -612,27 +618,7 @@ int WebRtcAudioRenderer::Render(base::TimeDelta delay,
     return 0;
 
   audio_delay_ = delay;
-
-  // If there are skipped frames, pull and throw away the same amount. We always
-  // pull 10 ms of data from the source (see PrepareSink()), so the fifo is only
-  // required if the number of frames to drop doesn't correspond to 10 ms.
-  if (prior_frames_skipped > 0) {
-    const int source_frames_per_buffer = sink_params_.sample_rate() / 100;
-    if (!audio_fifo_ && prior_frames_skipped != source_frames_per_buffer) {
-      audio_fifo_ = std::make_unique<media::AudioPullFifo>(
-          sink_params_.channels(), source_frames_per_buffer,
-          ConvertToBaseRepeatingCallback(
-              CrossThreadBindRepeating(&WebRtcAudioRenderer::SourceCallback,
-                                       CrossThreadUnretained(this))));
-    }
-
-    std::unique_ptr<media::AudioBus> drop_bus =
-        media::AudioBus::Create(audio_bus->channels(), prior_frames_skipped);
-    if (audio_fifo_)
-      audio_fifo_->Consume(drop_bus.get(), drop_bus->frames());
-    else
-      SourceCallback(0, drop_bus.get());
-  }
+  glitch_info_accumulator_.Add(glitch_info);
 
   // Pull the data we will deliver.
   if (audio_fifo_)
@@ -688,7 +674,7 @@ void WebRtcAudioRenderer::SourceCallback(int fifo_frame_delay,
   // We need to keep render data for the |source_| regardless of |state_|,
   // otherwise the data will be buffered up inside |source_|.
   source_->RenderData(audio_bus, sink_params_.sample_rate(), output_delay,
-                      &current_time_);
+                      &current_time_, glitch_info_accumulator_.GetAndReset());
 
   // Avoid filling up the audio bus if we are not playing; instead
   // return here and ensure that the returned value in Render() is 0.
@@ -865,6 +851,8 @@ void WebRtcAudioRenderer::PrepareSink() {
                        __func__, sample_rate));
     sample_rate = 48000;
   }
+  DVLOG(1) << "WebRtcAudioRenderer::PrepareSink sample_rate " << sample_rate;
+
   media::AudioSampleRate asr;
   if (media::ToAudioSampleRate(sample_rate, &asr)) {
     UMA_HISTOGRAM_ENUMERATION("WebRTC.AudioOutputSampleRate", asr,

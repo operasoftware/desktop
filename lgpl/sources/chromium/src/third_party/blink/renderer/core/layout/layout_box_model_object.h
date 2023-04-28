@@ -199,6 +199,10 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
 
   virtual PhysicalRect PhysicalVisualOverflowRect() const = 0;
 
+  // Returns the visual overflow rect, expanded to the area affected by any
+  // filters that paint outside of the box, in physical coordinates.
+  PhysicalRect PhysicalVisualOverflowRectIncludingFilters() const;
+
   bool UsesCompositedScrolling() const;
 
   // These return the CSS computed padding values.
@@ -597,7 +601,6 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   virtual void LocalQuadsForSelf(Vector<gfx::QuadF>& quads) const;
 
   void WillBeDestroyed() override;
-  void InsertedIntoTree() override;
 
   PhysicalOffset AdjustedPositionRelativeTo(const PhysicalOffset&,
                                             const Element*) const;
@@ -726,7 +729,6 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
         &LayoutBoxModelObject::BorderTop, &LayoutBoxModelObject::BorderRight,
         &LayoutBoxModelObject::BorderBottom, &LayoutBoxModelObject::BorderLeft);
   }
-  void DisallowDeferredShapingIfNegativePositioned() const;
 };
 
 template <>

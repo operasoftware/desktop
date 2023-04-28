@@ -1104,10 +1104,10 @@ static void parse_id3(AVFormatContext *s, AVIOContext *pb,
 static int id3_has_changed_values(struct playlist *pls, AVDictionary *metadata,
                                   ID3v2ExtraMetaAPIC *apic)
 {
-    AVDictionaryEntry *entry = NULL;
-    AVDictionaryEntry *oldentry;
+    const AVDictionaryEntry *entry = NULL;
+    const AVDictionaryEntry *oldentry;
     /* check that no keys have changed values */
-    while ((entry = av_dict_get(metadata, "", entry, AV_DICT_IGNORE_SUFFIX))) {
+    while ((entry = av_dict_iterate(metadata, entry))) {
         oldentry = av_dict_get(pls->id3_initial, entry->key, NULL, AV_DICT_MATCH_CASE);
         if (!oldentry || strcmp(oldentry->value, entry->value) != 0)
             return 1;
@@ -1527,7 +1527,7 @@ reload:
                 return AVERROR_EOF;
             }
         } else {
-            av_log(v->parent, AV_LOG_WARNING, "maybe the m3u8 list sequence have been wraped.\n");
+            av_log(v->parent, AV_LOG_WARNING, "The m3u8 list sequence may have been wrapped.\n");
         }
         if (v->cur_seq_no >= v->start_seq_no + v->n_segments) {
             if (v->finished)

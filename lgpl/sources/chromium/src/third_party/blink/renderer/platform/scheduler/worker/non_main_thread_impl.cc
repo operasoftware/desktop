@@ -5,8 +5,8 @@
 #include "third_party/blink/renderer/platform/scheduler/worker/non_main_thread_impl.h"
 
 #include <memory>
-#include "base/bind.h"
 #include "base/check.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/message_loop/message_pump.h"
@@ -17,11 +17,11 @@
 #include "base/task/sequence_manager/task_queue.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/platform/heap/blink_gc_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
+#include "third_party/blink/renderer/platform/scheduler/common/task_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/worker_scheduler_proxy.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/worker_thread_scheduler.h"
 
@@ -89,11 +89,6 @@ scoped_refptr<base::SingleThreadTaskRunner> NonMainThreadImpl::GetTaskRunner()
   return thread_->GetDefaultTaskRunner();
 }
 
-scoped_refptr<base::SingleThreadTaskRunner>
-NonMainThreadImpl::GetDeprecatedTaskRunner() const {
-  return GetTaskRunner();
-}
-
 void NonMainThreadImpl::ShutdownOnThread() {
   thread_->ShutdownOnThread();
   Scheduler()->Shutdown();
@@ -113,6 +108,7 @@ NonMainThreadImpl::SimpleThreadImpl::SimpleThreadImpl(
       base::sequence_manager::SequenceManager::Settings::Builder()
           .SetMessagePumpType(base::MessagePumpType::DEFAULT)
           .SetRandomisedSamplingEnabled(true)
+          .SetPrioritySettings(CreatePrioritySettings())
           .Build());
   internal_task_queue_ = sequence_manager_->CreateTaskQueue(
       base::sequence_manager::TaskQueue::Spec(
@@ -138,7 +134,7 @@ NonMainThreadImpl::GCSupport::GCSupport(NonMainThreadImpl* thread) {
   ThreadState* thread_state = ThreadState::AttachCurrentThread();
   gc_task_runner_ = std::make_unique<GCTaskRunner>(thread);
   blink_gc_memory_dump_provider_ = std::make_unique<BlinkGCMemoryDumpProvider>(
-      thread_state, base::ThreadTaskRunnerHandle::Get(),
+      thread_state, base::SingleThreadTaskRunner::GetCurrentDefault(),
       BlinkGCMemoryDumpProvider::HeapType::kBlinkWorkerThread);
 }
 

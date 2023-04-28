@@ -4,7 +4,10 @@
 
 #include "third_party/blink/renderer/core/dom/css_toggle_map.h"
 
+#include "third_party/blink/renderer/core/dom/css_toggle_inference.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
 #include "third_party/blink/renderer/core/style/toggle_root.h"
 #include "third_party/blink/renderer/core/style/toggle_root_list.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -12,13 +15,37 @@
 namespace blink {
 
 CSSToggleMap::CSSToggleMap(Element* owner_element)
-    : owner_element_(owner_element) {}
+    : owner_element_(owner_element) {
+  DCHECK(owner_element);
+
+  auto add_result =
+      owner_element->GetDocument().ElementsWithCSSToggles().insert(
+          owner_element);
+  DCHECK(add_result.is_new_entry);
+}
 
 void CSSToggleMap::Trace(Visitor* visitor) const {
   visitor->Trace(owner_element_);
   visitor->Trace(toggles_);
 
   ScriptWrappable::Trace(visitor);
+  ElementRareDataField::Trace(visitor);
+}
+
+void CSSToggleMap::DidMoveToNewDocument(Document& old_document) {
+  Element* element = OwnerElement();
+
+  // In theory the removal from the old document should happen
+  // earlier, but it shouldn't matter, because we don't use
+  // ElementsWithCSSToggles() from things that can happen mid-move.
+  DCHECK(old_document.ElementsWithCSSToggles().Contains(element));
+  old_document.ElementsWithCSSToggles().erase(element);
+  old_document.EnsureCSSToggleInference().MarkNeedsRebuild();
+
+  Document& new_document = element->GetDocument();
+  auto add_result = new_document.ElementsWithCSSToggles().insert(element);
+  DCHECK(add_result.is_new_entry);
+  new_document.EnsureCSSToggleInference().MarkNeedsRebuild();
 }
 
 void CSSToggleMap::CreateToggles(const ToggleRootList* toggle_roots) {
@@ -98,10 +125,10 @@ bool CSSToggleMap::deleteForBinding(ScriptState*,
 }
 
 bool CSSToggleMap::GetMapEntry(ScriptState*,
-                               const AtomicString& key,
-                               Member<CSSToggle>& value,
+                               const String& key,
+                               CSSToggle*& value,
                                ExceptionState&) {
-  auto iterator = toggles_.find(key);
+  auto iterator = toggles_.find(AtomicString(key));
   if (iterator == toggles_.end())
     return false;
 
@@ -109,7 +136,7 @@ bool CSSToggleMap::GetMapEntry(ScriptState*,
   return true;
 }
 
-CSSToggleMapMaplike::IterationSource* CSSToggleMap::StartIteration(
+CSSToggleMapMaplike::IterationSource* CSSToggleMap::CreateIterationSource(
     ScriptState*,
     ExceptionState&) {
   return MakeGarbageCollected<IterationSource>(*this);
@@ -124,10 +151,10 @@ CSSToggleMap::IterationSource::IterationSource(const CSSToggleMap& toggle_map) {
   }
 }
 
-bool CSSToggleMap::IterationSource::Next(ScriptState*,
-                                         AtomicString& key,
-                                         Member<CSSToggle>& value,
-                                         ExceptionState&) {
+bool CSSToggleMap::IterationSource::FetchNextItem(ScriptState*,
+                                                  String& key,
+                                                  CSSToggle*& value,
+                                                  ExceptionState&) {
   if (index_ >= toggles_snapshot_.size())
     return false;
   value = toggles_snapshot_[index_++];

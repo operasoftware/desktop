@@ -68,15 +68,15 @@ V8CSSNumberish* CSSHSL::alpha() const {
 }
 
 void CSSHSL::setH(CSSNumericValue* hue, ExceptionState& exception_state) {
-  if (CSSOMTypes::IsCSSStyleValueAngle(*hue))
+  if (CSSOMTypes::IsCSSStyleValueAngle(*hue)) {
     h_ = hue;
-  else
+  } else {
     exception_state.ThrowTypeError("Hue must be a CSS angle type.");
+  }
 }
 
-void CSSHSL::setS(
-    const V8CSSNumberish* saturation,
-    ExceptionState& exception_state) {
+void CSSHSL::setS(const V8CSSNumberish* saturation,
+                  ExceptionState& exception_state) {
   if (auto* value = ToPercentage(saturation)) {
     s_ = value;
   } else {
@@ -85,9 +85,8 @@ void CSSHSL::setS(
   }
 }
 
-void CSSHSL::setL(
-    const V8CSSNumberish* lightness,
-    ExceptionState& exception_state) {
+void CSSHSL::setL(const V8CSSNumberish* lightness,
+                  ExceptionState& exception_state) {
   if (auto* value = ToPercentage(lightness)) {
     l_ = value;
   } else {
@@ -96,9 +95,8 @@ void CSSHSL::setL(
   }
 }
 
-void CSSHSL::setAlpha(
-    const V8CSSNumberish* alpha,
-    ExceptionState& exception_state) {
+void CSSHSL::setAlpha(const V8CSSNumberish* alpha,
+                      ExceptionState& exception_state) {
   if (auto* value = ToPercentage(alpha)) {
     alpha_ = value;
   } else {
@@ -110,7 +108,7 @@ void CSSHSL::setAlpha(
 Color CSSHSL::ToColor() const {
   // FromHSLA expects hue in the range [0, 6)
   return Color::FromHSLA(
-      h_->to(CSSPrimitiveValue::UnitType::kDegrees)->value() / 60,
+      h_->to(CSSPrimitiveValue::UnitType::kDegrees)->value() / 60.f,
       ComponentToColorInput(s_), ComponentToColorInput(l_),
       ComponentToColorInput(alpha_));
 }
