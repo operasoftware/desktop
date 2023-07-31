@@ -44,7 +44,6 @@
 #include "third_party/blink/renderer/core/frame/layout_subtree_root_list.h"
 #include "third_party/blink/renderer/core/frame/overlay_interstitial_ad_detector.h"
 #include "third_party/blink/renderer/core/frame/sticky_ad_detector.h"
-#include "third_party/blink/renderer/core/layout/depth_ordered_layout_object_list.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/paint/layout_object_counter.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_request_forward.h"
@@ -118,7 +117,6 @@ struct PhysicalOffset;
 struct PhysicalRect;
 
 enum class PaintBenchmarkMode;
-enum class PaintArtifactCompositorUpdateReason;
 
 typedef uint64_t DOMTimeStamp;
 using LayerTreeFlags = unsigned;
@@ -183,12 +181,6 @@ class CORE_EXPORT LocalFrameView final
   void DidFinishForcedLayout(DocumentUpdateReason);
 
   void ClearLayoutSubtreeRoot(const LayoutObject&);
-  void AddOrthogonalWritingModeRoot(LayoutBox&);
-  void RemoveOrthogonalWritingModeRoot(LayoutBox&);
-  bool HasOrthogonalWritingModeRoots() const;
-  void LayoutOrthogonalWritingModeRoots();
-  void ScheduleOrthogonalWritingModeRootsForLayout();
-  void MarkOrthogonalWritingModeRootsForLayout();
 
   // Returns true if commits will be deferred for first contentful paint.
   bool WillDoPaintHoldingForFCP() const;
@@ -245,8 +237,7 @@ class CORE_EXPORT LocalFrameView final
 
   void ForceUpdateViewportIntersections();
 
-  void SetPaintArtifactCompositorNeedsUpdate(
-      PaintArtifactCompositorUpdateReason);
+  void SetPaintArtifactCompositorNeedsUpdate();
 
   // Methods for getting/setting the size Blink should use to layout the
   // contents.
@@ -322,7 +313,7 @@ class CORE_EXPORT LocalFrameView final
     return background_attachment_fixed_objects_;
   }
   void InvalidateBackgroundAttachmentFixedDescendantsOnScroll(
-      const LayoutObject& scrolled_object);
+      const LayoutBox& scroller);
 
   void HandleLoadCompleted();
 
@@ -422,7 +413,7 @@ class CORE_EXPORT LocalFrameView final
   void DisableAutoSizeMode();
 
   void ForceLayoutForPagination(const gfx::SizeF& page_size,
-                                const gfx::SizeF& original_page_size,
+                                const gfx::SizeF& aspect_ratio,
                                 float maximum_shrink_factor);
 
   // Updates the fragment anchor element based on URL's fragment identifier.
@@ -470,7 +461,7 @@ class CORE_EXPORT LocalFrameView final
     return user_scrollable_areas_.Get();
   }
 
-  void ServiceScriptedAnimations(base::TimeTicks);
+  void ServiceScrollAnimations(base::TimeTicks);
 
   void ScheduleAnimation(base::TimeDelta = base::TimeDelta(),
                          base::Location location = base::Location::Current());
@@ -750,7 +741,7 @@ class CORE_EXPORT LocalFrameView final
   // Gets the xr overlay layer if present, or nullptr if there is none.
   PaintLayer* GetXROverlayLayer() const;
 
-  void PropagateCullRectNeedsUpdateForFrames();
+  void SetCullRectNeedsUpdateForFrames(bool disable_expansion);
 
   void RunPaintBenchmark(int repeat_count, cc::PaintBenchmarkResult& result);
 
@@ -765,13 +756,16 @@ class CORE_EXPORT LocalFrameView final
 
   void AddPendingTransformUpdate(LayoutObject& object);
   bool RemovePendingTransformUpdate(const LayoutObject& object);
-  bool UpdateAllPendingTransforms();
 
   void AddPendingOpacityUpdate(LayoutObject& object);
   bool RemovePendingOpacityUpdate(const LayoutObject& object);
-  bool UpdateAllPendingOpacityUpdates();
+
+  void RemoveAllPendingUpdates();
+  bool ExecuteAllPendingUpdates();
 
   void ForAllChildLocalFrameViews(base::FunctionRef<void(LocalFrameView&)>);
+
+  void NotifyElementWithRememberedSizeDisconnected(Element*);
 
  protected:
   void FrameRectsChanged(const gfx::Rect&) override;
@@ -998,6 +992,9 @@ class CORE_EXPORT LocalFrameView final
   void GetUserScrollTranslationNodes(
       Vector<const TransformPaintPropertyNode*>& scroll_translation_nodes);
 
+  void GetAnchorScrollContainerNodes(
+      Vector<const TransformPaintPropertyNode*>& anchor_scroll_container_nodes);
+
   // Return the sticky-ad detector for this frame, creating it if necessary.
   StickyAdDetector& EnsureStickyAdDetector();
 
@@ -1027,7 +1024,6 @@ class CORE_EXPORT LocalFrameView final
 
   bool has_pending_layout_;
   LayoutSubtreeRootList layout_subtree_root_list_;
-  DepthOrderedLayoutObjectList orthogonal_writing_mode_root_list_;
 
   bool layout_scheduling_enabled_;
   unsigned layout_count_for_testing_;
@@ -1182,6 +1178,11 @@ class CORE_EXPORT LocalFrameView final
   // TODO(yotha): unify these into one HeapHashMap.
   Member<HeapHashSet<Member<LayoutObject>>> pending_transform_updates_;
   Member<HeapHashSet<Member<LayoutObject>>> pending_opacity_updates_;
+
+  // These are elements that were disconnected while having a remembered
+  // size. We need to clear the remembered at resize observer timing,
+  // assuming they are still disconnected.
+  HeapHashSet<WeakMember<Element>> disconnected_elements_with_remembered_size_;
 
 #if DCHECK_IS_ON()
   bool is_updating_descendant_dependent_flags_;

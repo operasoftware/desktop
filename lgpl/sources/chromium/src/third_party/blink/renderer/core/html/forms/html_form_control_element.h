@@ -38,6 +38,11 @@ namespace blink {
 
 class HTMLFormElement;
 
+constexpr const char* kPopoverTargetActionToggle = "toggle";
+constexpr const char* kPopoverTargetActionShow = "show";
+constexpr const char* kPopoverTargetActionHide = "hide";
+constexpr const char* kPopoverTargetActionHover = "hover";
+
 // HTMLFormControlElement is the default implementation of
 // ListedElement, and listed element implementations should use
 // HTMLFormControlElement unless there is a special reason.
@@ -93,7 +98,6 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
     DISALLOW_NEW();
     WeakMember<HTMLElement> popover;
     PopoverTriggerAction action;
-    QualifiedName attribute_name;
     void Trace(Visitor* visitor) const { visitor->Trace(popover); }
   };
 
@@ -102,15 +106,19 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
     kSupported,
   };
 
-  // Retrieves the element pointed to by 'popovertoggletarget',
-  // 'popovershowtarget', and/or 'popoverhidetarget' content attributes, if any,
-  // and only if this form control element supports popover triggering.
+  // Retrieves the popover target element and triggering behavior.
   PopoverTargetElement popoverTargetElement();
   virtual PopoverTriggerSupport SupportsPopoverTriggering() const {
     return PopoverTriggerSupport::kNone;
   }
+  // The IDL reflections:
+  AtomicString popoverTargetAction() const;
+  void setPopoverTargetAction(const AtomicString& value);
 
   void DefaultEventHandler(Event&) override;
+
+  void SetHovered(bool hovered) override;
+  void HandlePopoverInvokerHovered(bool hovered);
 
   // Getter and setter for the PII type of the element derived from the autofill
   // field semantic prediction.

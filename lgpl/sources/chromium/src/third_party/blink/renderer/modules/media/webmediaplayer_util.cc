@@ -9,9 +9,14 @@
 #include <string>
 #include <utility>
 
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "media/base/bind_to_current_loop.h"
+#include "base/task/bind_post_task.h"
+#include "media/base/audio_codecs.h"
 #include "media/base/media_log.h"
+#include "media/base/pipeline_metadata.h"
+#include "media/base/pipeline_status.h"
+#include "media/base/video_codecs.h"
 #include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/public/platform/url_conversion.h"
 #include "third_party/blink/public/platform/web_media_player_encrypted_media_client.h"
@@ -160,17 +165,35 @@ void ReportMetrics(WebMediaPlayer::LoadType load_type,
 }
 
 void ReportPipelineError(WebMediaPlayer::LoadType load_type,
+                         const media::PipelineMetadata& metadata,
                          media::PipelineStatus error) {
   DCHECK_NE(media::PIPELINE_OK, error);
 
-  UMA_HISTOGRAM_ENUMERATION(
+  constexpr auto kPipelineStatusMax =
+      static_cast<media::PipelineStatusCodes>(media::PIPELINE_STATUS_MAX + 1);
+
+  base::UmaHistogramEnumeration(
       "Opera.DSK.Media." + LoadTypeToString(load_type) + ".Pipeline.Error",
-      error.code(), media::PIPELINE_STATUS_MAX + 1);
+      error.code(), kPipelineStatusMax);
+
+  if (metadata.audio_decoder_config.codec() == media::AudioCodec::kAAC) {
+    base::UmaHistogramEnumeration("Opera.DSK.Media." +
+                                      LoadTypeToString(load_type) +
+                                      ".Pipeline.AAC.Error",
+                                  error.code(), kPipelineStatusMax);
+  }
+
+  if (metadata.video_decoder_config.codec() == media::VideoCodec::kH264) {
+    base::UmaHistogramEnumeration("Opera.DSK.Media." +
+                                      LoadTypeToString(load_type) +
+                                      ".Pipeline.H264.Error",
+                                  error.code(), kPipelineStatusMax);
+  }
 }
 
 media::OutputDeviceStatusCB ConvertToOutputDeviceStatusCB(
     WebSetSinkIdCompleteCallback callback) {
-  return media::BindToCurrentLoop(
+  return base::BindPostTaskToCurrentDefault(
       WTF::BindOnce(RunSetSinkIdCallback, std::move(callback)));
 }
 

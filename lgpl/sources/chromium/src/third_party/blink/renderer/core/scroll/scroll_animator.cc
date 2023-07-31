@@ -65,8 +65,9 @@ ScrollAnimator::ScrollAnimator(ScrollableArea* scrollable_area,
       last_granularity_(ui::ScrollGranularity::kScrollByPixel) {}
 
 ScrollAnimator::~ScrollAnimator() {
-  if (on_finish_)
-    std::move(on_finish_).Run();
+  if (on_finish_) {
+    std::move(on_finish_).Run(ScrollableArea::ScrollCompletionMode::kFinished);
+  }
 }
 
 ScrollOffset ScrollAnimator::DesiredTargetOffset() const {
@@ -97,7 +98,7 @@ void ScrollAnimator::ResetAnimationState() {
     animation_curve_.reset();
   start_time_ = base::TimeTicks();
   if (on_finish_)
-    std::move(on_finish_).Run();
+    std::move(on_finish_).Run(ScrollableArea::ScrollCompletionMode::kFinished);
 }
 
 ScrollResult ScrollAnimator::UserScroll(
@@ -113,13 +114,20 @@ ScrollResult ScrollAnimator::UserScroll(
   have_scrolled_since_page_load_ = true;
 #endif
 
-  base::ScopedClosureRunner run_on_return(std::move(on_finish));
+  ScrollableArea::ScrollCallback run_on_return(BindOnce(
+      [](ScrollableArea::ScrollCallback callback,
+         ScrollableArea::ScrollCompletionMode mode) {
+        if (callback) {
+          std::move(callback).Run(mode);
+        }
+      },
+      std::move(on_finish)));
 
   base::PowerSaveModeMonitor* monitor = base::PowerSaveModeMonitor::Get();
   if (monitor && monitor->IsOnPowerSaveMode() &&
       granularity != ui::ScrollGranularity::kScrollByPage) {
     return ScrollAnimatorBase::UserScroll(granularity, delta,
-                                          run_on_return.Release());
+                                          std::move(run_on_return));
   }
 
   if (!scrollable_area_->ScrollAnimatorEnabled() ||
@@ -128,7 +136,7 @@ ScrollResult ScrollAnimator::UserScroll(
     if (HasRunningAnimation())
       CancelAnimation();
     return ScrollAnimatorBase::UserScroll(granularity, delta,
-                                          run_on_return.Release());
+                                          std::move(run_on_return));
   }
 
   TRACE_EVENT0("blink", "ScrollAnimator::scroll");
@@ -144,9 +152,11 @@ ScrollResult ScrollAnimator::UserScroll(
 
   if (WillAnimateToOffset(target_offset)) {
     last_granularity_ = granularity;
-    if (on_finish_)
-      std::move(on_finish_).Run();
-    on_finish_ = run_on_return.Release();
+    if (on_finish_) {
+      std::move(on_finish_)
+          .Run(ScrollableArea::ScrollCompletionMode::kInterruptedByScroll);
+    }
+    on_finish_ = std::move(run_on_return);
     // Report unused delta only if there is no animation running. See
     // comment below regarding scroll latching.
     // TODO(bokan): Need to standardize how ScrollAnimators report
@@ -164,7 +174,9 @@ ScrollResult ScrollAnimator::UserScroll(
   // starting one. This ensures we latch for the duration of the
   // animation rather than animating multiple scrollers at the same time.
   if (on_finish_)
-    std::move(on_finish_).Run();
+    std::move(on_finish_).Run(ScrollableArea::ScrollCompletionMode::kFinished);
+
+  std::move(run_on_return).Run(ScrollableArea::ScrollCompletionMode::kFinished);
   return ScrollResult(false, false, delta.x(), delta.y());
 }
 
@@ -268,8 +280,10 @@ void ScrollAnimator::TickAnimation(base::TimeTicks monotonic_time) {
 
   if (is_finished) {
     run_state_ = RunState::kPostAnimationCleanup;
-    if (on_finish_)
-      std::move(on_finish_).Run();
+    if (on_finish_) {
+      std::move(on_finish_)
+          .Run(ScrollableArea::ScrollCompletionMode::kFinished);
+    }
   } else {
     GetScrollableArea()->ScheduleAnimation();
   }
@@ -389,19 +403,19 @@ void ScrollAnimator::NotifyCompositorAnimationAborted(int group_id) {
   // animation.
   ScrollAnimatorCompositorCoordinator::CompositorAnimationFinished(group_id);
   if (on_finish_)
-    std::move(on_finish_).Run();
+    std::move(on_finish_).Run(ScrollableArea::ScrollCompletionMode::kFinished);
 }
 
 void ScrollAnimator::NotifyCompositorAnimationFinished(int group_id) {
   ScrollAnimatorCompositorCoordinator::CompositorAnimationFinished(group_id);
   if (on_finish_)
-    std::move(on_finish_).Run();
+    std::move(on_finish_).Run(ScrollableArea::ScrollCompletionMode::kFinished);
 }
 
 void ScrollAnimator::CancelAnimation() {
   ScrollAnimatorCompositorCoordinator::CancelAnimation();
   if (on_finish_)
-    std::move(on_finish_).Run();
+    std::move(on_finish_).Run(ScrollableArea::ScrollCompletionMode::kFinished);
 #if BUILDFLAG(IS_MAC)
   have_scrolled_since_page_load_ = false;
 #endif

@@ -15,6 +15,9 @@
 namespace media {
 class DecoderFactory;
 class GpuVideoAcceleratorFactories;
+namespace mojom {
+class InterfaceFactory;
+}  // namespace mojom
 }
 
 namespace base {
@@ -42,6 +45,7 @@ PLATFORM_EXPORT std::unique_ptr<webrtc::VideoDecoderFactory>
 CreateWebrtcVideoDecoderFactory(
     media::GpuVideoAcceleratorFactories* gpu_factories,
     base::WeakPtr<media::DecoderFactory> media_decoder_factory,
+    media::mojom::InterfaceFactory* media_interface_factory,
     scoped_refptr<base::SequencedTaskRunner> media_task_runner,
     const gfx::ColorSpace& render_color_space,
     StatsCollector::StoreProcessingStatsCB stats_callback);

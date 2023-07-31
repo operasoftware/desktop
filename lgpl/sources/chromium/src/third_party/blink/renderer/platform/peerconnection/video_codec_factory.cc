@@ -20,7 +20,6 @@
 #include "third_party/webrtc/api/video_codecs/video_decoder_software_fallback_wrapper.h"
 #include "third_party/webrtc/api/video_codecs/video_encoder_software_fallback_wrapper.h"
 #include "third_party/webrtc/media/base/codec.h"
-#include "third_party/webrtc/media/engine/encoder_simulcast_proxy.h"
 #include "third_party/webrtc/media/engine/internal_decoder_factory.h"
 #include "third_party/webrtc/media/engine/internal_encoder_factory.h"
 #include "third_party/webrtc/media/engine/simulcast_encoder_adapter.h"
@@ -33,10 +32,6 @@
 namespace blink {
 
 namespace {
-// Kill switch to disable WebRTC Media Capabilities stats collection.
-BASE_FEATURE(kWebrtcMediaCapabilitiesStatsCollection,
-             "WebrtcMediaCapabilitiesStatsCollection",
-             base::FEATURE_ENABLED_BY_DEFAULT);
 
 template <typename Factory>
 bool IsFormatSupported(const Factory* factory,
@@ -73,17 +68,6 @@ std::unique_ptr<webrtc::VideoDecoder> Wrap(
   }
   return hardware_decoder ? std::move(hardware_decoder)
                           : std::move(software_decoder);
-}
-
-std::unique_ptr<webrtc::VideoEncoder> Wrap(
-    std::unique_ptr<webrtc::VideoEncoder> software_encoder,
-    std::unique_ptr<webrtc::VideoEncoder> hardware_encoder) {
-  if (software_encoder && hardware_encoder) {
-    return webrtc::CreateVideoEncoderSoftwareFallbackWrapper(
-        std::move(software_encoder), std::move(hardware_encoder));
-  }
-  return hardware_encoder ? std::move(hardware_encoder)
-                          : std::move(software_encoder);
 }
 
 // This class combines a hardware factory with the internal factory and adds
@@ -137,53 +121,23 @@ class EncoderAdapter : public webrtc::VideoEncoderFactory {
       return nullptr;
     }
 
-    std::unique_ptr<webrtc::VideoEncoder> encoder;
-    if (base::EqualsCaseInsensitiveASCII(format.name.c_str(),
-                                         cricket::kVp9CodecName) ||
-        base::EqualsCaseInsensitiveASCII(format.name.c_str(),
-                                         cricket::kAv1CodecName)) {
-      // For VP9 and AV1 we don't use simulcast.
-      std::unique_ptr<webrtc::VideoEncoder> software_encoder =
-          supported_in_software
-              ? software_encoder_factory_.CreateVideoEncoder(format)
-              : nullptr;
-      if (!software_encoder && platform_supported_in_software) {
-        software_encoder =
-            platform_software_encoder_factory_->CreateVideoEncoder(format);
-      }
-      std::unique_ptr<webrtc::VideoEncoder> hardware_encoder =
-          supported_in_hardware
-              ? hardware_encoder_factory_->CreateVideoEncoder(format)
-              : nullptr;
+    VideoEncoderFactory* primary_factory =
+        supported_in_hardware   ? hardware_encoder_factory_.get()
+        : supported_in_software ? &software_encoder_factory_
+                                : platform_software_encoder_factory_.get();
+    VideoEncoderFactory* fallback_factory =
+        supported_in_hardware ? supported_in_software
+                                    ? &software_encoder_factory_
+                                : platform_supported_in_software
+                                    ? platform_software_encoder_factory_.get()
+                                    : nullptr
+                              : nullptr;
+    std::unique_ptr<webrtc::VideoEncoder> encoder =
+        std::make_unique<webrtc::SimulcastEncoderAdapter>(
+            primary_factory, fallback_factory, format);
 
-      encoder = Wrap(std::move(software_encoder), std::move(hardware_encoder));
-    } else {
-      VideoEncoderFactory* primary_factory =
-          supported_in_hardware ? hardware_encoder_factory_.get()
-                                : &software_encoder_factory_;
-      VideoEncoderFactory* fallback_factory =
-          supported_in_hardware && supported_in_software
-              ? &software_encoder_factory_
-              : nullptr;
-      if (primary_factory == &software_encoder_factory_ &&
-          !supported_in_software) {
-        primary_factory = platform_software_encoder_factory_.get();
-      }
-      if (!fallback_factory && supported_in_hardware &&
-          platform_supported_in_software) {
-        fallback_factory = platform_software_encoder_factory_.get();
-      }
-      encoder = std::make_unique<webrtc::SimulcastEncoderAdapter>(
-          primary_factory, fallback_factory, format);
-    }
-
-    if (encoder &&
-        base::FeatureList::IsEnabled(kWebrtcMediaCapabilitiesStatsCollection)) {
-      return std::make_unique<StatsCollectingEncoder>(
-          format, std::move(encoder), stats_callback_);
-    } else {
-      return encoder;
-    }
+    return std::make_unique<StatsCollectingEncoder>(format, std::move(encoder),
+                                                    stats_callback_);
   }
 
   std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override {
@@ -229,11 +183,15 @@ class EncoderAdapter : public webrtc::VideoEncoderFactory {
 // adds internal SW codecs and SW fallback wrappers.
 class DecoderAdapter : public webrtc::VideoDecoderFactory {
  public:
-  explicit DecoderAdapter(
+  DecoderAdapter(
       std::unique_ptr<webrtc::VideoDecoderFactory> hardware_decoder_factory,
+      media::mojom::InterfaceFactory* media_interface_factory,
       scoped_refptr<base::SequencedTaskRunner> media_task_runner,
+      const gfx::ColorSpace& render_color_space,
       StatsCollector::StoreProcessingStatsCB stats_callback)
-      : platform_software_decoder_factory_(std::move(media_task_runner)),
+      : platform_software_decoder_factory_(media_interface_factory,
+                                           std::move(media_task_runner),
+                                           render_color_space),
         hardware_decoder_factory_(std::move(hardware_decoder_factory)),
         stats_callback_(stats_callback) {}
 
@@ -252,14 +210,9 @@ class DecoderAdapter : public webrtc::VideoDecoderFactory {
     if (!software_decoder && !hardware_decoder)
       return nullptr;
 
-    if (base::FeatureList::IsEnabled(kWebrtcMediaCapabilitiesStatsCollection)) {
-      return std::make_unique<StatsCollectingDecoder>(
-          format,
-          Wrap(std::move(software_decoder), std::move(hardware_decoder)),
-          stats_callback_);
-    } else {
-      return Wrap(std::move(software_decoder), std::move(hardware_decoder));
-    }
+    return std::make_unique<StatsCollectingDecoder>(
+        format, Wrap(std::move(software_decoder), std::move(hardware_decoder)),
+        stats_callback_);
   }
 
   std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override {
@@ -339,6 +292,7 @@ std::unique_ptr<webrtc::VideoEncoderFactory> CreateWebrtcVideoEncoderFactory(
 std::unique_ptr<webrtc::VideoDecoderFactory> CreateWebrtcVideoDecoderFactory(
     media::GpuVideoAcceleratorFactories* gpu_factories,
     base::WeakPtr<media::DecoderFactory> media_decoder_factory,
+    media::mojom::InterfaceFactory* media_interface_factory,
     scoped_refptr<base::SequencedTaskRunner> media_task_runner,
     const gfx::ColorSpace& render_color_space,
     StatsCollector::StoreProcessingStatsCB stats_callback) {
@@ -359,7 +313,8 @@ std::unique_ptr<webrtc::VideoDecoderFactory> CreateWebrtcVideoDecoderFactory(
   }
 
   return std::make_unique<DecoderAdapter>(
-      std::move(decoder_factory), std::move(media_task_runner), stats_callback);
+      std::move(decoder_factory), media_interface_factory,
+      std::move(media_task_runner), render_color_space, stats_callback);
 }
 
 }  // namespace blink

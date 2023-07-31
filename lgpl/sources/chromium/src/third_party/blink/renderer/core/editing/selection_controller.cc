@@ -155,6 +155,16 @@ void MarkSelectionEndpointsForRepaint(const SelectionInFlatTree& selection) {
   }
 }
 
+bool IsNonSelectable(const Node* node) {
+  LayoutObject* layout_object = node ? node->GetLayoutObject() : nullptr;
+  return !layout_object || !layout_object->IsSelectable();
+}
+
+inline bool ShouldIgnoreNodeForCheckSelectable(const Node* enclosing_block,
+                                               const Node* node) {
+  return node == enclosing_block || (node && node->IsTextNode());
+}
+
 }  // namespace
 
 SelectionInFlatTree AdjustSelectionWithTrailingWhitespace(
@@ -178,6 +188,64 @@ SelectionInFlatTree AdjustSelectionWithTrailingWhitespace(
   }
   return SelectionInFlatTree::Builder(selection)
       .SetBaseAndExtent(new_end, selection.Extent())
+      .Build();
+}
+
+SelectionInFlatTree AdjustSelectionByUserSelect(
+    Node* anchor_node,
+    const SelectionInFlatTree& selection) {
+  DCHECK(anchor_node);
+
+  if (selection.IsNone())
+    return SelectionInFlatTree();
+
+  SelectionInFlatTree expanded_selection =
+      ExpandSelectionToRespectUserSelectAll(anchor_node, selection);
+  Element* enclosing_block = EnclosingBlock(anchor_node);
+
+  PositionInFlatTree base = expanded_selection.Base();
+  PositionInFlatTree new_start_pos =
+      PositionInFlatTree::FirstPositionInNode(*anchor_node);
+  for (PositionIteratorInFlatTree iter =
+           PositionIteratorInFlatTree(new_start_pos);
+       !iter.AtStart(); iter.Decrement()) {
+    PositionInFlatTree current_pos = iter.ComputePosition();
+    if (current_pos <= base) {
+      new_start_pos = base;
+      break;
+    }
+
+    if (!ShouldIgnoreNodeForCheckSelectable(enclosing_block, iter.GetNode()) &&
+        IsNonSelectable(iter.GetNode())) {
+      new_start_pos = current_pos;
+      break;
+    }
+  }
+
+  PositionInFlatTree extent = expanded_selection.Extent();
+  PositionInFlatTree new_end_pos =
+      PositionInFlatTree::LastPositionInNode(*anchor_node);
+  for (PositionIteratorInFlatTree iter =
+           PositionIteratorInFlatTree(new_end_pos);
+       !iter.AtEnd(); iter.Increment()) {
+    PositionInFlatTree current_pos = iter.ComputePosition();
+    if (current_pos >= extent) {
+      new_end_pos = extent;
+      break;
+    }
+
+    if (!ShouldIgnoreNodeForCheckSelectable(enclosing_block, iter.GetNode()) &&
+        IsNonSelectable(iter.GetNode())) {
+      new_end_pos = current_pos;
+      break;
+    }
+  }
+
+  return SelectionInFlatTree::Builder()
+      .Collapse(
+          MostBackwardCaretPosition(new_start_pos, kCannotCrossEditingBoundary))
+      .Extend(
+          MostForwardCaretPosition(new_end_pos, kCannotCrossEditingBoundary))
       .Build();
 }
 
@@ -364,6 +432,15 @@ bool SelectionController::HandleSingleClick(
           : visible_hit_position;
   const VisibleSelectionInFlatTree& selection =
       Selection().ComputeVisibleSelectionInFlatTree();
+  const bool is_editable = IsEditable(*inner_node);
+
+  if (frame_->GetEditor().Behavior().ShouldToggleMenuWhenCaretTapped() &&
+      is_editable && event.Event().FromTouch() && selection.IsCaret() &&
+      selection.Base() == position_to_use.GetPosition()) {
+    mouse_down_was_single_click_on_caret_ = true;
+    HandleTapOnCaret(event, selection.AsSelection());
+    return false;
+  }
 
   // Don't restart the selection when the mouse is pressed on an
   // existing selection so we can allow for text dragging.
@@ -418,7 +495,6 @@ bool SelectionController::HandleSingleClick(
   }
 
   bool is_handle_visible = false;
-  const bool is_editable = IsEditable(*inner_node);
   if (is_editable) {
     const bool is_text_box_empty =
         !RootEditableElement(*inner_node)->HasChildren();
@@ -452,7 +528,7 @@ bool SelectionController::HandleSingleClick(
           SetSelectionOptions::Builder()
               .SetShouldShowHandle(is_handle_visible)
               .Build())) {
-    // UpdateSelectionForMouseDownDispatchingSelectStart() returns false when
+    // UpdateSelectionForEventDispatchingSelectStart() returns false when
     // the selectstart handler has prevented the default selection behavior from
     // occurring.
     return false;
@@ -467,6 +543,32 @@ bool SelectionController::HandleSingleClick(
   }
 
   return false;
+}
+
+// Returns true if the tap is processed.
+void SelectionController::HandleTapOnCaret(
+    const MouseEventWithHitTestResults& event,
+    const SelectionInFlatTree& selection) {
+  Node* inner_node = event.InnerNode();
+  const bool is_text_box_empty =
+      !RootEditableElement(*inner_node)->HasChildren();
+
+  // If the textbox is empty, tapping the caret should toggle showing/hiding the
+  // handle. Otherwise, always show the handle.
+  const bool should_show_handle =
+      !is_text_box_empty || !Selection().IsHandleVisible();
+
+  // Repaint the caret to ensure that the handle is shown if needed.
+  MarkSelectionEndpointsForRepaint(selection);
+  const bool did_select = UpdateSelectionForEventDispatchingSelectStart(
+      inner_node, selection,
+      SetSelectionOptions::Builder()
+          .SetShouldShowHandle(should_show_handle)
+          .Build());
+  if (did_select) {
+    frame_->GetEventHandler().ShowNonLocatedContextMenu(nullptr,
+                                                        kMenuSourceTouch);
+  }
 }
 
 // Returns true if the tap is processed.
@@ -999,14 +1101,14 @@ bool SelectionController::HandleTripleClick(
                 SelectionInFlatTree::Builder().Collapse(pos).Build(),
                 TextGranularity::kParagraph)
           : SelectionInFlatTree();
+  const SelectionInFlatTree adjusted_selection =
+      AdjustSelectionByUserSelect(inner_node, new_selection);
 
   const bool is_handle_visible =
       event.Event().FromTouch() && new_selection.IsRange();
 
   const bool did_select = UpdateSelectionForEventDispatchingSelectStart(
-      inner_node,
-      ExpandSelectionToRespectUserSelectAll(inner_node, new_selection),
-
+      inner_node, adjusted_selection,
       SetSelectionOptions::Builder()
           .SetGranularity(TextGranularity::kParagraph)
           .SetShouldShowHandle(is_handle_visible)
@@ -1032,6 +1134,7 @@ bool SelectionController::HandleMousePressEvent(
   mouse_down_may_start_select_ = (CanStartSelect(node, SelectionStartPolicy::kDefault) ||
                                   IsSelectionOverLink(event)) &&
                                  !event.GetScrollbar();
+  mouse_down_was_single_click_on_caret_ = false;
   link_selection_might_start_during_drag_ =
       !mouse_down_may_start_select_ && event.IsOverLink() &&
       !event.GetScrollbar() &&
@@ -1266,7 +1369,8 @@ void SelectionController::UpdateSelectionForContextMenuEvent(
     const PhysicalOffset& position) {
   if (!Selection().IsAvailable())
     return;
-  if (Selection().Contains(position) || hit_test_result.GetScrollbar() ||
+  if (mouse_down_was_single_click_on_caret_ || Selection().Contains(position) ||
+      hit_test_result.GetScrollbar() ||
       // FIXME: In the editable case, word selection sometimes selects content
       // that isn't underneath the mouse.
       // If the selection is non-editable, we do word selection to make it
@@ -1276,8 +1380,9 @@ void SelectionController::UpdateSelectionForContextMenuEvent(
             .ComputeVisibleSelectionInDOMTreeDeprecated()
             .IsContentEditable() ||
         (hit_test_result.InnerNode() &&
-         hit_test_result.InnerNode()->IsTextNode())))
+         hit_test_result.InnerNode()->IsTextNode()))) {
     return;
+  }
 
   // Context menu events are always allowed to perform a selection.
   base::AutoReset<bool> mouse_down_may_start_select_change(

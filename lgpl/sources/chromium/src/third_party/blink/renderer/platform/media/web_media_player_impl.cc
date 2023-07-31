@@ -25,6 +25,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -35,7 +36,6 @@
 #include "components/viz/common/gpu/raster_context_provider.h"
 #include "media/audio/null_audio_sink.h"
 #include "media/base/audio_renderer_sink.h"
-#include "media/base/bind_to_current_loop.h"
 #include "media/base/cdm_context.h"
 #include "media/base/demuxer.h"
 #include "media/base/encryption_scheme.h"
@@ -97,6 +97,10 @@
 #include "third_party/blink/renderer/platform/media/web_inband_text_track_impl.h"
 #include "third_party/blink/renderer/platform/media/web_media_source_impl.h"
 #include "ui/gfx/geometry/size.h"
+
+#if BUILDFLAG(ENABLE_HLS_DEMUXER)
+#include "third_party/blink/renderer/platform/media/hls_data_source_provider_impl.h"
+#endif  // BUILDFLAG(ENABLE_HLS_DEMUXER)
 
 #if BUILDFLAG(IS_ANDROID)
 #include "media/base/android/media_codec_util.h"
@@ -374,6 +378,7 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
           media_log_.get(),
           frame_->GetDocument().SiteForCookies(),
           frame_->GetDocument().TopFrameOrigin(),
+          frame_->GetDocument().HasStorageAccess(),
           enable_instant_source_buffer_gc,
           std::move(demuxer_override))),
       tick_clock_(base::DefaultTickClock::GetInstance()),
@@ -428,7 +433,8 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
 
   // Using base::Unretained(this) is safe because the `pipeline` is owned by
   // `this` and the callback will always be made on the main task runner.
-  // Not using BindToCurrentLoop() because CreateRenderer() is a sync call.
+  // Not using base::BindPostTaskToCurrentDefault() because CreateRenderer() is
+  // a sync call.
   auto pipeline = std::make_unique<media::PipelineImpl>(
       media_task_runner_, main_task_runner_,
       base::BindRepeating(&WebMediaPlayerImpl::CreateRenderer,
@@ -513,9 +519,9 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
 
 #if BUILDFLAG(IS_ANDROID)
   renderer_factory_selector_->SetRemotePlayStateChangeCB(
-      media::BindToCurrentLoop(base::BindRepeating(
+      base::BindPostTaskToCurrentDefault(base::BindRepeating(
           &WebMediaPlayerImpl::OnRemotePlayStateChange, weak_this_)));
-#endif  // defined (OS_ANDROID)
+#endif  // defined (IS_ANDROID)
 }
 
 WebMediaPlayerImpl::~WebMediaPlayerImpl() {
@@ -1570,6 +1576,15 @@ void WebMediaPlayerImpl::AddVideoTrack(const std::string& id,
 }
 #endif  // BUILDFLAG(ENABLE_FFMPEG)
 
+#if BUILDFLAG(ENABLE_HLS_DEMUXER)
+base::SequenceBound<media::HlsDataSourceProvider>
+WebMediaPlayerImpl::GetHlsDataSourceProvider() {
+  return base::SequenceBound<HlsDataSourceProviderImpl>(
+      main_task_runner_, media_log_.get(), url_index_, main_task_runner_,
+      media_task_runner_, tick_clock_);
+}
+#endif
+
 void WebMediaPlayerImpl::SetCdmInternal(WebContentDecryptionModule* cdm) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   DCHECK(cdm);
@@ -1621,11 +1636,11 @@ void WebMediaPlayerImpl::OnCdmAttached(bool success) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   DCHECK(pending_cdm_context_ref_);
 
+  media_log_->SetProperty<MediaLogProperty::kIsCdmAttached>(success);
+
   // If the CDM is set from the constructor there is no promise
   // (`set_cdm_result_`) to fulfill.
   if (success) {
-    media_log_->SetProperty<MediaLogProperty::kIsVideoEncrypted>(true);
-
     // This will release the previously attached CDM (if any).
     cdm_context_ref_ = std::move(pending_cdm_context_ref_);
     if (set_cdm_result_) {
@@ -1696,6 +1711,8 @@ void WebMediaPlayerImpl::OnPipelineSeeked(bool time_updated) {
 void WebMediaPlayerImpl::OnPipelineSuspended() {
   // Add a log event so the player shows up as "SUSPENDED" in media-internals.
   media_log_->AddEvent<MediaLogEvent::kSuspended>();
+
+  pending_oneshot_suspend_ = false;
 
   if (attempting_suspended_start_) {
     DCHECK(pipeline_controller_->IsSuspended());
@@ -1804,20 +1821,26 @@ void WebMediaPlayerImpl::UpdateLoadedUrl(const GURL& url) {
   loaded_url_ = url;
 }
 
-bool WebMediaPlayerImpl::RestartForHls() {
+void WebMediaPlayerImpl::RestartForHls() {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
-
   observer_->OnHlsManifestDetected();
-#if BUILDFLAG(IS_ANDROID)
-  // TODO: DCHECK that |pipeline_| is stopped.
+
+  // Use the media player renderer if the native hls demuxer isn't compiled in
+  // or if the feature is disabled.
+#if BUILDFLAG(ENABLE_HLS_DEMUXER)
+  if (!base::FeatureList::IsEnabled(media::kBuiltInHlsPlayer)) {
+    renderer_factory_selector_->SetBaseRendererType(
+        media::RendererType::kMediaPlayer);
+  }
+#elif BUILDFLAG(IS_ANDROID)
   renderer_factory_selector_->SetBaseRendererType(
       media::RendererType::kMediaPlayer);
+#else
+  // Shouldn't be reachable from desktop where hls is not enabled.
+  NOTREACHED();
+#endif
   SetMemoryReportingState(false);
   StartPipeline();
-  return true;
-#else
-  return false;
-#endif
 }
 
 void WebMediaPlayerImpl::OnError(media::PipelineStatus status) {
@@ -1839,7 +1862,7 @@ void WebMediaPlayerImpl::OnError(media::PipelineStatus status) {
 #endif  // BUILDFLAG(IS_WIN)
 
   MaybeSetContainerNameForMetrics();
-  ReportPipelineError(load_type_, status);
+  ReportPipelineError(load_type_, pipeline_metadata_, status);
   simple_watch_timer_.Stop();
   media_log_->NotifyError(status);
   media_metrics_provider_->OnError(status);
@@ -1961,6 +1984,7 @@ void WebMediaPlayerImpl::OnMetadata(const media::PipelineMetadata& metadata) {
   if (!HasVideo() && !HasAudio()) {
     DVLOG(1) << __func__ << ": no audio and no video -> error";
     OnError(media::DEMUXER_ERROR_COULD_NOT_OPEN);
+    media::ReportDemuxerErrorDetails(media::DemuxerErrorDetails::kNoTracks);
     return;  // Do not transition to HAVE_METADATA.
   }
 
@@ -2281,6 +2305,16 @@ void WebMediaPlayerImpl::OnWaiting(media::WaitingReason reason) {
     // PipelineImpl.
     case media::WaitingReason::kDecoderStateLost:
       pipeline_controller_->OnDecoderStateLost();
+      return;
+
+    // On Android, it happens when the surface used by the decoder is destroyed,
+    // e.g. background. We want to suspend the pipeline and hope the surface
+    // will be available when resuming the pipeline by some other signals.
+    case media::WaitingReason::kSecureSurfaceLost:
+      if (!pipeline_controller_->IsSuspended() && !pending_oneshot_suspend_) {
+        pending_oneshot_suspend_ = true;
+        UpdatePlayState();
+      }
       return;
   }
 }
@@ -2760,8 +2794,9 @@ std::unique_ptr<media::Renderer> WebMediaPlayerImpl::CreateRenderer(
 
   media::RequestOverlayInfoCB request_overlay_info_cb;
 #if BUILDFLAG(IS_ANDROID)
-  request_overlay_info_cb = media::BindToCurrentLoop(base::BindRepeating(
-      &WebMediaPlayerImpl::OnOverlayInfoRequested, weak_this_));
+  request_overlay_info_cb =
+      base::BindPostTaskToCurrentDefault(base::BindRepeating(
+          &WebMediaPlayerImpl::OnOverlayInfoRequested, weak_this_));
 #endif
 
   if (renderer_type) {
@@ -2780,10 +2815,13 @@ std::unique_ptr<media::Renderer> WebMediaPlayerImpl::CreateRenderer(
   media_metrics_provider_->SetRendererType(renderer_type_);
   media_log_->SetProperty<MediaLogProperty::kRendererName>(renderer_type_);
 
-  return renderer_factory_selector_->GetCurrentFactory()->CreateRenderer(
-      media_task_runner_, worker_task_runner_, audio_source_provider_.get(),
-      compositor_.get(), std::move(request_overlay_info_cb),
-      client_->TargetColorSpace());
+  return renderer_factory_selector_->GetCurrentFactory()
+      ->CreateRendererWithCallback(
+          media_task_runner_, worker_task_runner_, audio_source_provider_.get(),
+          compositor_.get(), std::move(request_overlay_info_cb),
+          client_->TargetColorSpace(),
+          base::BindPostTaskToCurrentDefault(base::BindRepeating(
+              &WebMediaPlayerImpl::BounceCallback, weak_this_)));
 }
 
 absl::optional<media::DemuxerType> WebMediaPlayerImpl::GetDemuxerType() const {
@@ -2829,7 +2867,7 @@ void WebMediaPlayerImpl::StartPipeline() {
       FROM_HERE,
       base::BindOnce(&VideoFrameCompositor::SetOnNewProcessedFrameCallback,
                      base::Unretained(compositor_.get()),
-                     media::BindToCurrentLoop(base::BindOnce(
+                     base::BindPostTaskToCurrentDefault(base::BindOnce(
                          &WebMediaPlayerImpl::OnFirstFrame, weak_this_))));
 
   // base::Unretained(this) is safe here, since |CreateDemuxer| calls the bound
@@ -3057,7 +3095,8 @@ WebMediaPlayerImpl::UpdatePlayState_ComputePlayState(
     bool is_in_picture_in_picture) {
   PlayState result;
 
-  bool must_suspend = was_suspended_for_frame_closed_;
+  bool must_suspend =
+      was_suspended_for_frame_closed_ || pending_oneshot_suspend_;
   bool is_stale = delegate_->IsStale(delegate_id_);
 
   if (stale_state_override_for_testing_.has_value() &&
@@ -3338,7 +3377,7 @@ void WebMediaPlayerImpl::CreateWatchTimeReporter() {
           pipeline_metadata_.has_audio, has_video, false, false,
           GetDemuxerType() == media::DemuxerType::kChunkDemuxer, is_encrypted_,
           embedded_media_experience_enabled_,
-          media::mojom::MediaStreamType::kNone),
+          media::mojom::MediaStreamType::kNone, renderer_type_),
       pipeline_metadata_.natural_size,
       base::BindRepeating(&WebMediaPlayerImpl::GetCurrentTimeInternal,
                           base::Unretained(this)),
@@ -3457,7 +3496,7 @@ void WebMediaPlayerImpl::RequestVideoFrameCallback() {
   }
 
   compositor_->SetOnFramePresentedCallback(
-      media::BindToCurrentLoop(base::BindOnce(
+      base::BindPostTaskToCurrentDefault(base::BindOnce(
           &WebMediaPlayerImpl::OnNewFramePresentedCallback, weak_this_)));
 }
 
@@ -3740,7 +3779,8 @@ void WebMediaPlayerImpl::WriteSplitHistogram(
 
 void WebMediaPlayerImpl::RecordUnderflowDuration(base::TimeDelta duration) {
   DCHECK(demuxer_manager_->HasDataSource() ||
-         GetDemuxerType() == media::DemuxerType::kChunkDemuxer);
+         GetDemuxerType() == media::DemuxerType::kChunkDemuxer ||
+         GetDemuxerType() == media::DemuxerType::kManifestDemuxer);
   WriteSplitHistogram<kPlaybackType | kEncrypted>(
       &base::UmaHistogramTimes, "Media.UnderflowDuration2", duration);
 }
@@ -3951,6 +3991,11 @@ void WebMediaPlayerImpl::ReportSessionUMAs() const {
 
 bool WebMediaPlayerImpl::PassedTimingAllowOriginCheck() const {
   return demuxer_manager_->PassedDataSourceTimingAllowOriginCheck();
+}
+
+void WebMediaPlayerImpl::BounceCallback(base::OnceClosure callback) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+  std::move(callback).Run();
 }
 
 }  // namespace blink

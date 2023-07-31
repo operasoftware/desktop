@@ -80,7 +80,7 @@ class TestEncoder final : public media::VideoEncoder {
         output.timestamp = base::TimeDelta::Max();
       } else {
         output.timestamp = pending_encode.frame->timestamp();
-        output.key_frame = pending_encode.key_frame;
+        output.key_frame = pending_encode.options.key_frame;
       }
       task_runner_->PostTask(
           FROM_HERE, base::BindOnce(output_cb_, std::move(output),
@@ -105,12 +105,12 @@ class TestEncoder final : public media::VideoEncoder {
     RespondWithStatus(std::move(done_cb), status_);
   }
   void Encode(scoped_refptr<media::VideoFrame> frame,
-              bool key_frame,
+              const EncodeOptions& options,
               EncoderStatusCB done_cb) override {
     ASSERT_TRUE(is_initialized());
     PendingEncode pending_encode;
     pending_encode.frame = std::move(frame);
-    pending_encode.key_frame = key_frame;
+    pending_encode.options = options;
     pending_encodes_.push_back(std::move(pending_encode));
     RespondWithStatus(std::move(done_cb), status_);
   }

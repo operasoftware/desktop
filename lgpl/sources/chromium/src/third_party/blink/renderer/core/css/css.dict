@@ -936,6 +936,8 @@
 "spelling-error"
 "grammar-error"
 "color-contrast"
+"accentcolor"
+"accentcolortext"
 
 # at-rules
 "@charset"

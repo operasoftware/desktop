@@ -65,6 +65,10 @@ bool NetworkInformation::IsObserving() const {
 }
 
 String NetworkInformation::type() const {
+  if (RuntimeEnabledFeatures::NetInfoConstantTypeEnabled()) {
+    return ConnectionTypeToString(kWebConnectionTypeUnknown);
+  }
+
   // type_ is only updated when listening for events, so ask
   // networkStateNotifier if not listening (crbug.com/379841).
   if (!IsObserving())
@@ -75,6 +79,10 @@ String NetworkInformation::type() const {
 }
 
 double NetworkInformation::downlinkMax() const {
+  if (RuntimeEnabledFeatures::NetInfoConstantTypeEnabled()) {
+    return std::numeric_limits<double>::infinity();
+  }
+
   if (!IsObserving())
     return GetNetworkStateNotifier().MaxBandwidth();
 
@@ -273,7 +281,8 @@ NetworkInformation* NetworkInformation::connection(NavigatorBase& navigator) {
 }
 
 NetworkInformation::NetworkInformation(NavigatorBase& navigator)
-    : Supplement<NavigatorBase>(navigator),
+    : ActiveScriptWrappable<NetworkInformation>({}),
+      Supplement<NavigatorBase>(navigator),
       ExecutionContextLifecycleObserver(navigator.GetExecutionContext()),
       web_holdback_console_message_shown_(false),
       context_stopped_(false) {

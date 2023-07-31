@@ -36,7 +36,10 @@
   }
 
   function hasDetachButton_() {
-    return document.querySelector('#detach-button-host') != null;
+    const button =
+        document.getElementById('detach-button-host')
+        .shadowRoot.getElementById('video-detach-button');
+    return button && !button.hasAttribute('disabled');
   }
 </script>
 </html>

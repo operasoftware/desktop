@@ -362,6 +362,10 @@ void UseCounterCallback(v8::Isolate* isolate,
       blink_feature =
           WebFeature::kV8InvalidatedTypedArraySpeciesLookupChainProtector;
       break;
+    case v8::Isolate::kInvalidatedNumberStringNotRegexpLikeProtector:
+      blink_feature =
+          WebFeature::kV8InvalidatedNumberStringNotRegexpLikeProtector;
+      break;
     case v8::Isolate::kVarRedeclaredCatchBinding:
       blink_feature = WebFeature::kV8VarRedeclaredCatchBinding;
       break;
@@ -392,6 +396,12 @@ void UseCounterCallback(v8::Isolate* isolate,
     case v8::Isolate::kRegExpUnicodeSetIncompatibilitiesWithUnicodeMode:
       blink_feature =
           WebFeature::kV8RegExpUnicodeSetIncompatibilitiesWithUnicodeMode;
+      break;
+    case v8::Isolate::kImportAssertionDeprecatedSyntax:
+      blink_feature = WebFeature::kV8ImportAssertionDeprecatedSyntax;
+      break;
+    case v8::Isolate::kCompileHintsMagicAll:
+      blink_feature = WebFeature::kV8CompileHintsMagicAll;
       break;
     default:
       // This can happen if V8 has added counters that this version of Blink

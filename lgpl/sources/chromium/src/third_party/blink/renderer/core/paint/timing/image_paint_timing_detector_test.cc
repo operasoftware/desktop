@@ -282,7 +282,7 @@ class ImagePaintTimingDetectorTest : public testing::Test,
     sk_sp<SkColorSpace> src_rgb_color_space = SkColorSpace::MakeSRGB();
     SkImageInfo raster_image_info =
         SkImageInfo::MakeN32Premul(width, height, src_rgb_color_space);
-    sk_sp<SkSurface> surface(SkSurface::MakeRaster(raster_image_info));
+    sk_sp<SkSurface> surface(SkSurfaces::Raster(raster_image_info));
     sk_sp<SkImage> image = surface->makeImageSnapshot();
     ImageResourceContent* original_image_content =
         ImageResourceContent::CreateLoaded(
@@ -1240,6 +1240,17 @@ TEST_P(ImagePaintTimingDetectorTest, LargestImagePaint_FullViewportImage) {
 }
 
 TEST_P(ImagePaintTimingDetectorTest, LargestImagePaint_Detached_Frame) {
+#if BUILDFLAG(IS_ANDROID)
+  if (RuntimeEnabledFeatures::SolidColorLayersEnabled() ||
+      RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()) {
+    // TODO(crbug.com/1353921, crbug.com/1414885):
+    // This test is flaky on Android. Fix it.
+    // https://chrome-swarming.appspot.com/task?id=60c68038be22f011
+    // The first EXPECT_EQ(0u, events.size()) below failed.
+    return;
+  }
+#endif
+
   using trace_analyzer::Query;
   GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(R"HTML(
@@ -1284,7 +1295,8 @@ class ImagePaintTimingDetectorFencedFrameTest
         features::kFencedFrames, {{"implementation_type", "mparch"}});
   }
 
-  void InitializeFencedFrameRoot(mojom::blink::FencedFrameMode mode) {
+  void InitializeFencedFrameRoot(
+      blink::FencedFrame::DeprecatedFencedFrameMode mode) {
     web_view_helper_.InitializeWithOpener(/*opener=*/nullptr,
                                           /*frame_client=*/nullptr,
                                           /*view_client=*/nullptr,
@@ -1313,7 +1325,8 @@ INSTANTIATE_PAINT_TEST_SUITE_P(ImagePaintTimingDetectorFencedFrameTest);
 
 TEST_P(ImagePaintTimingDetectorFencedFrameTest, NotReported) {
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
-  InitializeFencedFrameRoot(mojom::blink::FencedFrameMode::kDefault);
+  InitializeFencedFrameRoot(
+      blink::FencedFrame::DeprecatedFencedFrameMode::kDefault);
   GetDocument().SetBaseURLOverride(KURL("https://test.com"));
   SetBodyInnerHTML(R"HTML(
       <body></body>

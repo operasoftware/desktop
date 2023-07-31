@@ -104,7 +104,7 @@ bool LayoutThemeMac::IsAccentColorCustomized(
   return true;
 }
 
-Color LayoutThemeMac::GetAccentColor(
+Color LayoutThemeMac::GetSystemAccentColor(
     mojom::blink::ColorScheme color_scheme) const {
   if (@available(macOS 10.14, *)) {
     return GetSystemColor(MacSystemColorID::kControlAccentColor, color_scheme);
@@ -141,10 +141,10 @@ Color LayoutThemeMac::FocusRingColor(
     return Color::FromRGBA(0x10, 0x10, 0x10, 0xFF);
   }
 
-  SkColor keyboard_focus_indicator =
+  SkColor4f keyboard_focus_indicator =
       GetSystemColor(MacSystemColorID::kKeyboardFocusIndicator, color_scheme)
-          .ToSkColorDeprecated();
-  Color focus_ring = Color::FromSkColor(
+          .toSkColor4f();
+  Color focus_ring = Color::FromSkColor4f(
       ui::NativeTheme::GetInstanceForWeb()->FocusRingColorForBaseColor(
           keyboard_focus_indicator));
 

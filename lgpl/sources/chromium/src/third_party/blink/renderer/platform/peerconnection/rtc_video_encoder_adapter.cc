@@ -10,15 +10,16 @@
 #include "base/logging.h"
 #include "base/sequence_checker.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
-#include "media/base/bind_to_current_loop.h"
 #include "media/base/encoder_status.h"
 #include "media/base/svc_scalability_mode.h"
 #include "media/base/video_encoder.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/gpu_video_encode_accelerator_helpers.h"
+#include "media/video/video_encoder_info.h"
 #include "third_party/blink/renderer/platform/webrtc/webrtc_video_frame_adapter.h"
 #include "third_party/webrtc/modules/video_coding/include/video_codec_interface.h"
 #include "third_party/webrtc/modules/video_coding/include/video_error_codes.h"
@@ -37,6 +38,7 @@ RTCVideoEncoderAdapter::RTCVideoEncoderAdapter(
     std::unique_ptr<media::VideoEncoder> encoder)
     : profile_(profile),
       encoder_(std::move(encoder)),
+      encoder_implementation_name_("platform SW encoder"),
       // The Windows platform SW encoder may need to load a system library,
       // hence MayBlock(). This doesn't hurt since we wait for tasks to finish
       // on this runner anyway.
@@ -76,6 +78,9 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
 
   if (codec_settings->GetScalabilityMode().has_value()) {
     switch (codec_settings->GetScalabilityMode().value()) {
+      case webrtc::ScalabilityMode::kL1T1:
+        encoder_options_.scalability_mode = media::SVCScalabilityMode::kL1T1;
+        break;
       case webrtc::ScalabilityMode::kL1T2:
         encoder_options_.scalability_mode = media::SVCScalabilityMode::kL1T2;
         break;
@@ -90,7 +95,10 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
     }
   }
 
-  auto output_callback = media::BindToCurrentLoop(
+  auto info_callback = base::BindPostTaskToCurrentDefault(
+      base::BindRepeating(&RTCVideoEncoderAdapter::OnEncoderInfoUpdated,
+                          weak_ptr_factory_.GetWeakPtr()));
+auto output_callback = base::BindPostTaskToCurrentDefault(
       base::BindRepeating(&RTCVideoEncoderAdapter::OnEncodedFrameReady,
                           weak_ptr_factory_.GetWeakPtr()));
 
@@ -100,7 +108,7 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
       needs_initialization
           ? base::BindOnce(&media::VideoEncoder::Initialize,
                            base::Unretained(encoder_.get()), profile_,
-                           encoder_options_, base::DoNothing(),
+                           encoder_options_, std::move(info_callback),
                            std::move(output_callback))
           : base::BindOnce(&media::VideoEncoder::ChangeOptions,
                            base::Unretained(encoder_.get()), encoder_options_,
@@ -166,7 +174,7 @@ int32_t RTCVideoEncoderAdapter::Encode(
 
   const media::EncoderStatus result = RunOnEncoderTaskRunnerSync(base::BindOnce(
       &media::VideoEncoder::Encode, base::Unretained(encoder_.get()),
-      std::move(frame), is_key_frame));
+      std::move(frame), media::VideoEncoder::EncodeOptions(is_key_frame)));
 
   return result.is_ok() ? WEBRTC_VIDEO_CODEC_OK
                         : WEBRTC_VIDEO_CODEC_ENCODER_FAILURE;
@@ -215,7 +223,7 @@ RTCVideoEncoderAdapter::EncoderInfo RTCVideoEncoderAdapter::GetEncoderInfo()
   info.scaling_settings = ScalingSettings::kOff;
   info.requested_resolution_alignment = 2;
   info.supports_native_handle = true;
-  info.implementation_name = "platform SW encoder";
+  info.implementation_name = encoder_implementation_name_;
   info.is_hardware_accelerated = false;
   info.supports_simulcast = false;
   info.preferred_pixel_formats = {webrtc::VideoFrameBuffer::Type::kNative};
@@ -223,6 +231,9 @@ RTCVideoEncoderAdapter::EncoderInfo RTCVideoEncoderAdapter::GetEncoderInfo()
   if (encoder_options_.scalability_mode.has_value()) {
     size_t num_temporal_layers = 1;
     switch (encoder_options_.scalability_mode.value()) {
+      case media::SVCScalabilityMode::kL1T1:
+        num_temporal_layers = 1;
+        break;
       case media::SVCScalabilityMode::kL1T2:
         num_temporal_layers = 2;
         break;
@@ -265,6 +276,15 @@ media::EncoderStatus RTCVideoEncoderAdapter::RunOnEncoderTaskRunnerSync(
   waiter.Wait();
 
   return result;
+}
+
+void RTCVideoEncoderAdapter::OnEncoderInfoUpdated(
+    const media::VideoEncoderInfo& encoder_info) {
+  DVLOG(1) << __func__
+           << " implementation_name=" << encoder_info.implementation_name;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  encoder_implementation_name_ = encoder_info.implementation_name;
 }
 
 void RTCVideoEncoderAdapter::OnEncodedFrameReady(

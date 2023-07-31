@@ -4,13 +4,11 @@
 
 #include "third_party/blink/renderer/modules/webcodecs/video_encoder.h"
 
+#include <algorithm>
 #include <string>
 
 #include "base/containers/contains.h"
-#include "base/cxx17_backports.h"
 #include "base/format_macros.h"
-#include "base/features/feature_utils.h"
-#include "base/features/submodule_features.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
@@ -25,7 +23,6 @@
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "media/base/async_destroy_video_encoder.h"
-#include "media/base/bind_to_current_loop.h"
 #include "media/base/limits.h"
 #include "media/base/mime_util.h"
 #include "media/base/svc_scalability_mode.h"
@@ -58,6 +55,8 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_decoder_config.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_config.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_encode_options.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_encode_options_for_av_1.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_encode_options_for_vp_9.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_init.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_encoder_support.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_pixel_format.h"
@@ -141,6 +140,28 @@ int ComputeMaxActiveEncodes(
              : preferred_capacity;
 }
 
+media::VideoEncodeAccelerator::SupportedRateControlMode BitrateToSupportedMode(
+    const media::Bitrate& bitrate) {
+  switch (bitrate.mode()) {
+    case media::Bitrate::Mode::kConstant:
+      return media::VideoEncodeAccelerator::kConstantMode;
+    case media::Bitrate::Mode::kVariable:
+      return media::VideoEncodeAccelerator::kVariableMode
+#if BUILDFLAG(IS_ANDROID)
+             // On Android we allow CBR-only encoders to be used for VBR because
+             // most devices don't properly advertise support for VBR encoding.
+             // In most cases they will initialize successfully when configured
+             // for VBR.
+             | media::VideoEncodeAccelerator::kConstantMode
+#endif  // BUILDFLAG(IS_ANDROID)
+          ;
+
+    case media::Bitrate::Mode::kExternal:
+      // External rate control is not supported by VEA yet.
+      return media::VideoEncodeAccelerator::kNoMode;
+  }
+}
+
 bool IsAcceleratedConfigurationSupported(
     media::VideoCodecProfile profile,
     const media::VideoEncoder::Options& options,
@@ -192,6 +213,13 @@ bool IsAcceleratedConfigurationSupported(
         !base::Contains(supported_profile.scalability_modes,
                         options.scalability_mode.value())) {
       continue;
+    }
+
+    if (options.bitrate.has_value()) {
+      auto mode = BitrateToSupportedMode(options.bitrate.value());
+      if (!(mode & supported_profile.rate_control_modes)) {
+        continue;
+      }
     }
 
     found_supported_profile = true;
@@ -251,6 +279,9 @@ VideoEncoderTraits::ParsedConfig* ParseConfigStatic(
     }
     if (config->hasBitrateMode() && config->bitrateMode() == "constant") {
       result->options.bitrate = media::Bitrate::ConstantBitrate(bps);
+    } else if (config->hasBitrateMode() &&
+               config->bitrateMode() == "quantizer") {
+      result->options.bitrate = media::Bitrate::ExternalRateControl();
     } else {
       // VBR in media:Bitrate supports both target and peak bitrate.
       // Currently webcodecs doesn't expose peak bitrate
@@ -363,28 +394,8 @@ bool VerifyCodecSupportStatic(VideoEncoderTraits::ParsedConfig* config,
                               ExceptionState* exception_state) {
   switch (config->codec) {
     case media::VideoCodec::kAV1:
-      if (config->profile !=
-          media::VideoCodecProfile::AV1PROFILE_PROFILE_MAIN) {
-        if (exception_state) {
-          exception_state->ThrowDOMException(
-              DOMExceptionCode::kNotSupportedError, "Unsupported av1 profile.");
-        }
-        return false;
-      }
-      break;
-
     case media::VideoCodec::kVP8:
-      break;
-
     case media::VideoCodec::kVP9:
-      if (config->profile == media::VideoCodecProfile::VP9PROFILE_PROFILE1 ||
-          config->profile == media::VideoCodecProfile::VP9PROFILE_PROFILE3) {
-        if (exception_state) {
-          exception_state->ThrowDOMException(
-              DOMExceptionCode::kNotSupportedError, "Unsupported vp9 profile.");
-        }
-        return false;
-      }
       break;
 #if BUILDFLAG(ENABLE_PLATFORM_HEVC)
     case media::VideoCodec::kHEVC:
@@ -515,9 +526,10 @@ bool CanUseGpuMemoryBufferReadback(media::VideoPixelFormat format,
 }
 
 bool MayHaveOSSoftwareEncoder(media::VideoCodecProfile profile) {
-  // The AV1 and VPx software encoders are fully featured while OpenH264 only
-  // supports H264PROFILE_BASELINE. Allow OS software encoding when we don't
-  // have an equivalent software encoder.
+  // Allow OS software encoding when we don't have an equivalent
+  // software encoder.
+  // External OpenH264 is equivalent to OS software encoding here because it
+  // also uses the VEA framework.
   //
   // Note: Since we don't enumerate OS software encoders this may still fail and
   // trigger fallback to our bundled software encoder (if any).
@@ -527,18 +539,18 @@ bool MayHaveOSSoftwareEncoder(media::VideoCodecProfile profile) {
   //
   // TODO(crbug.com/1383643): Add IS_WIN here once we can force
   // selection of a software encoder there.
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
   const auto codec = media::VideoCodecProfileToVideoCodec(profile);
-  return codec == media::VideoCodec::kHEVC ||
-#if BUILDFLAG(ENABLE_OPENH264)
-         (codec == media::VideoCodec::kH264 &&
-          profile != media::H264PROFILE_BASELINE);
-#else
-         codec == media::VideoCodec::kH264;
-#endif  // BUILDFLAG(ENABLE_OPENH264)
+  return codec == media::VideoCodec::kHEVC
+#if !BUILDFLAG(ENABLE_OPENH264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
+         || codec == media::VideoCodec::kH264
+#endif  // !BUILDFLAG(ENABLE_OPENH264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
+      ;
 #else
   return false;
-#endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)
+#endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID) || \
+        // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
 }
 
 EncoderType GetRequiredEncoderType(media::VideoCodecProfile profile,
@@ -637,7 +649,7 @@ std::unique_ptr<media::VideoEncoder> CreatePlatformH264VideoEncoder() {
 #if BUILDFLAG(IS_MAC)
   encoder = std::make_unique<media::VTVideoEncoder>();
 #elif BUILDFLAG(IS_WIN)
-  encoder = std::make_unique<media::WMFVideoEncoder>(nullptr);
+  encoder = std::make_unique<media::WMFVideoEncoder>();
 #endif
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
   return encoder;
@@ -649,15 +661,14 @@ VideoEncoder::CreateExternalH264VideoEncoder(
     const media::VideoEncoder::Options& options,
     media::GpuVideoAcceleratorFactories* external_software_factories) {
 #if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-  if (base::IsFeatureEnabled(base::kFeatureExternalOpenH264Encoder)) {
-    // Not really accelerated, but using the VEA framework to encode (in SW)
-    // in another process.
-    return CreateAcceleratedVideoEncoder(profile, options,
-                                         external_software_factories,
-                                         HardwarePreference::kNoPreference);
-  }
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
+  // Not really accelerated, but using the VEA framework to encode (in SW) in
+  // another process.
+  return CreateAcceleratedVideoEncoder(profile, options,
+                                       external_software_factories,
+                                       HardwarePreference::kNoPreference);
+#else
   return nullptr;
+#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
 }
 
 std::unique_ptr<media::VideoEncoder> CreateOpenH264VideoEncoder() {
@@ -753,7 +764,7 @@ void VideoEncoder::ContinueConfigureWithGpuFactories(
   media_encoder_ = CreateMediaVideoEncoder(
       *active_config_, external_software_factories, gpu_factories);
   if (!media_encoder_) {
-    HandleError(logger_->MakeException(
+    HandleError(logger_->MakeOperationError(
         "Encoder creation error.",
         media::EncoderStatus(
             media::EncoderStatus::Codes::kEncoderInitializationError,
@@ -785,8 +796,21 @@ void VideoEncoder::ContinueConfigureWithGpuFactories(
     DCHECK(self->active_config_);
 
     if (!status.is_ok()) {
-      self->HandleError(self->logger_->MakeException(
-          "Encoder initialization error.", std::move(status)));
+      std::string error_message;
+      switch (status.code()) {
+        case media::EncoderStatus::Codes::kEncoderUnsupportedProfile:
+          error_message = "Unsupported codec profile.";
+          break;
+        case media::EncoderStatus::Codes::kEncoderUnsupportedConfig:
+          error_message = "Unsupported configuration parameters.";
+          break;
+        default:
+          error_message = "Encoder initialization error.";
+          break;
+      }
+
+      self->HandleError(
+          self->logger_->MakeOperationError(error_message, std::move(status)));
     } else {
       UMA_HISTOGRAM_ENUMERATION("Blink.WebCodecs.VideoEncoder.Codec", codec,
                                 media::VideoCodec::kMaxValue);
@@ -886,18 +910,30 @@ bool VideoEncoder::StartReadback(scoped_refptr<media::VideoFrame> frame,
     // SkImage.
     auto format = (frame->format() == media::PIXEL_FORMAT_XBGR ||
                    frame->format() == media::PIXEL_FORMAT_ABGR)
-                      ? viz::ResourceFormat::RGBA_8888
-                      : viz::ResourceFormat::BGRA_8888;
+                      ? viz::SinglePlaneFormat::kRGBA_8888
+                      : viz::SinglePlaneFormat::kBGRA_8888;
 
+#if BUILDFLAG(IS_APPLE)
+    // The Apple hardware encoder properly sets output color spaces, so we can
+    // round trip through the encoder and decoder w/o downgrading to BT.601.
+    constexpr auto kDstColorSpace = gfx::ColorSpace::CreateREC709();
+#else
     // When doing RGBA to YUVA conversion using `accelerated_frame_pool_`, use
     // sRGB primaries and the 601 YUV matrix. Note that this is subtly
     // different from the 601 gfx::ColorSpace because the 601 gfx::ColorSpace
     // has different (non-sRGB) primaries.
-    // https://crbug.com/1258245
+    //
+    // This is necessary for our tests to pass since encoders will default to
+    // BT.601 when the color space information isn't told to the encoder. When
+    // coming back through the decoder it pulls out the embedded color space
+    // information instead of what's provided in the config.
+    //
+    // https://crbug.com/1258245, https://crbug.com/1377842
     constexpr gfx::ColorSpace kDstColorSpace(
         gfx::ColorSpace::PrimaryID::BT709, gfx::ColorSpace::TransferID::SRGB,
         gfx::ColorSpace::MatrixID::SMPTE170M,
         gfx::ColorSpace::RangeID::LIMITED);
+#endif
 
     TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("media", "CopyRGBATextureToVideoFrame",
                                       this, "timestamp", frame->timestamp());
@@ -939,10 +975,10 @@ void VideoEncoder::ProcessEncode(Request* request) {
   DCHECK_GT(requested_encodes_, 0u);
 
   auto frame = request->input->frame();
-  bool keyframe = request->encodeOpts->hasKeyFrameNonNull() &&
-                  request->encodeOpts->keyFrameNonNull();
+  auto encode_options = CreateEncodeOptions(request);
   active_encodes_++;
-  request->StartTracingVideoEncode(keyframe, frame->timestamp());
+  request->StartTracingVideoEncode(encode_options.key_frame,
+                                   frame->timestamp());
 
   auto encode_done_callback = ConvertToBaseOnceCallback(CrossThreadBindOnce(
       &VideoEncoder::OnEncodeDone, MakeUnwrappingCrossThreadWeakHandle(this),
@@ -958,8 +994,8 @@ void VideoEncoder::ProcessEncode(Request* request) {
   // TODO(crbug.com/1229845): We shouldn't be reading back frames here.
   if (frame->HasTextures() && !frame->HasGpuMemoryBuffer()) {
     auto readback_done_callback = WTF::BindOnce(
-        &VideoEncoder::OnReadbackDone, WrapWeakPersistent(this), keyframe,
-        reset_count_, frame, std::move(encode_done_callback));
+        &VideoEncoder::OnReadbackDone, WrapWeakPersistent(this),
+        WrapPersistent(request), frame, std::move(encode_done_callback));
     if (StartReadback(std::move(frame), std::move(readback_done_callback))) {
       request->input->close();
     } else {
@@ -985,21 +1021,52 @@ void VideoEncoder::ProcessEncode(Request* request) {
 
   --requested_encodes_;
   ScheduleDequeueEvent();
-  media_encoder_->Encode(frame, keyframe, std::move(encode_done_callback));
+  media_encoder_->Encode(frame, encode_options,
+                         std::move(encode_done_callback));
 
   // We passed a copy of frame() above, so this should be safe to close here.
   request->input->close();
 }
 
+media::VideoEncoder::EncodeOptions VideoEncoder::CreateEncodeOptions(
+    Request* request) {
+  media::VideoEncoder::EncodeOptions result;
+  result.key_frame = request->encodeOpts->hasKeyFrameNonNull() &&
+                     request->encodeOpts->keyFrameNonNull();
+  switch (active_config_->codec) {
+    case media::VideoCodec::kAV1: {
+      if (!request->encodeOpts->hasAv1() ||
+          !request->encodeOpts->av1()->hasQuantizer()) {
+        break;
+      }
+      result.quantizer = request->encodeOpts->av1()->quantizer();
+      break;
+    }
+    case media::VideoCodec::kVP9: {
+      if (!request->encodeOpts->hasVp9() ||
+          !request->encodeOpts->vp9()->hasQuantizer()) {
+        break;
+      }
+      result.quantizer = request->encodeOpts->vp9()->quantizer();
+      break;
+    }
+    case media::VideoCodec::kVP8:
+    case media::VideoCodec::kH264:
+    default:
+      break;
+  }
+  return result;
+}
+
 void VideoEncoder::OnReadbackDone(
-    bool keyframe,
-    uint32_t reset_count,
+    Request* request,
     scoped_refptr<media::VideoFrame> txt_frame,
     media::VideoEncoder::EncoderStatusCB done_callback,
     scoped_refptr<media::VideoFrame> result_frame) {
   TRACE_EVENT_NESTABLE_ASYNC_END0("media", "CopyRGBATextureToVideoFrame", this);
-  if (reset_count_ != reset_count)
+  if (reset_count_ != request->reset_count) {
     return;
+  }
 
   if (!result_frame) {
     callback_runner_->PostTask(
@@ -1012,10 +1079,11 @@ void VideoEncoder::OnReadbackDone(
   }
 
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  auto encode_options = CreateEncodeOptions(request);
   --requested_encodes_;
   ScheduleDequeueEvent();
   blocking_request_in_progress_ = false;
-  media_encoder_->Encode(std::move(result_frame), keyframe,
+  media_encoder_->Encode(std::move(result_frame), encode_options,
                          std::move(done_callback));
   ProcessRequests();
 }
@@ -1029,7 +1097,8 @@ void VideoEncoder::OnEncodeDone(Request* request, media::EncoderStatus status) {
 
   active_encodes_--;
   if (!status.is_ok()) {
-    HandleError(logger_->MakeException("Encoding error.", std::move(status)));
+    HandleError(
+        logger_->MakeEncodingError("Encoding error.", std::move(status)));
   }
   request->EndTracing();
   ProcessRequests();
@@ -1046,16 +1115,12 @@ void VideoEncoder::ProcessConfigure(Request* request) {
   blocking_request_in_progress_ = true;
 
 #if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-  if (base::IsFeatureEnabled(base::kFeatureExternalOpenH264Encoder)) {
-    RetrieveExternalSoftwareFactoriesWithKnownEncoderSupport(
-        CrossThreadBindOnce(
-            &VideoEncoder::ContinueConfigureWithExternalSoftwareFactories,
-            WrapCrossThreadWeakPersistent(this),
-            WrapCrossThreadPersistent(request)));
-    return;
-  }
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
+  RetrieveExternalSoftwareFactoriesWithKnownEncoderSupport(CrossThreadBindOnce(
+      &VideoEncoder::ContinueConfigureWithExternalSoftwareFactories,
+      WrapCrossThreadWeakPersistent(this), WrapCrossThreadPersistent(request)));
+#else
   ContinueConfigureWithExternalSoftwareFactories(request, nullptr);
+#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
 }
 
 void VideoEncoder::ContinueConfigureWithExternalSoftwareFactories(
@@ -1119,7 +1184,7 @@ void VideoEncoder::ProcessReconfigure(Request* request) {
     }
     DCHECK_CALLED_ON_VALID_SEQUENCE(self->sequence_checker_);
     if (!status.is_ok()) {
-      self->HandleError(self->logger_->MakeException(
+      self->HandleError(self->logger_->MakeOperationError(
           "Encoder initialization error.", std::move(status)));
       self->blocking_request_in_progress_ = false;
       req->EndTracing();
@@ -1221,6 +1286,11 @@ void VideoEncoder::CallOutputCallback(
 
   if (first_output_after_configure_ || codec_desc.has_value() ||
       output_color_space != last_output_color_space_) {
+    if (active_config->codec == media::VideoCodec::kH264) {
+      DCHECK(active_config->options.avc.produce_annexb ||
+             codec_desc.has_value());
+    }
+
     first_output_after_configure_ = false;
 
     if (output_color_space != last_output_color_space_) {
@@ -1402,7 +1472,8 @@ ScriptPromise VideoEncoder::isConfigSupported(ScriptState* script_state,
   if (parsed_config->hw_pref != HardwarePreference::kPreferSoftware ||
       MayHaveOSSoftwareEncoder(parsed_config->profile)) {
     // Hardware support not denied, detect support by hardware encoders.
-    auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+    auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+        script_state, exception_state.GetContext());
     promises.push_back(resolver->Promise());
     auto* support = VideoEncoderSupport::Create();
     support->setConfig(config_copy);
@@ -1417,7 +1488,8 @@ ScriptPromise VideoEncoder::isConfigSupported(ScriptState* script_state,
 
   if (parsed_config->hw_pref != HardwarePreference::kPreferHardware) {
     // Hardware support not required, detect support by software encoders.
-    auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+    auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+        script_state, exception_state.GetContext());
     promises.push_back(resolver->Promise());
     auto* support = VideoEncoderSupport::Create();
     support->setConfig(config_copy);
@@ -1426,8 +1498,7 @@ ScriptPromise VideoEncoder::isConfigSupported(ScriptState* script_state,
   }
 
 #if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-  if (base::IsFeatureEnabled(base::kFeatureExternalOpenH264Encoder) &&
-      parsed_config->hw_pref != HardwarePreference::kPreferHardware) {
+  if (parsed_config->hw_pref != HardwarePreference::kPreferHardware) {
     // Hardware support not required, detect support by the external software
     // encoder.
     auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);

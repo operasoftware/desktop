@@ -34,7 +34,7 @@ RTCPlatformSWVideoEncoderFactory::CreateVideoEncoder(
 #if BUILDFLAG(IS_MAC)
   encoder = std::make_unique<media::VTVideoEncoder>();
 #elif BUILDFLAG(IS_WIN)
-  encoder = std::make_unique<media::WMFVideoEncoder>(nullptr);
+  encoder = std::make_unique<media::WMFVideoEncoder>();
 #endif
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
   if (!encoder)

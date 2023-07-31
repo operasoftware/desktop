@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
+#include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_fragment_geometry.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_disable_side_effects_scope.h"
@@ -25,8 +26,9 @@ bool LayoutBox::ShrinkToAvoidFloats() const {
     return false;
 
   // Only auto width objects can possibly shrink to avoid floats.
-  if (!StyleRef().Width().IsAuto())
+  if (!StyleRef().UsedWidth().IsAuto()) {
     return false;
+  }
 
   // If the containing block is LayoutNG, we will not let legacy layout deal
   // with positioning of floats or sizing of auto-width new formatting context
@@ -192,6 +194,14 @@ const NGLayoutResult* LayoutBox::CachedLayoutResult(
   // the cache.
   if (size_cache_status == NGLayoutCacheStatus::kNeedsLayout)
     return nullptr;
+
+  if (cached_layout_result->HasOrthogonalFallbackSizeDescendant() &&
+      View()->IsResizingInitialContainingBlock()) {
+    // There's an orthogonal writing-mode root somewhere inside that depends on
+    // the size of the initial containing block, and the initial containing
+    // block size is changing.
+    return nullptr;
+  }
 
   // If we need simplified layout, but the cached fragment's children are not
   // valid (see comment in `SetCachedLayoutResult`), don't return the fragment,
@@ -363,6 +373,12 @@ const NGLayoutResult* LayoutBox::CachedLayoutResult(
         // relatively to the fragment.
         if (is_fragmented)
           return nullptr;
+
+        if (cached_layout_result->MinimalSpaceShortage()) {
+          // The fragmentation line has moved, and there was space shortage
+          // reported. This value is no longer valid.
+          return nullptr;
+        }
 
         // Fragmentation inside a nested multicol container depends on the
         // amount of remaining space in the outer fragmentation context, so if

@@ -289,7 +289,47 @@ namespace blink {
 
 namespace {
 
-static int g_frame_count = 0;
+int g_frame_count = 0;
+
+class DummyFrameOwner final : public GarbageCollected<DummyFrameOwner>,
+                              public FrameOwner {
+ public:
+  void Trace(Visitor* visitor) const override { FrameOwner::Trace(visitor); }
+
+  // FrameOwner overrides:
+  Frame* ContentFrame() const override { return nullptr; }
+  void SetContentFrame(Frame&) override {}
+  void ClearContentFrame() override {}
+  const FramePolicy& GetFramePolicy() const override {
+    DEFINE_STATIC_LOCAL(FramePolicy, frame_policy, ());
+    return frame_policy;
+  }
+  void AddResourceTiming(mojom::blink::ResourceTimingInfoPtr) override {}
+  void DispatchLoad() override {}
+  void IntrinsicSizingInfoChanged() override {}
+  void SetNeedsOcclusionTracking(bool) override {}
+  AtomicString BrowsingContextContainerName() const override {
+    return AtomicString();
+  }
+  mojom::blink::ScrollbarMode ScrollbarMode() const override {
+    return mojom::blink::ScrollbarMode::kAuto;
+  }
+  int MarginWidth() const override { return -1; }
+  int MarginHeight() const override { return -1; }
+  bool AllowFullscreen() const override { return false; }
+  bool AllowPaymentRequest() const override { return false; }
+  bool IsDisplayNone() const override { return false; }
+  mojom::blink::ColorScheme GetColorScheme() const override {
+    return mojom::blink::ColorScheme::kLight;
+  }
+  bool ShouldLazyLoadChildren() const override { return false; }
+
+ private:
+  // Intentionally private to prevent redundant checks when the type is
+  // already DummyFrameOwner.
+  bool IsLocal() const override { return false; }
+  bool IsRemote() const override { return false; }
+};
 
 }  // namespace
 
@@ -315,16 +355,18 @@ class ChromePrintContext : public PrintContext {
     return printed_page_width_ / page_rect.width();
   }
 
-  float SpoolSinglePage(cc::PaintCanvas* canvas, int page_number) {
+  void SpoolSinglePage(cc::PaintCanvas* canvas, int page_number) {
     DispatchEventsForPrintingOnAllFrames();
     if (!GetFrame()->GetDocument() ||
-        !GetFrame()->GetDocument()->GetLayoutView())
-      return 0;
+        !GetFrame()->GetDocument()->GetLayoutView()) {
+      return;
+    }
 
     GetFrame()->View()->UpdateLifecyclePhasesForPrinting();
     if (!GetFrame()->GetDocument() ||
-        !GetFrame()->GetDocument()->GetLayoutView())
-      return 0;
+        !GetFrame()->GetDocument()->GetLayoutView()) {
+      return;
+    }
 
     // The page rect gets scaled and translated, so specify the entire
     // print content area here as the recording rect.
@@ -333,9 +375,8 @@ class ChromePrintContext : public PrintContext {
     context.SetPrintingMetafile(canvas->GetPrintingMetafile());
     context.SetPrinting(true);
     context.BeginRecording();
-    float scale = SpoolPage(context, page_number);
+    SpoolPage(context, page_number);
     canvas->drawPicture(context.EndRecording());
-    return scale;
   }
 
   void SpoolPagesWithBoundariesForTesting(
@@ -352,8 +393,6 @@ class ChromePrintContext : public PrintContext {
     if (!GetFrame()->GetDocument() ||
         !GetFrame()->GetDocument()->GetLayoutView())
       return;
-
-    ComputePageRects(page_size_in_pixels);
 
     gfx::RectF all_pages_rect(spool_size_in_pixels);
 
@@ -428,10 +467,8 @@ class ChromePrintContext : public PrintContext {
   }
 
  protected:
-  virtual float SpoolPage(GraphicsContext& context, int page_number) {
+  virtual void SpoolPage(GraphicsContext& context, int page_number) {
     gfx::Rect page_rect = page_rects_[page_number];
-    float scale = printed_page_width_ / page_rect.width();
-
     AffineTransform transform;
     transform.Translate(static_cast<float>(-page_rect.x()),
                         static_cast<float>(-page_rect.y()));
@@ -461,8 +498,6 @@ class ChromePrintContext : public PrintContext {
 
     context.DrawRecord(builder->EndRecording(property_tree_state.Unalias()));
     context.Restore();
-
-    return scale;
   }
 
  private:
@@ -501,7 +536,11 @@ class ChromePluginPrintContext final : public ChromePrintContext {
     ChromePrintContext::Trace(visitor);
   }
 
-  void BeginPrintMode(float width, float height) override {}
+  void BeginPrintMode(float width, float height) override {
+    gfx::Rect rect(gfx::ToFlooredSize(gfx::SizeF(width, height)));
+    print_params_.print_content_area = rect;
+    page_rects_.Fill(rect, plugin_->PrintBegin(print_params_));
+  }
 
   void EndPrintMode() override {
     plugin_->PrintEnd();
@@ -522,27 +561,11 @@ class ChromePluginPrintContext final : public ChromePrintContext {
     return 1.0;
   }
 
-  void ComputePageRects(const gfx::SizeF& print_size) override {
-    gfx::Rect rect(gfx::ToFlooredSize(print_size));
-    print_params_.print_content_area = rect;
-    page_rects_.Fill(rect, plugin_->PrintBegin(print_params_));
-  }
-
-  void ComputePageRectsWithPageSize(
-      const gfx::SizeF& page_size_in_pixels) override {
-    NOTREACHED();
-  }
-
  protected:
-  // Spools the printed page, a subrect of frame(). Skip the scale step.
-  // NativeTheme doesn't play well with scaling. Scaling is done browser side
-  // instead. Returns the scale to be applied.
-  float SpoolPage(GraphicsContext& context, int page_number) override {
+  void SpoolPage(GraphicsContext& context, int page_number) override {
     auto* builder = MakeGarbageCollected<PaintRecordBuilder>(context);
     plugin_->PrintPage(page_number, builder->Context());
     context.DrawRecord(builder->EndRecording());
-
-    return 1.0;
   }
 
  private:
@@ -871,6 +894,12 @@ bool WebLocalFrameImpl::UsePrintingLayout() const {
 void WebLocalFrameImpl::CopyToFindPboard() {
   if (HasSelection())
     GetFrame()->GetSystemClipboard()->CopyToFindPboard(SelectionAsText());
+}
+
+void WebLocalFrameImpl::CenterSelection() {
+  if (HasSelection()) {
+    GetFrame()->Selection().RevealSelection(ScrollAlignment::CenterAlways());
+  }
 }
 
 gfx::PointF WebLocalFrameImpl::GetScrollOffset() const {
@@ -1205,9 +1234,9 @@ v8::Local<v8::Object> WebLocalFrameImpl::GlobalProxy() const {
 }
 
 bool WebFrame::ScriptCanAccess(WebFrame* target) {
-  return BindingSecurity::ShouldAllowAccessToFrame(
+  return BindingSecurity::ShouldAllowAccessTo(
       CurrentDOMWindow(V8PerIsolateData::MainThreadIsolate()),
-      ToCoreFrame(*target), BindingSecurity::ErrorReportOption::kDoNotReport);
+      ToCoreFrame(*target)->DomWindow());
 }
 
 void WebLocalFrameImpl::StartReload(WebFrameLoadType frame_load_type) {
@@ -1314,6 +1343,12 @@ bool WebLocalFrameImpl::FirstRectForCharacterRange(
     gfx::Rect& rect_in_viewport) const {
   if ((location + length < location) && (location + length))
     length = 0;
+
+  if (EditContext* edit_context =
+          GetFrame()->GetInputMethodController().GetActiveEditContext()) {
+    return edit_context->FirstRectForCharacterRange(location, length,
+                                                    rect_in_viewport);
+  }
 
   Element* editable =
       GetFrame()->Selection().RootEditableElementOrDocumentElement();
@@ -1756,6 +1791,37 @@ void WebLocalFrameImpl::ExtendSelectionAndDelete(int before, int after) {
                                                                   after);
 }
 
+void WebLocalFrameImpl::ExtendSelectionAndReplace(
+    int before,
+    int after,
+    const WebString& replacement_text) {
+  TRACE_EVENT0("blink", "WebLocalFrameImpl::extendSelectionAndReplace");
+
+  // EditContext and WebPlugin do not support atomic replacement.
+  if (EditContext* edit_context =
+          GetFrame()->GetInputMethodController().GetActiveEditContext()) {
+    edit_context->ExtendSelectionAndDelete(before, after);
+    edit_context->CommitText(replacement_text, std::vector<ui::ImeTextSpan>(),
+                             blink::WebRange(), 0);
+    return;
+  }
+
+  if (WebPlugin* plugin = FocusedPluginIfInputMethodSupported()) {
+    plugin->ExtendSelectionAndDelete(before, after);
+    plugin->CommitText(replacement_text, std::vector<ui::ImeTextSpan>(),
+                       blink::WebRange(), 0);
+    return;
+  }
+
+  // TODO(editing-dev): The use of UpdateStyleAndLayout
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  GetFrame()->GetDocument()->UpdateStyleAndLayout(
+      DocumentUpdateReason::kSelection);
+
+  GetFrame()->GetInputMethodController().ExtendSelectionAndReplace(
+      before, after, replacement_text);
+}
+
 void WebLocalFrameImpl::DeleteSurroundingText(int before, int after) {
   TRACE_EVENT0("blink", "WebLocalFrameImpl::deleteSurroundingText");
   if (WebPlugin* plugin = FocusedPluginIfInputMethodSupported()) {
@@ -1912,7 +1978,6 @@ uint32_t WebLocalFrameImpl::PrintBegin(const WebPrintParams& print_params,
 
   gfx::SizeF size(print_params.print_content_area.size());
   print_context_->BeginPrintMode(size.width(), size.height());
-  print_context_->ComputePageRects(size);
 
   return print_context_->PageCount();
 }
@@ -1922,12 +1987,12 @@ float WebLocalFrameImpl::GetPrintPageShrink(uint32_t page) {
   return print_context_->GetPageShrink(page);
 }
 
-float WebLocalFrameImpl::PrintPage(uint32_t page, cc::PaintCanvas* canvas) {
+void WebLocalFrameImpl::PrintPage(uint32_t page, cc::PaintCanvas* canvas) {
   DCHECK(print_context_);
   DCHECK(GetFrame());
   DCHECK(GetFrame()->GetDocument());
 
-  return print_context_->SpoolSinglePage(canvas, page);
+  print_context_->SpoolSinglePage(canvas, page);
 }
 
 void WebLocalFrameImpl::PrintEnd() {
@@ -2051,10 +2116,12 @@ WebLocalFrame* WebLocalFrame::CreateMainFrame(
     std::unique_ptr<WebPolicyContainer> policy_container,
     WebFrame* opener,
     const WebString& name,
-    network::mojom::blink::WebSandboxFlags sandbox_flags) {
+    network::mojom::blink::WebSandboxFlags sandbox_flags,
+    const WebURL& creator_base_url) {
   return WebLocalFrameImpl::CreateMainFrame(
       web_view, client, interface_registry, frame_token, opener, name,
-      sandbox_flags, document_token, std::move(policy_container));
+      sandbox_flags, document_token, std::move(policy_container),
+      creator_base_url);
 }
 
 WebLocalFrame* WebLocalFrame::CreateProvisional(
@@ -2079,7 +2146,8 @@ WebLocalFrameImpl* WebLocalFrameImpl::CreateMainFrame(
     const WebString& name,
     network::mojom::blink::WebSandboxFlags sandbox_flags,
     const DocumentToken& document_token,
-    std::unique_ptr<WebPolicyContainer> policy_container) {
+    std::unique_ptr<WebPolicyContainer> policy_container,
+    const WebURL& creator_base_url) {
   auto* frame = MakeGarbageCollected<WebLocalFrameImpl>(
       base::PassKey<WebLocalFrameImpl>(),
       mojom::blink::TreeScopeType::kDocument, client, interface_registry,
@@ -2097,7 +2165,7 @@ WebLocalFrameImpl* WebLocalFrameImpl::CreateMainFrame(
       page, nullptr, nullptr, nullptr, FrameInsertType::kInsertInConstructor,
       name, opener ? &ToCoreFrame(*opener)->window_agent_factory() : nullptr,
       opener, document_token, std::move(policy_container), storage_key,
-      sandbox_flags);
+      creator_base_url, sandbox_flags);
   return frame;
 }
 
@@ -2151,7 +2219,8 @@ WebLocalFrameImpl* WebLocalFrameImpl::CreateProvisional(
       previous_web_frame->Parent(), nullptr, FrameInsertType::kInsertLater,
       name, &ToCoreFrame(*previous_web_frame)->window_agent_factory(),
       previous_web_frame->Opener(), DocumentToken(),
-      /*policy_container=*/nullptr, StorageKey(), sandbox_flags);
+      /*policy_container=*/nullptr, StorageKey(),
+      /*creator_base_url=*/KURL(), sandbox_flags);
 
   LocalFrame* new_frame = web_frame->GetFrame();
 
@@ -2270,13 +2339,14 @@ void WebLocalFrameImpl::InitializeCoreFrame(
     const DocumentToken& document_token,
     std::unique_ptr<blink::WebPolicyContainer> policy_container,
     const StorageKey& storage_key,
+    const KURL& creator_base_url,
     network::mojom::blink::WebSandboxFlags sandbox_flags) {
   InitializeCoreFrameInternal(
       page, owner, parent, previous_sibling, insert_type, name,
       window_agent_factory, opener, document_token,
       PolicyContainer::CreateFromWebPolicyContainer(
           std::move(policy_container)),
-      storage_key, ukm::kInvalidSourceId, sandbox_flags);
+      storage_key, ukm::kInvalidSourceId, creator_base_url, sandbox_flags);
 }
 
 void WebLocalFrameImpl::InitializeCoreFrameInternal(
@@ -2292,6 +2362,7 @@ void WebLocalFrameImpl::InitializeCoreFrameInternal(
     std::unique_ptr<PolicyContainer> policy_container,
     const StorageKey& storage_key,
     ukm::SourceId document_ukm_source_id,
+    const KURL& creator_base_url,
     network::mojom::blink::WebSandboxFlags sandbox_flags) {
   Frame* parent_frame = parent ? ToCoreFrame(*parent) : nullptr;
   Frame* previous_sibling_frame =
@@ -2329,13 +2400,13 @@ void WebLocalFrameImpl::InitializeCoreFrameInternal(
   // We must call init() after frame_ is assigned because it is referenced
   // during init().
   frame_->Init(opener_frame, document_token, std::move(policy_container),
-               storage_key, document_ukm_source_id);
+               storage_key, document_ukm_source_id, creator_base_url);
 
   if (!owner) {
     // This trace event is needed to detect the main frame of the
     // renderer in telemetry metrics. See crbug.com/692112#c11.
     TRACE_EVENT_INSTANT1("loading", "markAsMainFrame", TRACE_EVENT_SCOPE_THREAD,
-                         "frame", ToTraceValue(frame_));
+                         "frame", GetFrameIdForTracing(frame_));
   }
 }
 
@@ -2396,13 +2467,18 @@ LocalFrame* WebLocalFrameImpl::CreateChildFrame(
         std::make_unique<PolicyContainer>(std::move(policy_container_remote),
                                           std::move(policy_container_data));
 
+    KURL creator_base_url;
+    if (features::IsNewBaseUrlInheritanceBehaviorEnabled()) {
+      creator_base_url = owner_element->GetDocument().BaseURL();
+    }
     To<WebLocalFrameImpl>(new_child_frame)
         ->InitializeCoreFrameInternal(
             *GetFrame()->GetPage(), owner_element, this, LastChild(),
             FrameInsertType::kInsertInConstructor, name,
             &GetFrame()->window_agent_factory(), nullptr, document_token,
             std::move(policy_container),
-            GetFrame()->DomWindow()->GetStorageKey(), document_ukm_source_id);
+            GetFrame()->DomWindow()->GetStorageKey(), document_ukm_source_id,
+            creator_base_url);
   };
 
   // FIXME: Using subResourceAttributeName as fallback is not a perfect
@@ -2487,8 +2563,7 @@ RemoteFrame* WebLocalFrameImpl::AdoptPortal(HTMLPortalElement* portal) {
 RemoteFrame* WebLocalFrameImpl::CreateFencedFrame(
     HTMLFencedFrameElement* fenced_frame,
     mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>
-        receiver,
-    mojom::blink::FencedFrameMode mode) {
+        receiver) {
   mojom::blink::FrameReplicationStatePtr initial_replicated_state =
       mojom::blink::FrameReplicationState::New();
   initial_replicated_state->origin = SecurityOrigin::CreateUniqueOpaque();
@@ -2505,8 +2580,8 @@ RemoteFrame* WebLocalFrameImpl::CreateFencedFrame(
           remote_frame_interfaces->frame.InitWithNewEndpointAndPassReceiver();
 
   GetFrame()->GetLocalFrameHostRemote().CreateFencedFrame(
-      std::move(receiver), mode, std::move(remote_frame_interfaces),
-      frame_token, devtools_frame_token);
+      std::move(receiver), std::move(remote_frame_interfaces), frame_token,
+      devtools_frame_token);
 
   DCHECK(initial_replicated_state->origin->IsOpaque());
 
@@ -2727,6 +2802,16 @@ void WebLocalFrameImpl::CommitNavigation(
     // the current document.
     navigation_params->origin_agent_cluster =
         GetFrame()->GetDocument()->GetAgent().IsOriginKeyedForInheritance();
+
+    KURL url = navigation_params->url;
+    if (navigation_params->is_synchronous_commit_for_bug_778318 &&
+        // Explicitly check for about:blank or about:srcdoc to prevent things
+        // like about:mumble propagating the base url.
+        (url.IsAboutBlankURL() || url.IsAboutSrcdocURL()) &&
+        features::IsNewBaseUrlInheritanceBehaviorEnabled()) {
+      navigation_params->fallback_base_url =
+          GetFrame()->GetDocument()->BaseURL();
+    }
   }
   if (GetTextFinder())
     GetTextFinder()->ClearActiveFindMatch();
@@ -2804,9 +2889,11 @@ void WebLocalFrameImpl::DownloadURL(
                           std::move(blob_url_token));
 }
 
-void WebLocalFrameImpl::WillPotentiallyStartOutermostMainFrameNavigation(
-    const WebURL& url) const {
-  GetFrame()->WillPotentiallyStartOutermostMainFrameNavigation(url);
+void WebLocalFrameImpl::MaybeStartOutermostMainFrameNavigation(
+    const WebVector<WebURL>& urls) const {
+  Vector<KURL> kurls;
+  std::move(urls.begin(), urls.end(), std::back_inserter(kurls));
+  GetFrame()->MaybeStartOutermostMainFrameNavigation(std::move(kurls));
 }
 
 bool WebLocalFrameImpl::WillStartNavigation(const WebNavigationInfo& info) {
@@ -3087,6 +3174,15 @@ void WebLocalFrameImpl::AddGenericIssueImpl(
   AuditsIssue::ReportGenericIssue(GetFrame(), error_type, violating_node_id);
 }
 
+void WebLocalFrameImpl::AddGenericIssueImpl(
+    mojom::blink::GenericIssueErrorType error_type,
+    int violating_node_id,
+    const WebString& violating_node_attribute) {
+  DCHECK(GetFrame());
+  AuditsIssue::ReportGenericIssue(GetFrame(), error_type, violating_node_id,
+                                  violating_node_attribute);
+}
+
 void WebLocalFrameImpl::SetTextCheckClient(
     WebTextCheckClient* text_check_client) {
   text_check_client_ = text_check_client;
@@ -3230,6 +3326,11 @@ void WebLocalFrameImpl::AddHitTestOnTouchStartCallback(
   options.setCapture(true);
   GetFrame()->DomWindow()->addEventListener(
       event_type_names::kTouchstart, touch_start_event_listener, &options);
+}
+
+void WebLocalFrameImpl::SetResourceCacheRemote(
+    CrossVariantMojoRemote<mojom::blink::ResourceCacheInterfaceBase> remote) {
+  GetFrame()->SetResourceCacheRemote(std::move(remote));
 }
 
 void WebLocalFrameImpl::SetTargetToCurrentHistoryItem(const WebString& target) {

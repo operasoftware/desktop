@@ -39,6 +39,7 @@
 #include "cc/layers/texture_layer_client.h"
 #include "cc/resources/cross_thread_shared_bitmap.h"
 #include "cc/resources/shared_bitmap_id_registrar.h"
+#include "components/viz/common/resources/shared_image_format.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/client/raster_interface.h"
@@ -344,6 +345,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                 std::unique_ptr<Extensions3DUtil>,
                 Client*,
                 bool discard_framebuffer_supported,
+                bool texture_storage_enabled,
                 bool want_alpha_channel,
                 bool premultiplied_alpha,
                 PreserveDrawingBuffer,
@@ -417,7 +419,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
     ColorBuffer(base::WeakPtr<DrawingBuffer> drawing_buffer,
                 const gfx::Size&,
                 const gfx::ColorSpace& color_space,
-                viz::ResourceFormat,
+                viz::SharedImageFormat,
                 SkAlphaType alpha_type,
                 GLenum texture_target,
                 GLuint texture_id,
@@ -438,7 +440,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
     base::WeakPtr<DrawingBuffer> drawing_buffer;
     const gfx::Size size;
     const gfx::ColorSpace color_space;
-    const viz::ResourceFormat format;
+    const viz::SharedImageFormat format;
     const SkAlphaType alpha_type;
     const GLenum texture_target;
     const GLuint texture_id;
@@ -457,7 +459,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   };
 
   using CopyFunctionRef = base::FunctionRef<bool(const gpu::MailboxHolder&,
-                                                 viz::ResourceFormat,
+                                                 viz::SharedImageFormat,
                                                  SkAlphaType alpha_type,
                                                  const gfx::Size&,
                                                  const gfx::ColorSpace&)>;
@@ -600,6 +602,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   std::unique_ptr<Extensions3DUtil> extensions_util_;
   gfx::Size size_;
   const bool discard_framebuffer_supported_;
+  const bool texture_storage_enabled_;
 
   // The alpha type that was requested (opaque, premul, or unpremul).
   SkAlphaType requested_alpha_type_;
@@ -608,7 +611,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   GLenum requested_format_ = GL_NONE;
 
   // The format with which ColorBuffers used for compositing will be allocated.
-  viz::ResourceFormat color_buffer_format_ = viz::RGBA_8888;
+  viz::SharedImageFormat color_buffer_format_ =
+      viz::SinglePlaneFormat::kRGBA_8888;
 
   Platform::GraphicsInfo graphics_info_;
   const bool using_swap_chain_;

@@ -119,6 +119,7 @@ export function createSiteSettingsPrefs(
     defaults[ContentSettingsTypes[type as keyof typeof ContentSettingsTypes]] =
         createDefaultContentSetting({});
   }
+  defaults[ContentSettingsTypes.ANTI_ABUSE].setting = ContentSetting.ALLOW;
   defaults[ContentSettingsTypes.COOKIES].setting = ContentSetting.ALLOW;
   defaults[ContentSettingsTypes.IMAGES].setting = ContentSetting.ALLOW;
   defaults[ContentSettingsTypes.JAVASCRIPT].setting = ContentSetting.ALLOW;
@@ -158,14 +159,28 @@ export function createSiteSettingsPrefs(
 }
 
 /**
+ * Creates a groupingKey that maps to the given id. This will not
+ * have the same internal format as the groupingKey returned by
+ * SiteSettingsHelper.
+ * @param id An id that can uniquely represent a SiteGroup.
+ */
+export function groupingKey(id: string): string {
+  // Base64 encode the id to make sure that if an eTLD+1 or origin is used
+  // somewhere instead of a groupingKey, it won't accidentally have the
+  // correct groupingKey value.
+  return btoa(id);
+}
+
+/**
  * Helper to create a mock SiteGroup.
- * @param eTLDPlus1Name The eTLD+1 of all the origins provided in |originList|.
+ * @param owningEntity The eTLD+1 or origin that owns this group.
+ * @param displayName The user-visible group name.
  * @param originList A list of the origins with the same eTLD+1.
  * @param mockUsage The override initial usage value for each origin in the site
  *     group.
  */
 export function createSiteGroup(
-    eTLDPlus1Name: string, originList: string[],
+    owningEntity: string|URL, displayName: string, originList: string[],
     mockUsage?: number): SiteGroup {
   if (mockUsage === undefined) {
     mockUsage = 0;
@@ -173,7 +188,9 @@ export function createSiteGroup(
   const originInfoList =
       originList.map((origin) => createOriginInfo(origin, {usage: mockUsage}));
   return {
-    etldPlus1: eTLDPlus1Name,
+    groupingKey: groupingKey(owningEntity.toString()),
+    etldPlus1: typeof owningEntity === 'string' ? owningEntity : undefined,
+    displayName,
     origins: originInfoList,
     numCookies: 0,
     hasInstalledPWA: false,

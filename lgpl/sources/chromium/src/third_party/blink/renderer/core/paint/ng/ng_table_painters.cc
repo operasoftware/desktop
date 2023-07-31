@@ -393,7 +393,7 @@ class TableCellBackgroundClipper {
         needs_clip_(!is_painting_background_in_contents_space &&
                     (table_cell.HasLayer() || table_cell.Parent()->HasLayer() ||
                      table_cell.Parent()->Parent()->HasLayer()) &&
-                    table_cell.TableInterface()->ShouldCollapseBorders()) {
+                    table_cell.Table()->ShouldCollapseBorders()) {
     if (!needs_clip_)
       return;
 
@@ -883,7 +883,7 @@ void NGTableCellPainter::PaintBackgroundForTablePart(
   Color color = table_part.StyleRef().VisitedDependentColor(
       GetCSSPropertyBackgroundColor());
   const FillLayer& background_layers = table_part.StyleRef().BackgroundLayers();
-  if (background_layers.AnyLayerHasImage() || color.Alpha()) {
+  if (background_layers.AnyLayerHasImage() || !color.IsFullyTransparent()) {
     BackgroundImageGeometry geometry(
         layout_table_cell,
         table_cell_paint_offset - table_part_paint_rect.offset, table_part,

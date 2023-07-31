@@ -29,11 +29,6 @@
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/openh264/openh264_buildflags.h"
 
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-#include "base/features/scoped_test_feature_override.h"
-#include "base/features/submodule_features.h"
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-
 namespace blink {
 
 namespace {
@@ -88,26 +83,11 @@ class FakeVideoEncoder : public VideoEncoder {
   std::unique_ptr<media::MockVideoEncoder> next_mock_encoder_;
 };
 
-class VideoEncoderTest : public testing::TestWithParam<bool> {
+class VideoEncoderTest : public testing::Test {
  public:
   VideoEncoderTest() = default;
   ~VideoEncoderTest() override = default;
-
- private:
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-  base::ScopedTestFeatureOverride enable_external_openh264_{
-      base::kFeatureExternalOpenH264Encoder, GetParam()};
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
 };
-
-constexpr bool kTestParams[] = {
-    false,
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-    true,
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-};
-
-INSTANTIATE_TEST_SUITE_P(, VideoEncoderTest, testing::ValuesIn(kTestParams));
 
 VideoEncoderConfig* CreateConfig() {
   auto* config = MakeGarbageCollected<VideoEncoderConfig>();
@@ -166,7 +146,7 @@ VideoFrame* MakeVideoFrame(ScriptState* script_state,
                             IGNORE_EXCEPTION_FOR_TESTING);
 }
 
-TEST_P(VideoEncoderTest, RejectFlushAfterClose) {
+TEST_F(VideoEncoderTest, RejectFlushAfterClose) {
   V8TestingScope v8_scope;
   auto& es = v8_scope.GetExceptionState();
   auto* script_state = v8_scope.GetScriptState();
@@ -205,7 +185,7 @@ TEST_P(VideoEncoderTest, RejectFlushAfterClose) {
   ASSERT_TRUE(tester.IsRejected());
 }
 
-TEST_P(VideoEncoderTest, CodecReclamation) {
+TEST_F(VideoEncoderTest, CodecReclamation) {
   V8TestingScope v8_scope;
   auto& es = v8_scope.GetExceptionState();
   auto* script_state = v8_scope.GetScriptState();

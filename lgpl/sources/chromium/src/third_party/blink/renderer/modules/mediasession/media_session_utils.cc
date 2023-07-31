@@ -17,7 +17,7 @@ int GetMediaSessionActionHandlerId(v8::Isolate* isolate,
                                    v8::Local<v8::Value> value,
                                    const std::string& action) {
   blink::MediaSession* media_session =
-      blink::V8MediaSession::ToImplWithTypeCheck(isolate, value);
+      blink::V8MediaSession::ToWrappable(isolate, value);
   CHECK(media_session) << "MediaSession required as argument";
   return media_session->getActionHandlerId(WTF::String::FromUTF8(action));
 }

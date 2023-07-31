@@ -31,6 +31,7 @@ function createClipboardEvent(name: string): ClipboardEvent {
 function createAutocompleteMatch(): AutocompleteMatch {
   return {
     a11yLabel: mojoString16(''),
+    actions: [],
     allowedToBeDefaultMatch: false,
     isSearchType: false,
     swapContentsAndDescription: false,
@@ -129,7 +130,6 @@ suite('NewTabPageRealboxTest', () => {
   suiteSetup(() => {
     loadTimeData.overrideValues({
       realboxSeparator: ' - ',
-      showSecondarySide: true,
     });
   });
 
@@ -157,7 +157,14 @@ suite('NewTabPageRealboxTest', () => {
       iconElement: RealboxIconElement, destinationUrl: string) {
     assertStyle(
         iconElement.$.icon, 'background-image',
-        getFaviconForPageURL(destinationUrl, false, '', 32, true));
+
+        // Resolution units are converted from `x` (shorthand for `dppx`) to
+        // `dppx` (the canonical unit for the resolution type) because
+        // assertStyle is using computed values instead of specified ones, and
+        // the computed values have to return the canonical unit for the type.
+        getFaviconForPageURL(destinationUrl, false, '', 32, true)
+            .replace(' 1x', ' 1dppx')
+            .replace(' 2x', ' 2dppx'));
     assertStyle(iconElement.$.icon, '-webkit-mask-image', 'none');
   }
 
@@ -1817,12 +1824,12 @@ suite('NewTabPageRealboxTest', () => {
     realbox.$.input.dispatchEvent(new InputEvent('input'));
 
     const matches = [createSearchMatch({
-      action: {
+      actions: [{
         a11yLabel: mojoString16(''),
         hint: mojoString16('Clear Browsing History'),
         suggestionContents: mojoString16(''),
         iconUrl: 'chrome://theme/current-channel-logo',
-      },
+      }],
       fillIntoEdit: mojoString16('clear browsing history'),
       supportsDeletion: true,
     })];
@@ -1874,93 +1881,7 @@ suite('NewTabPageRealboxTest', () => {
   // Test Responsiveness Metrics
   //============================================================================
 
-  test('responsiveness metric is being recorded', async () => {
-    realbox.$.input.value = 'he';
-    realbox.$.input.dispatchEvent(new InputEvent('input'));
-
-    // The responsiveness metric is not recorded until the results are painted.
-    assertEquals(
-        0, testProxy.handler.getCallCount('logCharTypedToRepaintLatency'));
-
-    let matches = [createSearchMatch()];
-    testProxy.callbackRouterRemote.autocompleteResultChanged({
-      input: mojoString16(realbox.$.input.value.trimStart()),
-      matches,
-      suggestionGroupsMap: {},
-    });
-    await testProxy.callbackRouterRemote.$.flushForTesting();
-    assertTrue(areMatchesShowing());
-
-    // The responsiveness metric is recorded once the results are painted.
-    await testProxy.handler.whenCalled('logCharTypedToRepaintLatency')
-        .then((args) => {
-          assertTrue(args.timeDelta.microseconds > 0);
-        });
-    assertEquals(
-        1, testProxy.handler.getCallCount('logCharTypedToRepaintLatency'));
-
-    testProxy.handler.reset();
-
-    // Delete the last character.
-    realbox.$.input.value = 'h';
-    realbox.$.input.dispatchEvent(new InputEvent('input'));
-
-    matches = [createSearchMatch({
-      allowedToBeDefaultMatch: true,
-      inlineAutocompletion: mojoString16('ello'),
-    })];
-    testProxy.callbackRouterRemote.autocompleteResultChanged({
-      input: mojoString16(realbox.$.input.value.trimStart()),
-      matches,
-      suggestionGroupsMap: {},
-    });
-    await testProxy.callbackRouterRemote.$.flushForTesting();
-    assertTrue(areMatchesShowing());
-
-    // The responsiveness metric is not recorded when characters are deleted.
-    assertEquals(
-        0, testProxy.handler.getCallCount('logCharTypedToRepaintLatency'));
-
-    testProxy.handler.reset();
-
-    assertEquals('hello', realbox.$.input.value);
-    const start = realbox.$.input.selectionStart!;
-    const end = realbox.$.input.selectionEnd!;
-    assertEquals('ello', realbox.$.input.value.substring(start, end));
-
-    // Type the next character of the inline autocompletion.
-    const keyEvent = new KeyboardEvent('keydown', {
-      bubbles: true,
-      cancelable: true,
-      composed: true,  // So it propagates across shadow DOM boundary.
-      key: 'e',
-    });
-    realbox.$.input.dispatchEvent(keyEvent);
-    assertTrue(keyEvent.defaultPrevented);
-
-    matches = [createSearchMatch({
-      allowedToBeDefaultMatch: true,
-      inlineAutocompletion: mojoString16('llo'),
-    })];
-    testProxy.callbackRouterRemote.autocompleteResultChanged({
-      input: mojoString16('he'),
-      matches,
-      suggestionGroupsMap: {},
-    });
-    await testProxy.callbackRouterRemote.$.flushForTesting();
-    assertTrue(areMatchesShowing());
-
-    // The responsiveness metric is recorded when the default match has
-    // inline autocompletion.
-    await testProxy.handler.whenCalled('logCharTypedToRepaintLatency')
-        .then((args) => {
-          assertTrue(args.timeDelta.microseconds > 0);
-        });
-    assertEquals(
-        1, testProxy.handler.getCallCount('logCharTypedToRepaintLatency'));
-  });
-
-  test('new responsiveness metrics are being recorded', async () => {
+  test('responsiveness metrics are being recorded', async () => {
     realbox.$.input.value = 'he';
     realbox.$.input.dispatchEvent(new InputEvent('input'));
 
@@ -2282,8 +2203,7 @@ suite('NewTabPageRealboxTest', () => {
     assertTrue(areMatchesShowing());
 
     // The first match is showing. The second match is initially hidden.
-    let matchEls =
-        realbox.$.matches.shadowRoot!.querySelectorAll('cr-realbox-match');
+    let matchEls = realbox.$.matches.selectableMatchElements;
     assertEquals(1, matchEls.length);
 
     // The suggestion group header and the toggle button are visible.
@@ -2320,8 +2240,7 @@ suite('NewTabPageRealboxTest', () => {
     testProxy.handler.reset();
 
     // Second match is visible.
-    matchEls =
-        realbox.$.matches.shadowRoot!.querySelectorAll('cr-realbox-match');
+    matchEls = realbox.$.matches.selectableMatchElements;
     assertEquals(2, matchEls.length);
 
     // Hide the second match by clicking the toggle button.
@@ -2335,8 +2254,7 @@ suite('NewTabPageRealboxTest', () => {
         1, testProxy.handler.getCallCount('toggleSuggestionGroupIdVisibility'));
 
     // Second match is hidden.
-    matchEls =
-        realbox.$.matches.shadowRoot!.querySelectorAll('cr-realbox-match');
+    matchEls = realbox.$.matches.selectableMatchElements;
     assertEquals(1, matchEls.length);
 
     testProxy.handler.reset();
@@ -2350,9 +2268,42 @@ suite('NewTabPageRealboxTest', () => {
     assertEquals(
         1, testProxy.handler.getCallCount('toggleSuggestionGroupIdVisibility'));
     // Second match is visible again.
-    matchEls =
-        realbox.$.matches.shadowRoot!.querySelectorAll('cr-realbox-match');
+    matchEls = realbox.$.matches.selectableMatchElements;
     assertEquals(2, matchEls.length);
+  });
+
+  test('HidesDropdownIfNoPrimaryMatches', async () => {
+    realbox.$.input.value = '';
+    realbox.$.input.dispatchEvent(new MouseEvent('mousedown', {button: 0}));
+
+    const matches = [createUrlMatch({suggestionGroupId: 100})];
+    const suggestionGroupsMap = {
+      100: {
+        header: mojoString16('People also search for'),
+        hideGroupA11yLabel: mojoString16(''),
+        showGroupA11yLabel: mojoString16(''),
+        hidden: false,
+        sideType: SideType.kSecondary,
+      },
+    };
+    testProxy.callbackRouterRemote.autocompleteResultChanged({
+      input: mojoString16(''),
+      matches,
+      suggestionGroupsMap,
+    });
+    await testProxy.callbackRouterRemote.$.flushForTesting();
+    assertFalse(areMatchesShowing());
+
+    // Verify updating the suggestion group to be a primary group makes the
+    // realbox dropdown show.
+    suggestionGroupsMap[100].sideType = SideType.kDefaultPrimary;
+    testProxy.callbackRouterRemote.autocompleteResultChanged({
+      input: mojoString16(''),
+      matches,
+      suggestionGroupsMap,
+    });
+    await testProxy.callbackRouterRemote.$.flushForTesting();
+    assertTrue(areMatchesShowing());
   });
 
   test(
@@ -2509,12 +2460,12 @@ suite('NewTabPageRealboxTest', () => {
     realbox.$.input.value = 'Clear Browsing History';
     realbox.$.input.dispatchEvent(new InputEvent('input'));
     const matches = [createSearchMatch({
-      action: {
+      actions: [{
         a11yLabel: mojoString16(''),
         hint: mojoString16('Clear Browsing History'),
         suggestionContents: mojoString16(''),
         iconUrl: 'chrome://theme/current-channel-logo',
-      },
+      }],
     })];
     testProxy.callbackRouterRemote.autocompleteResultChanged({
       input: mojoString16(realbox.$.input.value.trimStart()),
@@ -2559,12 +2510,20 @@ suite('NewTabPageRealboxTest', () => {
     const matches = [
       createSearchMatch({contents: mojoString16('Clear Bro')}),
       createSearchMatch({
-        action: {
-          a11yLabel: mojoString16(''),
-          hint: mojoString16('Clear Browsing History'),
-          suggestionContents: mojoString16(''),
-          iconUrl: 'chrome://theme/current-channel-logo',
-        },
+        actions: [
+          {
+            a11yLabel: mojoString16(''),
+            hint: mojoString16('Clear Browsing History'),
+            suggestionContents: mojoString16(''),
+            iconUrl: 'chrome://theme/current-channel-logo',
+          },
+          {
+            a11yLabel: mojoString16(''),
+            hint: mojoString16('Tab Switch'),
+            suggestionContents: mojoString16(''),
+            iconUrl: 'chrome://theme/current-channel-logo',
+          },
+        ],
       }),
     ];
     testProxy.callbackRouterRemote.autocompleteResultChanged({
@@ -2580,10 +2539,11 @@ suite('NewTabPageRealboxTest', () => {
     verifyMatch(matches[0]!, matchEls[0]!);
     verifyMatch(matches[1]!, matchEls[1]!);
 
-    const pedalEl = $$($$(matchEls[1]!, 'cr-realbox-action')!, '.contents')!;
+    const pedalElClear =
+        $$($$(matchEls[1]!, 'cr-realbox-action')!, '.contents')!;
 
     assertEquals(
-        pedalEl.querySelector<HTMLImageElement>('#action-icon')!.src,
+        pedalElClear.querySelector<HTMLImageElement>('#action-icon')!.src,
         'chrome://theme/current-channel-logo');  // Default Pedal Icon
 
     const leftClick = new MouseEvent('click', {
@@ -2593,7 +2553,7 @@ suite('NewTabPageRealboxTest', () => {
       composed: true,  // So it propagates across shadow DOM boundary.
     });
 
-    pedalEl.dispatchEvent(leftClick);
+    pedalElClear.dispatchEvent(leftClick);
     assertTrue(leftClick.defaultPrevented);
 
     await testProxy.handler.whenCalled('executeAction').then((args) => {
@@ -2602,6 +2562,20 @@ suite('NewTabPageRealboxTest', () => {
       assertTrue(args.matchSelectionTimestamp['internalValue'] > 0);
     });
     assertEquals(1, testProxy.handler.getCallCount('executeAction'));
+
+    const pedalElTab =
+        $$(matchEls[1]!.shadowRoot!.querySelectorAll('cr-realbox-action')![1]!,
+           '.contents')!;
+
+    pedalElTab.dispatchEvent(leftClick);
+    assertTrue(leftClick.defaultPrevented);
+
+    await testProxy.handler.whenCalled('executeAction').then((args) => {
+      assertEquals(1, args.line);
+      assertEquals(args.mouseButton, 0);
+      assertTrue(args.matchSelectionTimestamp['internalValue'] > 0);
+    });
+    assertEquals(2, testProxy.handler.getCallCount('executeAction'));
   });
 
   //============================================================================

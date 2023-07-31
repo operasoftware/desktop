@@ -231,10 +231,14 @@ net::SiteForCookies DefaultSiteForCookies(ExecutionContext* execution_context) {
     return window->document()->SiteForCookies();
 
   auto* scope = To<ServiceWorkerGlobalScope>(execution_context);
-  return net::SiteForCookies::FromUrl(GURL(scope->Url()));
+  const blink::BlinkStorageKey& key = scope->storage_key();
+  if (key.IsFirstPartyContext()) {
+    return net::SiteForCookies::FromUrl(GURL(scope->Url()));
+  }
+  return net::SiteForCookies();
 }
 
-scoped_refptr<SecurityOrigin> DefaultTopFrameOrigin(
+const scoped_refptr<const SecurityOrigin> DefaultTopFrameOrigin(
     ExecutionContext* execution_context) {
   DCHECK(execution_context);
 
@@ -244,20 +248,21 @@ scoped_refptr<SecurityOrigin> DefaultTopFrameOrigin(
     return window->document()->TopFrameOrigin()->IsolatedCopy();
   }
 
-  // TODO(crbug.com/1225444): This is a temporary solution until we can plumb
-  // BlinkStorageKey to ServiceWorkerGlobalScope. Once we do the top-frame
-  // origin should be BlinkStorageKey's top-frame site.
-  auto* scope = To<ServiceWorkerGlobalScope>(execution_context);
-  return SecurityOrigin::CreateFromUrlOrigin(url::Origin::Create(
-      net::SchemefulSite(scope->GetSecurityOrigin()->ToUrlOrigin()).GetURL()));
+  const BlinkStorageKey& key =
+      To<ServiceWorkerGlobalScope>(execution_context)->storage_key();
+  if (key.IsFirstPartyContext()) {
+    return key.GetSecurityOrigin();
+  }
+  return SecurityOrigin::CreateFromUrlOrigin(
+      url::Origin::Create(net::SchemefulSite(key.GetTopLevelSite()).GetURL()));
 }
 
 }  // namespace
 
 CookieStore::CookieStore(
     ExecutionContext* execution_context,
-    mojo::Remote<network::mojom::blink::RestrictedCookieManager> backend)
-    : ExecutionContextLifecycleObserver(execution_context),
+    HeapMojoRemote<network::mojom::blink::RestrictedCookieManager> backend)
+    : ExecutionContextClient(execution_context),
       backend_(std::move(backend)),
       change_listener_receiver_(this, execution_context),
       default_cookie_url_(DefaultCookieURL(execution_context)),
@@ -357,12 +362,9 @@ ScriptPromise CookieStore::Delete(ScriptState* script_state,
 
 void CookieStore::Trace(Visitor* visitor) const {
   visitor->Trace(change_listener_receiver_);
+  visitor->Trace(backend_);
   EventTargetWithInlineData::Trace(visitor);
-  ExecutionContextLifecycleObserver::Trace(visitor);
-}
-
-void CookieStore::ContextDestroyed() {
-  backend_.reset();
+  ExecutionContextClient::Trace(visitor);
 }
 
 const AtomicString& CookieStore::InterfaceName() const {
@@ -370,7 +372,7 @@ const AtomicString& CookieStore::InterfaceName() const {
 }
 
 ExecutionContext* CookieStore::GetExecutionContext() const {
-  return ExecutionContextLifecycleObserver::GetExecutionContext();
+  return ExecutionContextClient::GetExecutionContext();
 }
 
 void CookieStore::RemoveAllEventListeners() {
@@ -435,7 +437,8 @@ ScriptPromise CookieStore::DoRead(
     return ScriptPromise();
   }
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   backend_->GetAllForUrl(
       cookie_url, default_site_for_cookies_, default_top_frame_origin_,
       context->HasStorageAccess(), std::move(backend_options),
@@ -516,7 +519,8 @@ ScriptPromise CookieStore::DoWrite(ScriptState* script_state,
     return ScriptPromise();
   }
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   backend_->SetCanonicalCookie(
       *std::move(canonical_cookie), default_cookie_url_,
       default_site_for_cookies_, default_top_frame_origin_,

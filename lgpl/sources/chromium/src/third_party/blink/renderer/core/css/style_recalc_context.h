@@ -54,14 +54,19 @@ class CORE_EXPORT StyleRecalcContext {
   // Called to update the context when matching ::part rules for shadow hosts.
   StyleRecalcContext ForPartRules(Element& host) const;
 
-  // Set to the nearest container (for container queries), if any.
+  // Set to the nearest container (for size container queries), if any.
   // This is used to evaluate container queries in ElementRuleCollector.
   Element* container = nullptr;
+
+  // Used to decide which is the the closest style() @container candidate for
+  // ::slotted() and ::part() rule matching. Otherwise nullptr.
+  Element* style_container = nullptr;
 
   StyleScopeFrame* style_scope_frame = nullptr;
 
   // The style for the element at the start of the lifecycle update, or the
-  // :initial styles for the second pass when transitioning from display:none.
+  // @starting-style styles for the second pass when transitioning from
+  // display:none.
   const ComputedStyle* old_style = nullptr;
 
   // If true, something about the parent's style (e.g., that it has

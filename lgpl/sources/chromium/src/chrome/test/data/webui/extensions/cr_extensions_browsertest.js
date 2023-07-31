@@ -67,6 +67,10 @@ var CrExtensionsSidebarTest = class extends CrExtensionsBrowserTest {
   }
 };
 
+TEST_F('CrExtensionsSidebarTest', 'HrefVerification', function() {
+  this.runMochaTest(extension_sidebar_tests.TestNames.HrefVerification);
+});
+
 TEST_F('CrExtensionsSidebarTest', 'LayoutAndClickHandlers', function() {
   this.runMochaTest(extension_sidebar_tests.TestNames.LayoutAndClickHandlers);
 });
@@ -957,7 +961,7 @@ TEST_F('CrUrlUtilTest', 'All', () => {
 ////////////////////////////////////////////////////////////////////////////////
 // SitePermissionsEditPermissionsDialog tests
 
-var CrExtensionsSitePermissionsEditPermissionsDialog =
+var CrExtensionsSitePermissionsEditPermissionsDialogTest =
     class extends CrExtensionsBrowserTest {
   /** @override */
   get browsePreload() {
@@ -965,7 +969,7 @@ var CrExtensionsSitePermissionsEditPermissionsDialog =
   }
 };
 
-TEST_F('CrExtensionsSitePermissionsEditPermissionsDialog', 'All', () => {
+TEST_F('CrExtensionsSitePermissionsEditPermissionsDialogTest', 'All', () => {
   mocha.run();
 });
 

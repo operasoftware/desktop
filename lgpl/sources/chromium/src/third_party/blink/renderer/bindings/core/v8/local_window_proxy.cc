@@ -56,6 +56,7 @@
 #include "third_party/blink/renderer/core/inspector/inspector_task_runner.h"
 #include "third_party/blink/renderer/core/inspector/main_thread_debugger.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/extensions_registry.h"
@@ -199,6 +200,7 @@ void LocalWindowProxy::Initialize() {
   InstallConditionalFeatures();
 
   if (World().IsMainWorld()) {
+    probe::DidCreateMainWorldContext(GetFrame());
     GetFrame()->Loader().DispatchDidClearWindowObjectInMainWorld();
   }
 }
@@ -484,7 +486,8 @@ static void Getter(v8::Local<v8::Name> property,
     return;
   // FIXME: Consider passing StringImpl directly.
   AtomicString name = ToCoreAtomicString(property.As<v8::String>());
-  HTMLDocument* html_document = V8HTMLDocument::ToImpl(info.Holder());
+  HTMLDocument* html_document =
+      V8HTMLDocument::ToWrappableUnsafe(info.Holder());
   DCHECK(html_document);
   v8::Local<v8::Value> result =
       GetNamedProperty(html_document, name, info.Holder(), info.GetIsolate());

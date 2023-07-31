@@ -14,6 +14,8 @@ import multiprocessing
 import os
 import re
 import shutil
+import signal
+import subprocess
 import sys
 import warnings
 from typing import List, Optional, Tuple
@@ -22,13 +24,12 @@ from blinkpy.common import exit_codes
 from blinkpy.common import path_finder
 from blinkpy.common.host import Host
 from blinkpy.common.path_finder import PathFinder
-from blinkpy.web_tests.port.android import (
-    ANDROID_WEBVIEW,
-    CHROME_ANDROID,
-)
+from blinkpy.w3c.wpt_results_processor import WPTResultsProcessor
+from blinkpy.web_tests.port.base import Port
 
 path_finder.add_testing_dir_to_sys_path()
 path_finder.add_build_android_to_sys_path()
+path_finder.add_build_ios_to_sys_path()
 path_finder.bootstrap_wpt_imports()
 
 import mozlog
@@ -53,23 +54,60 @@ try:
 except ImportError:
     _ANDROID_ENABLED = False
 
-
-def _make_log_enabled_grouping_formatter():
-    # Make a grouping log formatter that shows regular log messages:
-    #   WARNING Unsupported test type wdspec for product content_shell
-    #
-    # Activating logs dynamically with:
-    #   StructuredLogger.send_message('show_logs', 'on')
-    # appears buggy. This factory exists as a workaround.
-    grouping_formatter = mozlog.formatters.GroupingFormatter()
-    grouping_formatter.message_handler.handle_message('show_logs', 'on')
-    return grouping_formatter
+try:
+    import xcode_util as xcode
+    _IOS_ENABLED = True
+except ImportError:
+    _IOS_ENABLED = False
 
 
-mozlog.commandline.log_formatters['grouped'] = (
-    _make_log_enabled_grouping_formatter,
-    mozlog.commandline.log_formatters['grouped'][1],
-)
+class GroupingFormatter(mozlog.formatters.GroupingFormatter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Enable informative log messages, which look like:
+        #   WARNING Unsupported test type wdspec for product content_shell
+        #
+        # Activating logs dynamically with:
+        #   StructuredLogger.send_message('show_logs', 'on')
+        # appears buggy. This default exists as a workaround.
+        self.show_logs = True
+
+    def suite_start(self, data) -> str:
+        self.completed_tests = 0
+        self.running_tests.clear()
+        self.test_output.clear()
+        self.subtest_failures.clear()
+        self.tests_with_failing_subtests.clear()
+        for status in self.expected:
+            self.expected[status] = 0
+        for tests in self.unexpected_tests.values():
+            tests.clear()
+        return super().suite_start(data)
+
+    def suite_end(self, data) -> str:
+        # Do not show test failures again in noninteractive mode. THey are
+        # already shown during the run.
+        self.test_failure_text = ''
+        return super().suite_end(data)
+
+
+class MachFormatter(mozlog.formatters.MachFormatter):
+    def __init__(self, *args, reset_before_suite: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.reset_before_suite = reset_before_suite
+
+    def suite_start(self, data) -> str:
+        output = super().suite_start(data)
+        if self.reset_before_suite:
+            for counts in self.summary.current['counts'].values():
+                counts['count'] = 0
+                counts['expected'].clear()
+                counts['unexpected'].clear()
+                counts['known_intermittent'].clear()
+            self.summary.current['unexpected_logs'].clear()
+            self.summary.current['intermittent_logs'].clear()
+            self.summary.current['harness_errors'].clear()
+        return output
 
 
 class StructuredLogAdapter(logging.Handler):
@@ -138,7 +176,7 @@ class WPTAdapter:
         self.fs = self.host.filesystem
         self.path_finder = PathFinder(self.fs)
         self.port = self.host.port_factory.get()
-        self.port.set_option_default('use_xvfb', True)
+        self._product_registry = make_product_registry()
         self._shard_index = _parse_environ_int('GTEST_SHARD_INDEX')
         self._total_shards = _parse_environ_int('GTEST_TOTAL_SHARDS')
 
@@ -147,7 +185,7 @@ class WPTAdapter:
             argv: Optional[List[str]] = None,
     ) -> argparse.Namespace:
         wptrunner_parser = wptcommandline.create_parser(
-            product_choices=sorted(_product_registry, key=len))
+            product_choices=sorted(self._product_registry, key=len))
         # Not ideal, but this creates a wptrunner-compliant CLI without showing
         # many irrelevant parameters.
         for group in wptrunner_parser._action_groups:
@@ -198,11 +236,6 @@ class WPTAdapter:
         parser.add_argument('--isolated-script-test-perf-output',
                             help=argparse.SUPPRESS)
         parser.add_argument('--script-type', help=argparse.SUPPRESS)
-        # `Port.setup_test_run` will always start Xvfb on Linux.
-        parser.add_argument('--xvfb',
-                            action='store_true',
-                            default=True,
-                            help=argparse.SUPPRESS)
         parser.add_argument(
             '-j',
             '--processes',
@@ -221,6 +254,10 @@ class WPTAdapter:
             self.add_android_arguments(parser)
         else:
             warnings.warn('Android tools not found')
+        if _IOS_ENABLED:
+            self.add_ios_arguments(parser)
+        else:
+            warnings.warn('iOS tools not found')
         # Nightly installation is not supported, so just add defaults.
         parser.set_defaults(
             prompt=False,
@@ -233,11 +270,12 @@ class WPTAdapter:
 
     def _check_and_update_options(self, options):
         """Postprocess options, some of which can depend on each other."""
+        self._check_and_update_sharding_options(options)
         # Set up logging as early as possible.
         self._check_and_update_output_options(options)
         self._check_and_update_upstream_options(options)
         self._check_and_update_config_options(options)
-        self._check_and_update_sharding_options(options)
+        self._check_and_update_debugging_options(options)
         # TODO(crbug/1316055): Enable tombstone with '--stackwalk-binary' and
         # '--symbols-path'.
         options.exclude = options.exclude or []
@@ -246,7 +284,6 @@ class WPTAdapter:
             'webdriver',
             'infrastructure/webdriver',
         ])
-        options.pause_after_test = False
         options.no_capture_stdio = True
         options.manifest_download = False
 
@@ -266,14 +303,17 @@ class WPTAdapter:
         output_dir = self.path_from_output_dir(options.target)
         if not self.fs.isdir(output_dir):
             raise ValueError("'--target' must be a directory under //out")
-        if options.log_chromium == '':
+        self.port.set_option_default('target', options.target)
+        if options.results_directory:
+            self.port.set_option_default('results_directory',
+                                         options.results_directory)
+        else:
+            options.results_directory = self.port.results_directory()
+        if options.log_chromium == '' or options.show_results:
             options.log_chromium = self.fs.join(output_dir, 'results.json')
         if options.log_wptreport == '':
-            if self._shard_index is None:
-                filename = 'wpt_reports_%s.json' % options.product
-            else:
-                filename = 'wpt_reports_%s_%02d.json' % (options.product,
-                                                         self._shard_index)
+            filename = 'wpt_reports_%s_%02d.json' % (options.product,
+                                                     options.this_chunk)
             options.log_wptreport = self.fs.join(output_dir, filename)
         for log_type in ('chromium', 'wptreport'):
             dest = 'log_%s' % log_type
@@ -281,7 +321,6 @@ class WPTAdapter:
             if filename:
                 filename = self.fs.abspath(filename)
                 setattr(options, dest, [mozlog.commandline.log_file(filename)])
-
         options.log = wptlogging.setup(dict(vars(options)),
                                        {'grouped': sys.stdout})
         logging.root.handlers.clear()
@@ -304,15 +343,10 @@ class WPTAdapter:
             '--force-fieldtrial-params='
             'DownloadServiceStudy.Enabled:start_up_delay_ms/0',
         ])
-        if options.retry_unexpected is None:
-            if _has_explicit_tests(options):
-                options.retry_unexpected = 0
-                logger.warning('Tests explicitly specified; disabling retries')
-            else:
-                options.retry_unexpected = 3
-                logger.warning(
-                    'Tests not explicitly specified; '
-                    'using %d retries', options.retry_unexpected)
+        if options.sanitizer_enabled and (options.timeout_multiplier or 1) < 2:
+            options.timeout_multiplier = 2
+            logger.info('Defaulting to 2x timeout multiplier because '
+                        'sanitizer is enabled')
         if not options.mojojs_path:
             options.mojojs_path = self.path_from_output_dir(
                 options.target, 'gen')
@@ -320,21 +354,57 @@ class WPTAdapter:
             options.config = self.path_finder.path_from_web_tests(
                 'wptrunner.blink.ini')
         if options.flag_specific:
+            # Enable adding smoke tests later.
+            self.port.set_option_default('flag_specific',
+                                         options.flag_specific)
             configs = self.port.flag_specific_configs()
-            args, smoke_file_name = configs[options.flag_specific]
+            args, _ = configs[options.flag_specific]
             logger.info('Running with flag-specific arguments: "%s"',
                         ' '.join(args))
             options.binary_args.extend(args)
-            if smoke_file_name and not _has_explicit_tests(options):
-                options.include_file = self.path_finder.path_from_web_tests(
-                    smoke_file_name)
+
+        if self.port.default_smoke_test_only():
+            smoke_file_short_path = self.fs.relpath(
+                self.port.path_to_smoke_tests_file(),
+                self.port.web_tests_dir())
+            if not _has_explicit_tests(options):
+                self._load_smoke_tests(options)
                 logger.info(
                     'Tests not explicitly specified; '
-                    'running tests from web_tests/%s', smoke_file_name)
-            elif smoke_file_name:
+                    'running tests from %s', smoke_file_short_path)
+            else:
                 logger.warning(
                     'Tests explicitly specified; '
-                    'not running tests from web_tests/%s', smoke_file_name)
+                    'not running tests from %s', smoke_file_short_path)
+
+    def _check_and_update_debugging_options(self, options: argparse.Namespace):
+        self.port.set_option_default('use_xvfb', options.headless)
+        if not options.headless and options.processes is None:
+            logger.info('Not headless; default to 1 worker to avoid '
+                        'opening too many windows')
+            options.processes = 1
+
+    def _load_smoke_tests(self, options: argparse.Namespace):
+        """Read the smoke tests file and append its tests to the test list.
+
+        This method handles smoke test files inherited from `run_web_tests.py`
+        differently from the native `wpt run --include-file` parameter.
+        Specifically, tests are assumed to be relative to `web_tests/`, so a
+        line without a recognized `external/wpt/` or `wpt_internal/` prefix is
+        assumed to be a legacy layout test that is excluded.
+        """
+        smoke_file_path = self.port.path_to_smoke_tests_file()
+        options.include = options.include or []
+        with self.fs.open_text_file_for_reading(smoke_file_path) as smoke_file:
+            for line in smoke_file:
+                test, _, _ = line.partition('#')
+                test = test.strip()
+                for wpt_dir, url_prefix in Port.WPT_DIRS.items():
+                    if not wpt_dir.endswith('/'):
+                        wpt_dir += '/'
+                    if test.startswith(wpt_dir):
+                        options.include.append(
+                            test.replace(wpt_dir, url_prefix, 1))
 
     def _check_and_update_upstream_options(self, options: argparse.Namespace):
         if options.use_upstream_wpt:
@@ -354,22 +424,21 @@ class WPTAdapter:
             # '--run-by-dir=0' so that tests can be more evenly distributed
             # among workers.
             options.fail_on_unexpected_pass = False
+            options.restart_on_unexpected = False
             options.restart_on_new_group = False
             options.run_by_dir = 0
 
     def _check_and_update_sharding_options(self, options):
-        if self._shard_index is not None:
+        # Command line arguments take priority over environment variables
+        if (options.total_chunks == 1 and self._shard_index is not None
+                and self._total_shards is not None):
             # wptrunner uses a 1-based index, whereas LUCI uses 0-based.
             options.this_chunk = self._shard_index + 1
-        if self._total_shards is not None:
             options.total_chunks = self._total_shards
-        logger.info('Selecting tests for shard %d/%d', options.this_chunk,
-                    options.total_chunks)
-        # The default sharding strategy is to shard by directory. But
-        # we want to hash each test to determine which shard runs it.
-        # This allows running individual directories that have few
-        # tests across many shards.
-        options.chunk_type = options.chunk_type or 'hash'
+        # Override the default sharding strategy, which is to shard by directory
+        # (`dir_hash`). Sharding by test ID attempts to maximize shard workload
+        # uniformity, as test leaf directories can vary greatly in size.
+        options.chunk_type = options.chunk_type or 'id_hash'
 
     def path_from_output_dir(self, *parts):
         return self.path_finder.path_from_chromium_base('out', *parts)
@@ -382,6 +451,7 @@ class WPTAdapter:
             stack.callback(self.fs.rmtree, tmp_dir)
             product = self._make_product(options)
             stack.enter_context(product.test_env())
+            product.update_options_for_product(options)
 
             if options.use_upstream_wpt:
                 tests_root = tools_root = self.fs.join(tmp_dir, 'upstream-wpt')
@@ -404,16 +474,28 @@ class WPTAdapter:
             logger.debug('Using WPT tools from %s', tools_root)
             self._create_extra_run_info(options)
 
+            if options.clobber_old_results:
+                self.port.clobber_old_results()
+            elif self.port._filesystem.exists(self.port.artifacts_directory()):
+                self.port.limit_archived_results_count()
+
+                # Rename the existing results folder for archiving.
+                self.port.rename_results_folder()
+
+            # Create the output directory if it doesn't already exist.
+            self.port.host.filesystem.maybe_make_directory(
+                self.port.artifacts_directory())
+
             self.port.setup_test_run()  # Start Xvfb, if necessary.
             stack.callback(self.port.clean_up_test_run)
             self.fs.chdir(self.path_finder.web_tests_dir())
             run = _load_entry_point(tools_root)
+            stack.enter_context(self.process_and_upload_results(options))
             exit_code = run(**vars(options))
-            self.process_and_upload_results(options)
             return exit_code
 
     def _make_product(self, options: argparse.Namespace) -> 'Product':
-        product_cls = _product_registry[options.product]
+        product_cls = self._product_registry[options.product]
         return product_cls(self.host, options, self.port.python3_command())
 
     def _checkout_3h_epoch_commit(self, tools_root: str):
@@ -435,7 +517,7 @@ class WPTAdapter:
             'debug': self.port.get_option('configuration') == 'Debug',
             'flag_specific': options.flag_specific or '',
             'used_upstream': options.use_upstream_wpt,
-            'sanitizer_enabled': options.enable_sanitizer,
+            'sanitizer_enabled': options.sanitizer_enabled,
         }
         if options.use_upstream_wpt:
             # `run_wpt_tests` does not run in the upstream checkout's git
@@ -449,49 +531,22 @@ class WPTAdapter:
         with self.fs.open_text_file_for_writing(run_info_path) as file_handle:
             json.dump(run_info, file_handle)
 
-    def process_and_upload_results(
-            self,
-            options,
-            layout_test_results_subdir: str = 'layout-test-results',
-    ):
-        if not options.log_chromium:
-            return
-        json_results_filename = options.log_chromium[0].name
-        artifacts_dir = os.path.join(os.path.dirname(json_results_filename),
-                                     layout_test_results_subdir)
-        command = [
-            self.port.python3_command(),
-            os.path.join(path_finder.get_blink_tools_dir(),
-                         'wpt_process_results.py'),
-            '--target',
-            options.target,
-            '--web-tests-dir',
-            self.path_finder.web_tests_dir(),
-            '--artifacts-dir',
-            artifacts_dir,
-            '--wpt-results',
-            json_results_filename,
-        ]
-        if options.verbose:
-            command.append('--verbose')
+    @contextlib.contextmanager
+    def process_and_upload_results(self, options):
+        artifacts_dir = self.port.artifacts_directory()
+        processor = WPTResultsProcessor(self.host.filesystem,
+                                        self.port,
+                                        artifacts_dir=artifacts_dir)
+        with processor.stream_results() as events:
+            options.log.add_handler(events.put)
+            yield
         if options.log_wptreport:
-            command.extend(['--wpt-report', options.log_wptreport[0].name])
-        exit_code = common.run_command(command)
-        if (exit_code != exit_codes.INTERRUPTED_EXIT_STATUS
-                and options.show_results
-                and self.has_regressions(artifacts_dir)):
-            self.show_results_in_browser(artifacts_dir)
-
-    def show_results_in_browser(self, artifacts_dir: str):
-        results_file = self.fs.join(artifacts_dir, 'results.html')
-        self.port.show_results_html_file(results_file)
-
-    def has_regressions(self, artifacts_dir: str):
-        full_results_file = self.fs.join(artifacts_dir, 'full_results.json')
-        with self.fs.open_text_file_for_reading(
-                full_results_file) as full_results:
-            results = json.load(full_results)
-        return results["num_regressions"] > 0
+            processor.process_wpt_report(options.log_wptreport[0].name)
+        if options.log_chromium:
+            processor.process_results_json(options.log_chromium[0].name)
+        if options.show_results and processor.has_regressions:
+            self.port.show_results_html_file(
+                self.fs.join(artifacts_dir, 'results.html'))
 
     def add_configuration_arguments(self, parser: argparse.ArgumentParser):
         group = parser.add_argument_group('Configuration')
@@ -503,7 +558,7 @@ class WPTAdapter:
             '-p',
             '--product',
             default='content_shell',
-            choices=sorted(_product_registry, key=len),
+            choices=sorted(self._product_registry, key=len),
             help='Product (browser or browser component) to test.')
         group.add_argument('--headless',
                            action='store_true',
@@ -543,21 +598,15 @@ class WPTAdapter:
             '--isolated-script-test-launcher-retry-limit',
             metavar='RETRIES',
             type=lambda value: max(0, int(value)),
-            default=None,
-            help=(
-                'Maximum number of times to rerun unexpectedly failed tests. '
-                'Defaults to 3 unless given an explicit list of tests to run.'
-            ))
+            default=3,
+            help=('Maximum number of times to rerun unexpectedly failed '
+                  'tests. Defaults to 3.'))
         group.add_argument('--no-show-results',
                            dest='show_results',
                            action='store_false',
                            default=self.host.platform.interactive,
                            help=("Don't launch a browser with results after"
                                  "the tests are done"))
-        group.add_argument(
-            '--enable-sanitizer',
-            action='store_true',
-            help='Only report sanitizer-related errors and crashes.')
         group.add_argument('--enable-leak-detection',
                            action='append_const',
                            dest='binary_args',
@@ -637,6 +686,8 @@ class WPTAdapter:
     def add_output_arguments(self, parser):
         group = parser.add_argument_group(
             'Output Logging', 'Options for controlling logging behavior.')
+        group.add_argument('--results-directory',
+                           help='Location of test results'),
         # For the overridden '--log-*' options, the value will be `None` if no
         # report should be logged, or the empty string if a default filename
         # should be derived.
@@ -655,11 +706,23 @@ class WPTAdapter:
             help=('Log a wptreport as newline-delimited JSON objects '
                   '(default: //out/<target>/'
                   'wpt_reports_<product>_<shard-index>.json)'))
+        group.add_argument('--clobber-old-results',
+                           action='store_true',
+                           help='Clobbers test results from previous runs.'),
         group.add_argument('-v',
                            '--verbose',
                            action='count',
                            default=0,
                            help='Increase verbosity')
+        # Install customized versions of `mozlog` formatters.
+        for name, formatter in [
+            ('grouped', GroupingFormatter),
+            ('mach', MachFormatter),
+        ]:
+            mozlog.commandline.log_formatters[name] = (
+                formatter,
+                mozlog.commandline.log_formatters[name][1],
+            )
         return group
 
     def add_android_arguments(self, parser):
@@ -667,28 +730,28 @@ class WPTAdapter:
             'Android specific arguments',
             'Options for configuring Android devices and tooling.')
         common.add_emulator_args(group)
-        group.add_argument(
-            '--browser-apk',
-            # Aliases for backwards compatibility.
-            '--chrome-apk',
-            '--system-webview-shell',
-            type=os.path.abspath,
-            help=('Path to the browser APK to install and run. '
-                  '(For WebView, this value is the shell. '
-                  'Defaults to an on-device APK if not provided.)'))
+        group.add_argument('--browser-apk',
+                           type=os.path.abspath,
+                           help=('Path to the browser APK to install and run. '
+                                 '(For WebView, this value is the shell.)'))
         group.add_argument('--webview-provider',
                            type=os.path.abspath,
                            help=('Path to a WebView provider APK to install. '
                                  '(WebView only.)'))
+        group.add_argument('--no-install',
+                           action='store_true',
+                           help=('Do not install packages to device. '
+                                 'Use the packages preinstalled instead.'))
+        return group
+
+    def add_ios_arguments(self, parser):
+        group = parser.add_argument_group(
+            'iOS specific arguments', 'Options for configuring iOS tooling.')
         group.add_argument(
-            '--additional-apk',
-            type=os.path.abspath,
-            action='append',
-            default=[],
-            help='Paths to additional APKs to install.')
-        group.add_argument(
-            '--release-channel',
-            help='Install WebView from release channel. (WebView only.)')
+            '--xcode-build-version',
+            help='Xcode build version to install. Use chrome_ios'
+            ' product to enable this',
+            metavar='build_id')
         return group
 
 
@@ -708,6 +771,15 @@ class IsolatedScriptTestFilterAction(argparse.Action):
                 include.extend(extra_include)
                 exclude.extend(extra_exclude)
         namespace.include, namespace.exclude = include, exclude
+        # The `chromium_tests` recipe passes `--isolated-script-test-filter` to
+        # retry failed tests without the patch. Because the patch may have added
+        # the failed tests (common for imported tests),
+        #  1. `run_wpt_tests.py --isolated-script-test-filter` must tolerate
+        #     test IDs that don't exist.
+        #  2. When all tests retried don't exist without the patch, wptrunner
+        #     must run zero tests and exit successfully instead of interpreting
+        #     the lack of explicit tests as running all tests.
+        namespace.default_exclude = True
 
     def _resolve_tests(self, test_filter: str) -> Tuple[List[str], List[str]]:
         """Resolve an isolated script-style filter string into lists of tests.
@@ -753,7 +825,7 @@ def _load_entry_point(tools_root: str):
     if tools_root not in sys.path:
         sys.path.insert(0, tools_root)
     # Remove current cached modules to force a reload.
-    module_pattern = re.compile(r'\bwpt(runner|serve)?\b')
+    module_pattern = re.compile(r'^(tools|wpt(runner|serve)?)\b')
     for name in list(sys.modules):
         if module_pattern.search(name):
             del sys.modules[name]
@@ -769,6 +841,18 @@ def _load_entry_point(tools_root: str):
     dummy_venv = Virtualenv(path_finder.get_source_dir(),
                             skip_virtualenv_setup=True)
     return functools.partial(run.run, dummy_venv)
+
+
+def make_product_registry():
+    """Create a mapping from all product names (including aliases) to their
+    respective classes.
+    """
+    product_registry = {}
+    product_classes = [Chrome, ContentShell, ChromeiOS, ChromeAndroid, WebView]
+    for product_cls in product_classes:
+        names = [product_cls.name] + product_cls.aliases
+        product_registry.update((name, product_cls) for name in names)
+    return product_registry
 
 
 class Product:
@@ -787,73 +871,55 @@ class Product:
         self._options = options
         self._python_executable = python_executable
         self._tasks = contextlib.ExitStack()
-        self._validate_options()
 
     def _path_from_target(self, *components):
         return self._path_finder.path_from_chromium_base(
             'out', self._options.target, *components)
 
-    def _validate_options(self):
-        """Validate product-specific command-line options.
-
-        The validity of some options may depend on the product. We check these
-        options here instead of at parse time because the product itself is an
-        option and the parser cannot handle that dependency.
-
-        The test environment will not be set up at this point, so checks should
-        not depend on external resources.
-
-        Raises:
-            ValueError: When the given options are invalid for this product.
-                The user will see the error's message (formatted with
-                `argparse`, not a traceback) and the program will exit early,
-                which avoids wasted runtime.
-        """
-
     @contextlib.contextmanager
     def test_env(self):
         """Set up and clean up the test environment."""
         with self._tasks:
-            self.update_options()
             yield
 
-    def update_options(self):
+    def update_options_for_product(self, options):
         """Override product-specific wptrunner parameters."""
-        version = self.get_version()  # pylint: disable=assignment-from-none
-        if version:
-            self._options.browser_version = version
-        webdriver = self.webdriver_binary
-        if webdriver and self._host.filesystem.exists(webdriver):
-            self._options.webdriver_binary = webdriver
+        self._ensure_value(options, 'browser_version', self.get_version())
+        self._ensure_value(options, 'webdriver_binary',
+                           self.default_webdriver_binary)
+
+    def _ensure_value(self, options, name, value):
+        if not getattr(options, name, None) and value is not None:
+            setattr(options, name, value)
 
     def get_version(self):
         """Get the product version, if available."""
         return None
 
     @property
-    def webdriver_binary(self):
-        """Optional[str]: Path to the webdriver binary, if available."""
-        return self._options.webdriver_binary
+    def default_webdriver_binary(self):
+        """Path to the default webdriver binary, if available."""
+        return None
 
 
 class DesktopBase(Product):
     @property
-    def binary(self):
-        raise NotImplementedError
+    def default_binary(self):
+        return None
 
-    def update_options(self):
-        super().update_options()
-        self._options.binary = self.binary
+    def update_options_for_product(self, options):
+        super().update_options_for_product(options)
+        self._ensure_value(options, 'binary', self.default_binary)
         port = self._host.port_factory.get()
-        self._options.processes = (self._options.processes
-                                   or port.default_child_processes())
+        self._ensure_value(options, 'processes',
+                           port.default_child_processes())
 
 
 class Chrome(DesktopBase):
     name = 'chrome'
 
     @property
-    def binary(self):
+    def default_binary(self):
         binary_path = 'chrome'
         if self._host.platform.is_win():
             binary_path += '.exe'
@@ -864,19 +930,19 @@ class Chrome(DesktopBase):
         return self._path_from_target(binary_path)
 
     @property
-    def webdriver_binary(self):
-        default_binary = 'chromedriver'
+    def default_webdriver_binary(self):
         if self._host.platform.is_win():
-            default_binary += '.exe'
-        return (super().webdriver_binary
-                or self._path_from_target(default_binary))
+            path = 'chromedriver.exe'
+        else:
+            path = 'chromedriver'  #linux and mac
+        return self._path_from_target(path)
 
 
 class ContentShell(DesktopBase):
     name = 'content_shell'
 
     @property
-    def binary(self):
+    def default_binary(self):
         binary_path = 'content_shell'
         if self._host.platform.is_win():
             binary_path += '.exe'
@@ -891,55 +957,93 @@ class ChromeiOS(Product):
     name = 'chrome_ios'
 
     @property
-    def webdriver_binary(self) -> Optional[str]:
-        return os.path.realpath(
-            os.path.join(
-                os.path.dirname(__file__),
-                '../../../ios/chrome/test/wpt/tools/'
-                'run_cwt_chromedriver_wrapper.py'))
+    def default_webdriver_binary(self) -> Optional[str]:
+        return self._path_finder.path_from_chromium_base(
+            'ios', 'chrome', 'test', 'wpt', 'tools',
+            'run_cwt_chromedriver_wrapper.py')
 
+    @contextlib.contextmanager
+    def test_env(self):
+        with super().test_env():
+            # Set up xcode log output dir.
+            output_dir = self._host.filesystem.join(
+                self._host.filesystem.dirname(
+                    self._options.log_chromium[0].name), "xcode-output")
+            self._options.webdriver_args.extend([
+                '--out-dir=' + output_dir,
+            ])
 
-@contextlib.contextmanager
-def _install_apk(device, path):
-    """Helper context manager for ensuring a device uninstalls an APK."""
-    device.Install(path)
-    try:
-        yield
-    finally:
-        device.Uninstall(path)
+            # Install xcode.
+            if self._options.xcode_build_version:
+                try:
+                    runtime_cache_folder = xcode.construct_runtime_cache_folder(
+                        '../../Runtime-ios-', '16.0')
+                    os.makedirs(runtime_cache_folder, exist_ok=True)
+                    xcode.install('../../mac_toolchain',
+                                  self._options.xcode_build_version,
+                                  '../../Xcode.app',
+                                  runtime_cache_folder=runtime_cache_folder,
+                                  ios_version='16.0')
+                    xcode.select('../../Xcode.app')
+                except subprocess.CalledProcessError as e:
+                    logger.error(
+                        'Xcode build version %s failed to install: %s ',
+                        self._options.xcode_build_version, e)
+                else:
+                    logger.info(
+                        'Xcode build version %s successfully installed.',
+                        self._options.xcode_build_version)
+            else:
+                logger.warning('Skip the Xcode installation, no '
+                               '--xcode-build-version')
+            yield
 
 
 class ChromeAndroidBase(Product):
     def __init__(self, host, options, python_executable=None):
         super().__init__(host, options, python_executable)
-        self.devices = {}
+        self.browser_apk = options.browser_apk or self.default_browser_apk
+        self.no_install = options.no_install
+        self.devices = []
+
+    @contextlib.contextmanager
+    def _install_apk(self, device, path):
+        """Helper context manager for ensuring a device uninstalls an APK."""
+        device.Install(path)
+        try:
+            yield
+        finally:
+            device.Uninstall(path)
 
     @contextlib.contextmanager
     def test_env(self):
         with super().test_env():
-            devil_chromium.Initialize(adb_path=self._options.adb_binary)
-            if not self._options.adb_binary:
-                self._options.adb_binary = devil_env.config.FetchPath('adb')
-            devices = self._tasks.enter_context(get_devices(self._options))
-            if not devices:
+            self.adb_binary = devil_env.config.FetchPath('adb')
+            devil_chromium.Initialize(adb_path=self.adb_binary)
+            self.devices = self._tasks.enter_context(get_devices(
+                self._options))
+            if not self.devices:
                 raise Exception('No devices attached to this host. '
                                 "Make sure to provide '--avd-config' "
                                 'if using only emulators.')
 
-            self.provision_devices(devices)
+            if not self.no_install:
+                self.provision_devices()
             yield
 
-    def update_options(self):
-        super().update_options()
-        self._options.device_serial.extend(sorted(self.devices))
-        self._options.package_name = (self._options.package_name
-                                      or self.get_browser_package_name())
+    def update_options_for_product(self, options):
+        super().update_options_for_product(options)
+        self._ensure_value(options, 'adb_binary', self.adb_binary)
+        self._ensure_value(options, 'device_serial',
+                           [device.serial for device in self.devices])
+        self._ensure_value(options, 'package_name',
+                           self.get_browser_package_name())
 
     def get_version(self):
         version_provider = self.get_version_provider_package_name()
         if self.devices and version_provider:
             # Assume devices are identically provisioned, so select any.
-            device = list(self.devices.values())[0]
+            device = self.devices[0]
             try:
                 version = device.GetApplicationVersion(version_provider)
                 logger.info('Product version: %s %s (package: %r)', self.name,
@@ -952,9 +1056,8 @@ class ChromeAndroidBase(Product):
         return None
 
     @property
-    def webdriver_binary(self):
-        default_binary = self._path_from_target('clang_x64', 'chromedriver')
-        return super().webdriver_binary or default_binary
+    def default_webdriver_binary(self):
+        return self._path_from_target('clang_x64', 'chromedriver')
 
     def get_browser_package_name(self):
         """Get the name of the package to run tests against.
@@ -968,11 +1071,9 @@ class ChromeAndroidBase(Product):
         See Also:
             https://github.com/web-platform-tests/wpt/blob/merge_pr_33203/tools/wpt/browser.py#L867-L924
         """
-        if self._options.package_name:
-            return self._options.package_name
-        if self._options.browser_apk:
+        if self.browser_apk:
             with contextlib.suppress(apk_helper.ApkHelperError):
-                return apk_helper.GetPackageName(self._options.browser_apk)
+                return apk_helper.GetPackageName(self.browser_apk)
         return None
 
     def get_version_provider_package_name(self):
@@ -993,16 +1094,10 @@ class ChromeAndroidBase(Product):
         # Assume the product is a single APK.
         return self.get_browser_package_name()
 
-    def provision_devices(self, devices):
+    def provision_devices(self):
         """Provisions a set of Android devices in parallel."""
-        contexts = [self._provision_device(device) for device in devices]
+        contexts = [self._provision_device(device) for device in self.devices]
         self._tasks.enter_context(SyncParallelizer(contexts))
-
-        for device in devices:
-            if device.serial in self.devices:
-                raise Exception('duplicate device serial: %s' % device.serial)
-            self.devices[device.serial] = device
-            self._tasks.callback(self.devices.pop, device.serial, None)
 
     @contextlib.contextmanager
     def _provision_device(self, device):
@@ -1012,33 +1107,31 @@ class ChromeAndroidBase(Product):
         it is crucial that it is thread safe.
         """
         with contextlib.ExitStack() as exit_stack:
-            if self._options.browser_apk:
-                exit_stack.enter_context(
-                    _install_apk(device, self._options.browser_apk))
-            for apk in self._options.additional_apk:
-                exit_stack.enter_context(_install_apk(device, apk))
+            exit_stack.enter_context(
+                self._install_apk(device, self.browser_apk))
             logger.info('Provisioned device (serial: %s)', device.serial)
             yield
 
 
 class WebView(ChromeAndroidBase):
-    name = ANDROID_WEBVIEW
+    name = 'android_webview'
     aliases = ['webview']
+
+    def __init__(self, host, options, python_executable=None):
+        super().__init__(host, options, python_executable)
+        self.webview_provider = options.webview_provider or self.default_webview_provider
+
+    @property
+    def default_browser_apk(self):
+        return self._path_from_target('apks', 'SystemWebViewShell.apk')
+
+    @property
+    def default_webview_provider(self):
+        return self._path_from_target('apks', 'SystemWebView.apk')
 
     def _install_webview(self, device):
         # Prioritize local builds.
-        if self._options.webview_provider:
-            return webview_app.UseWebViewProvider(
-                device, self._options.webview_provider)
-        assert self._options.release_channel, 'no webview install method'
-        return self._install_webview_from_release(device)
-
-    def _validate_options(self):
-        super()._validate_options()
-        if not self._options.webview_provider \
-                and not self._options.release_channel:
-            raise ValueError("Must provide either '--webview-provider' or "
-                             "'--release-channel' to install WebView.")
+        return webview_app.UseWebViewProvider(device, self.webview_provider)
 
     def get_browser_package_name(self):
         return (super().get_browser_package_name()
@@ -1059,56 +1152,14 @@ class WebView(ChromeAndroidBase):
         with self._install_webview(device), super()._provision_device(device):
             yield
 
-    @contextlib.contextmanager
-    def _install_webview_from_release(self, device):
-        script_path = self._path_finder.path_from_chromium_base(
-            'clank', 'bin', 'install_webview.py')
-        command = [
-            self._python_executable, script_path, '-s', device.serial,
-            '--channel', self._options.release_channel
-        ]
-        exit_code = common.run_command(command)
-        if exit_code != 0:
-            raise Exception(
-                'failed to install webview from release '
-                '(serial: %r, channel: %r, exit code: %d)' %
-                (device.serial, self._options.release_channel, exit_code))
-        yield
-
 
 class ChromeAndroid(ChromeAndroidBase):
-    name = CHROME_ANDROID
+    name = 'chrome_android'
     aliases = ['clank']
 
-    def _validate_options(self):
-        super()._validate_options()
-        if not self._options.package_name and not self._options.browser_apk:
-            raise ValueError(
-                "Must provide either '--package-name' or '--browser-apk' "
-                'for %r.' % self.name)
-
-
-def _make_product_registry():
-    """Create a mapping from all product names (including aliases) to their
-    respective classes.
-    """
-    product_registry = {}
-    product_classes = [Chrome, ContentShell, ChromeiOS]
-    if _ANDROID_ENABLED:
-        product_classes.extend([ChromeAndroid, WebView])
-    for product_cls in product_classes:
-        names = [product_cls.name] + product_cls.aliases
-        product_registry.update((name, product_cls) for name in names)
-    return product_registry
-
-
-_product_registry = _make_product_registry()
-
-
-@contextlib.contextmanager
-def get_device(args):
-    with get_devices(args) as devices:
-        yield None if not devices else devices[0]
+    @property
+    def default_browser_apk(self):
+        return self._path_from_target('apks', 'ChromePublic.apk')
 
 
 @contextlib.contextmanager
@@ -1144,6 +1195,16 @@ def _parse_environ_int(name: str) -> Optional[int]:
     return None
 
 
+def handle_interrupt_signals():
+    def termination_handler(_signum, _unused_frame):
+        raise KeyboardInterrupt()
+
+    if sys.platform == "win32":
+        signal.signal(signal.SIGBREAK, termination_handler)
+    else:
+        signal.signal(signal.SIGTERM, termination_handler)
+
+
 def main() -> int:
     # Force log output in utf-8 instead of a locale-dependent encoding. On
     # Windows, this can be cp1252. See: crbug.com/1371195.
@@ -1152,11 +1213,19 @@ def main() -> int:
         sys.stderr.reconfigure(encoding='utf-8')
     # Also apply utf-8 mode to python subprocesses.
     os.environ['PYTHONUTF8'] = '1'
+    # Convert SIGTERM to be handled as KeyboardInterrupt to handle early termination
+    # Same handle is declared later on in wptrunner
+    # See: https://github.com/web-platform-tests/wpt/blob/25cd6eb086db5977ac51f7dee7faafe6772dc9d7/tools/wptrunner/wptrunner/wptrunner.py
+    # This early declaration allow graceful exit when Chromium swarming kill process before wpt starts
+    handle_interrupt_signals()
     try:
         adapter = WPTAdapter()
         options = adapter.parse_arguments()
+        logger.info('Selecting tests for shard %d/%d', options.this_chunk,
+                    options.total_chunks)
         return adapter.run_tests(options)
     except KeyboardInterrupt:
+        logger.critical("Harness exited after signal interrupt")
         return exit_codes.INTERRUPTED_EXIT_STATUS
 
 

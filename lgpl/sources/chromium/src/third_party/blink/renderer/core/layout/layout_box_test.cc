@@ -1335,27 +1335,21 @@ TEST_F(LayoutBoxTest, LocationOfRelativeChildWithContainerScrollbars) {
 
   EXPECT_EQ(LayoutPoint(178, 177), normal->Location());
   EXPECT_EQ(PhysicalOffset(178, 177), normal->PhysicalLocation());
-  EXPECT_EQ(PhysicalOffset(0, 0), normal->OffsetForInFlowPosition());
 
   EXPECT_EQ(LayoutPoint(278, 107), vlr->Location());
   EXPECT_EQ(PhysicalOffset(278, 107), vlr->PhysicalLocation());
-  EXPECT_EQ(PhysicalOffset(0, 0), vlr->OffsetForInFlowPosition());
 
   EXPECT_EQ(LayoutPoint(77, 107), vrl->Location());
   EXPECT_EQ(PhysicalOffset(313, 107), vrl->PhysicalLocation());
-  EXPECT_EQ(PhysicalOffset(0, 0), vrl->OffsetForInFlowPosition());
 
   EXPECT_EQ(LayoutPoint(428, 177), rtl->Location());
   EXPECT_EQ(PhysicalOffset(428, 177), rtl->PhysicalLocation());
-  EXPECT_EQ(PhysicalOffset(0, 0), rtl->OffsetForInFlowPosition());
 
   EXPECT_EQ(LayoutPoint(278, 211), rtl_vlr->Location());
   EXPECT_EQ(PhysicalOffset(278, 211), rtl_vlr->PhysicalLocation());
-  EXPECT_EQ(PhysicalOffset(0, 0), rtl_vlr->OffsetForInFlowPosition());
 
   EXPECT_EQ(LayoutPoint(77, 211), rtl_vrl->Location());
   EXPECT_EQ(PhysicalOffset(313, 211), rtl_vrl->PhysicalLocation());
-  EXPECT_EQ(PhysicalOffset(0, 0), rtl_vrl->OffsetForInFlowPosition());
 }
 
 TEST_F(LayoutBoxTest, LocationOfFloatLeftChildWithContainerScrollbars) {
@@ -1913,6 +1907,113 @@ TEST_F(LayoutBoxTest, HitTestResizerStackedWithTextAreaChild) {
   EXPECT_EQ(GetDocument().getElementById("target"), HitTest(99, 99));
   EXPECT_TRUE(HitTest(1, 1)->IsDescendantOrShadowDescendantOf(
       GetDocument().getElementById("textarea")));
+}
+
+TEST_F(LayoutBoxTest, AnchorInFragmentedContainingBlock) {
+  ScopedCSSAnchorPositioningForTest enabled(true);
+
+  // Create a 3-column multicol layout with a fragmented containing block,
+  // and a fragmented anchor element that starts from the second fragment.
+  InsertStyleElement(R"CSS(
+    #multicol {
+      column-count: 3;
+      column-width: 90px;
+      column-gap: 10px;
+      width: 300px;
+      height: 100px;
+    }
+    #cb {
+      position: relative;
+      height: 300px;
+    }
+    #spacer {
+      height: 110px;
+    }
+    #anchor {
+      height: 120px;
+      anchor-name: --a;
+    }
+    #target {
+      position: absolute;
+    }
+  )CSS");
+  SetBodyInnerHTML(R"HTML(
+    <div id="multicol">
+      <div id="cb">
+        <div id="spacer"></div>
+        <div id="anchor"></div>
+        <div id="target" anchor="anchor"></div>
+      </div>
+    </div>
+  )HTML");
+
+  const LayoutBox* target = To<LayoutBox>(GetLayoutObjectByElementId("target"));
+  EXPECT_EQ(GetLayoutObjectByElementId("anchor"),
+            target->FindTargetAnchor(
+                *MakeGarbageCollected<ScopedCSSName>("--a", &GetDocument())));
+  EXPECT_EQ(GetLayoutObjectByElementId("anchor"),
+            target->AcceptableImplicitAnchor());
+}
+
+TEST_F(LayoutBoxTest, AnchorInInlineContainingBlock) {
+  ScopedCSSAnchorPositioningForTest enabled(true);
+
+  SetBodyInnerHTML(R"HTML(
+    <div>
+      <span id="not-implicit-anchor">not implicit anchor</span>
+      <span style="position: relative">
+        <span id="anchor" style="anchor-name: --a">anchor</span>
+        <div id="target" anchor="not-implicit-anchor"
+             style="position: absolute; top: anchor(--a top)"></div>
+      </span>
+      some text
+    </div>
+  )HTML");
+
+  const LayoutBox* target = To<LayoutBox>(GetLayoutObjectByElementId("target"));
+  EXPECT_EQ(GetLayoutObjectByElementId("anchor"),
+            target->FindTargetAnchor(
+                *MakeGarbageCollected<ScopedCSSName>("--a", &GetDocument())));
+  EXPECT_FALSE(target->AcceptableImplicitAnchor());
+}
+
+TEST_F(LayoutBoxTest, AnchorInInlineContainingBlockWithNameConflicts) {
+  ScopedCSSAnchorPositioningForTest enabled(true);
+
+  SetBodyInnerHTML(R"HTML(
+    <div>
+      <span style="position: relative">
+        <span id="anchor1" style="anchor-name: --a">anchor</span>
+        <div id="target1" style="position: absolute;top: anchor(--a top)"></div>
+      </span>
+      <span style="position: relative">
+        <span id="anchor2" style="anchor-name: --a">anchor</span>
+        <div id="target2" style="position: absolute;top: anchor(--a top)"></div>
+      </span>
+      <span style="position: relative">
+        <span id="anchor3" style="anchor-name: --a">anchor</span>
+        <div id="target3" style="position: absolute;top: anchor(--a top)"></div>
+      </span>
+    </div>
+  )HTML");
+
+  const ScopedCSSName& anchor_name =
+      *MakeGarbageCollected<ScopedCSSName>("--a", &GetDocument());
+
+  const LayoutBox* target1 =
+      To<LayoutBox>(GetLayoutObjectByElementId("target1"));
+  EXPECT_EQ(GetLayoutObjectByElementId("anchor1"),
+            target1->FindTargetAnchor(anchor_name));
+
+  const LayoutBox* target2 =
+      To<LayoutBox>(GetLayoutObjectByElementId("target2"));
+  EXPECT_EQ(GetLayoutObjectByElementId("anchor2"),
+            target2->FindTargetAnchor(anchor_name));
+
+  const LayoutBox* target3 =
+      To<LayoutBox>(GetLayoutObjectByElementId("target3"));
+  EXPECT_EQ(GetLayoutObjectByElementId("anchor3"),
+            target3->FindTargetAnchor(anchor_name));
 }
 
 class LayoutBoxBackgroundPaintLocationTest : public RenderingTest,

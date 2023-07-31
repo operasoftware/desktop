@@ -95,15 +95,7 @@ void LayoutEmbeddedObject::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
 
-  if (!RuntimeEnabledFeatures::LayoutNGReplacedNoBoxSettersEnabled()) {
-    UpdateLogicalWidth();
-    UpdateLogicalHeight();
-  }
-
   ClearLayoutOverflow();
-
-  if (!RuntimeEnabledFeatures::LayoutNGUnifyUpdateAfterLayoutEnabled())
-    UpdateAfterLayout();
 
   if (!GetEmbeddedContentView() && GetFrameView())
     GetFrameView()->AddPartToUpdate(*this);
@@ -139,14 +131,6 @@ void LayoutEmbeddedObject::ComputeIntrinsicSizingInfo(
   }
 
   LayoutEmbeddedContent::ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
-}
-
-bool LayoutEmbeddedObject::NeedsPreferredWidthsRecalculation() const {
-  NOT_DESTROYED();
-  if (LayoutEmbeddedContent::NeedsPreferredWidthsRecalculation())
-    return true;
-  FrameView* frame_view = ChildFrameView();
-  return frame_view && frame_view->HasIntrinsicSizingInfo();
 }
 
 }  // namespace blink

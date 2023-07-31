@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 
 namespace blink {
 namespace {
@@ -86,7 +87,18 @@ ViewTransition* ViewTransitionSupplement::startViewTransition(
     Document& document,
     V8ViewTransitionCallback* callback,
     ExceptionState& exception_state) {
+  DCHECK(script_state);
+  DCHECK(ThreadScheduler::Current());
   auto* supplement = From(document);
+  if (callback) {
+    auto* tracker = ThreadScheduler::Current()->GetTaskAttributionTracker();
+    // Set the parent task ID if we're not in an extension task (as extensions
+    // are not currently supported in TaskAttributionTracker).
+    if (tracker && script_state->World().IsMainWorld()) {
+      auto id = tracker->RunningTaskAttributionId(script_state);
+      callback->SetParentTaskId(id);
+    }
+  }
   return supplement->StartTransition(script_state, document, callback,
                                      exception_state);
 }
@@ -228,8 +240,7 @@ void ViewTransitionSupplement::AddPendingRequest(
 
   // Ensure paint artifact compositor does an update, since that's the mechanism
   // we use to pass transition requests to the compositor.
-  document->View()->SetPaintArtifactCompositorNeedsUpdate(
-      PaintArtifactCompositorUpdateReason::kViewTransitionNotifyChanges);
+  document->View()->SetPaintArtifactCompositorNeedsUpdate();
 }
 
 VectorOf<std::unique_ptr<ViewTransitionRequest>>
@@ -249,11 +260,12 @@ void ViewTransitionSupplement::OnMetaTagChanged(
   }
   same_origin_opt_in_ = same_origin_opt_in;
 
-  auto* document = GetSupplementable();
-  DCHECK(document);
-  DCHECK(document->GetFrame());
-  document->GetFrame()->GetLocalFrameHostRemote().OnViewTransitionOptInChanged(
-      same_origin_opt_in);
+  // If we have a frame, notify the frame host that the opt-in has changed.
+  if (auto* document = GetSupplementable(); document->GetFrame()) {
+    document->GetFrame()
+        ->GetLocalFrameHostRemote()
+        .OnViewTransitionOptInChanged(same_origin_opt_in);
+  }
 
   if (same_origin_opt_in_ == mojom::ViewTransitionSameOriginOptIn::kDisabled &&
       transition_ && !transition_->IsCreatedViaScriptAPI()) {
@@ -264,10 +276,12 @@ void ViewTransitionSupplement::OnMetaTagChanged(
 }
 
 void ViewTransitionSupplement::WillInsertBody() {
+  // If the opt-in is enabled, then there's nothing to do in this function.
   if (same_origin_opt_in_ == mojom::ViewTransitionSameOriginOptIn::kEnabled) {
     return;
   }
 
+  // Since we don't have an opt-in, skip a navigation transition if it exists.
   if (transition_ && transition_->IsForNavigationOnNewDocument()) {
     transition_->skipTransition();
     DCHECK(!transition_)

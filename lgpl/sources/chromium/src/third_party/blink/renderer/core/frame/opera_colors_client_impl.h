@@ -5,12 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_OPERA_COLORS_CLIENT_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_OPERA_COLORS_CLIENT_IMPL_H_
 
-#include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "third_party/blink/public/mojom/frame/opera_colors_client.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_associated_receiver.h"
 
 namespace blink {
 
@@ -38,7 +38,9 @@ class CORE_EXPORT OperaColorsClientImpl final
  private:
   Member<LocalFrame> frame_;
 
-  mojo::AssociatedReceiver<mojom::blink::OperaColorsClient> receiver_;
+  blink::HeapMojoAssociatedReceiver<mojom::blink::OperaColorsClient,
+                                    OperaColorsClientImpl>
+      receiver_{this, nullptr};
 };
 
 }  // namespace blink

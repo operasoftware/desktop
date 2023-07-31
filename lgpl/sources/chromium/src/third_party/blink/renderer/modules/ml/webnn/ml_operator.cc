@@ -14,8 +14,12 @@ String MLOperator::OperatorKindToString(MLOperator::OperatorKind kind) {
   switch (kind) {
     case MLOperator::OperatorKind::kClamp:
       return "clamp";
+    case MLOperator::OperatorKind::kConcat:
+      return "concat";
     case MLOperator::OperatorKind::kConv2d:
       return "conv2d";
+    case MLOperator::OperatorKind::kConvTranspose2d:
+      return "convTranspose2d";
     case MLOperator::OperatorKind::kAdd:
       return "add";
     case MLOperator::OperatorKind::kSub:
@@ -24,10 +28,22 @@ String MLOperator::OperatorKindToString(MLOperator::OperatorKind kind) {
       return "mul";
     case MLOperator::OperatorKind::kDiv:
       return "div";
+    case MLOperator::OperatorKind::kAbs:
+      return "abs";
+    case MLOperator::OperatorKind::kCeil:
+      return "ceil";
+    case MLOperator::OperatorKind::kFloor:
+      return "floor";
+    case MLOperator::OperatorKind::kNeg:
+      return "neg";
+    case MLOperator::OperatorKind::kLeakyRelu:
+      return "leakyRelu";
     case MLOperator::OperatorKind::kMax:
       return "max";
     case MLOperator::OperatorKind::kMin:
       return "min";
+    case MLOperator::OperatorKind::kElu:
+      return "elu";
     case MLOperator::OperatorKind::kGemm:
       return "gemm";
     case MLOperator::OperatorKind::kHardSwish:
@@ -36,16 +52,24 @@ String MLOperator::OperatorKindToString(MLOperator::OperatorKind kind) {
       return "averagePool2d";
     case MLOperator::OperatorKind::kMaxPool2d:
       return "maxPool2d";
+    case MLOperator::OperatorKind::kPad:
+      return "pad";
+    case MLOperator::OperatorKind::kPRelu:
+      return "prelu";
     case MLOperator::OperatorKind::kRelu:
       return "relu";
     case MLOperator::OperatorKind::kReshape:
       return "reshape";
     case MLOperator::OperatorKind::kResample2d:
       return "resample2d";
-    case MLOperator::OperatorKind::kSoftmax:
-      return "softmax";
     case MLOperator::OperatorKind::kSigmoid:
       return "sigmoid";
+    case MLOperator::OperatorKind::kSlice:
+      return "slice";
+    case MLOperator::OperatorKind::kSoftmax:
+      return "softmax";
+    case MLOperator::OperatorKind::kTranspose:
+      return "transpose";
   }
 }
 
@@ -61,7 +85,6 @@ void MLOperator::Trace(Visitor* visitor) const {
   visitor->Trace(options_);
   visitor->Trace(inputs_);
   visitor->Trace(outputs_);
-  ScriptWrappable::Trace(visitor);
 }
 
 MLOperator::OperatorKind MLOperator::Kind() const {
@@ -94,4 +117,38 @@ void MLOperator::Connect(HeapVector<Member<const MLOperand>> inputs,
   is_connected_ = true;
 }
 
+MLPadOperator::MLPadOperator(MLGraphBuilder* builder,
+                             const Vector<uint32_t>& beginning_padding,
+                             const Vector<uint32_t>& ending_padding,
+                             const bindings::DictionaryBase* options)
+    : MLOperator(builder, MLOperator::OperatorKind::kPad, options),
+      beginning_padding_(beginning_padding),
+      ending_padding_(ending_padding) {}
+
+MLPadOperator::~MLPadOperator() = default;
+
+const Vector<uint32_t>& MLPadOperator::BeginningPadding() const {
+  return beginning_padding_;
+}
+
+const Vector<uint32_t>& MLPadOperator::EndingPadding() const {
+  return ending_padding_;
+}
+
+MLSliceOperator::MLSliceOperator(MLGraphBuilder* builder,
+                                 const Vector<uint32_t>& starts,
+                                 const Vector<uint32_t>& sizes)
+    : MLOperator(builder, MLOperator::OperatorKind::kSlice, nullptr),
+      starts_(starts),
+      sizes_(sizes) {}
+
+MLSliceOperator::~MLSliceOperator() = default;
+
+const Vector<uint32_t>& MLSliceOperator::Starts() const {
+  return starts_;
+}
+
+const Vector<uint32_t>& MLSliceOperator::Sizes() const {
+  return sizes_;
+}
 }  // namespace blink

@@ -18,13 +18,13 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "media/base/bind_to_current_loop.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
 #include "media/base/media_util.h"
@@ -102,6 +102,18 @@ void RecordReinitializationLatency(base::TimeDelta latency) {
                           latency);
 }
 
+bool HasSoftwareFallback(media::VideoCodec video_codec,
+                         const media::VideoDecoder& video_decoder) {
+#if BUILDFLAG(IS_ANDROID) && !BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
+  return video_codec != media::VideoCodec::kH264;
+#elif defined(USE_SYSTEM_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
+  return video_decoder.IsPlatformDecoder();
+#else
+  return true;
+#endif
+}
+
 struct EncodedImageExternalMemory
     : public media::DecoderBuffer::ExternalMemory {
  public:
@@ -163,39 +175,11 @@ absl::optional<RTCVideoDecoderFallbackReason> NeedSoftwareFallback(
   // layers. See https://crbug.com/webrtc/9304.
   const bool is_spatial_layer_buffer = buffer.side_data_size() > 0;
   if (codec == media::VideoCodec::kVP9 && is_spatial_layer_buffer &&
-      !RTCVideoDecoderAdapter::Vp9HwSupportForSpatialLayers()) {
-    // D3D11 supports decoding the VP9 kSVC stream, but DXVA not. Currently just
-    // a reasonably temporary measure. Once the DXVA supports decoding VP9 kSVC
-    // stream, the boolean |need_fallback_to_software| should be removed, and if
-    // the OS is windows but not win7, we will return true in
-    // 'Vp9HwSupportForSpatialLayers' instead of false.
-#if BUILDFLAG(IS_WIN)
-    if (decoder_type == media::VideoDecoderType::kD3D11 &&
-        base::FeatureList::IsEnabled(media::kD3D11Vp9kSVCHWDecoding)) {
-      return absl::nullopt;
-    }
-#endif
+      !RTCVideoDecoderAdapter::Vp9HwSupportForSpatialLayers(decoder_type)) {
     return RTCVideoDecoderFallbackReason::kSpatialLayers;
   }
 
   return absl::nullopt;
-}
-
-bool IsHardwareAcceleratedDecoder(const media::VideoDecoder& decoder) {
-  switch (decoder.GetDecoderType()) {
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-    // It's not always possible to tell whether a decoder is accelerated based
-    // on VideoDecoderType. But we're only really interested in the two special
-    // cases below. Upstream assumes RTCVideoDecoderAdapter always wraps an
-    // accelerated decoder and we introduce these two exceptions.
-    case media::VideoDecoderType::kVT:
-    case media::VideoDecoderType::kWMF:
-      return false;
-#endif
-
-    default:
-      return true;
-  }
 }
 
 }  // namespace
@@ -258,11 +242,6 @@ class RTCVideoDecoderAdapter::Impl {
   void DecodePendingBuffers();
   void OnDecodeDone(media::DecoderStatus status);
   void OnOutput(scoped_refptr<media::VideoFrame> frame);
-
-#if defined(OPERA_DESKTOP)
-  bool IsHardwareDecoder() const { return gpu_factories_ != nullptr; }
-#endif  // defined(OPERA_DESKTOP)
-  bool HasSoftwareFallback(media::VideoCodec video_codec) const;
 
   media::GpuVideoAcceleratorFactories* const gpu_factories_;
 
@@ -356,7 +335,8 @@ RTCVideoDecoderAdapter::Impl::FallbackOrRegisterConcurrentInstanceOnce(
   // Don't allow hardware decode for small videos if there are too many
   // decoder instances.  This includes the case where our resolution drops while
   // too many decoders exist.
-  if (HasSoftwareFallback(codec) && current_resolution_ < kMinResolution &&
+  if (HasSoftwareFallback(codec, *video_decoder_) &&
+      current_resolution_ < kMinResolution &&
       g_num_decoders_ > kMaxDecoderInstances) {
     // Decrement the count and clear the flag, so that other decoders don't
     // fall back also.
@@ -436,7 +416,7 @@ RTCVideoDecoderAdapter::Impl::EnqueueBuffer(
     // |status_| has been changed to kOk in DecodeInternal().
   }
 
-  if (HasSoftwareFallback(video_codec_) &&
+  if (HasSoftwareFallback(video_codec_, *video_decoder_) &&
       pending_buffers_.size() >= kMaxPendingBuffers) {
     // We are severely behind. Drop pending buffers and request a keyframe to
     // catch up as quickly as possible.
@@ -579,17 +559,6 @@ void RTCVideoDecoderAdapter::Impl::OnOutput(
   consecutive_error_count_ = 0;
 }
 
-bool RTCVideoDecoderAdapter::Impl::HasSoftwareFallback(
-    media::VideoCodec video_codec) const {
-#if BUILDFLAG(IS_ANDROID) && !BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
-  return video_codec != media::VideoCodec::kH264;
-#elif defined(OPERA_DESKTOP)
-  return IsHardwareDecoder();
-#else
-  return true;
-#endif
-}
-
 // static
 std::unique_ptr<RTCVideoDecoderAdapter> RTCVideoDecoderAdapter::Create(
       media::GpuVideoAcceleratorFactories* gpu_factories,
@@ -632,6 +601,7 @@ std::unique_ptr<RTCVideoDecoderAdapter> RTCVideoDecoderAdapter::CreateInternal(
       media::kNoTransformation, kDefaultSize, gfx::Rect(kDefaultSize),
       kDefaultSize, media::EmptyExtraData(),
       media::EncryptionScheme::kUnencrypted);
+  config.set_is_rtc(true);
 
   config.set_is_rtc(true);
 
@@ -642,24 +612,16 @@ std::unique_ptr<RTCVideoDecoderAdapter> RTCVideoDecoderAdapter::CreateInternal(
       // Synchronously verify that the decoder can be initialized.
       rtc_video_decoder_adapter = base::WrapUnique(
           new RTCVideoDecoderAdapter(gpu_factories, nullptr, nullptr, config));
-      if (rtc_video_decoder_adapter->InitializeSync(config)) {
-        return rtc_video_decoder_adapter;
-      }
-    rtc_video_decoder_adapter.reset();
-      // Initialization failed - post delete task and try next supported
-      // implementation, if any.
-      gpu_factories->GetTaskRunner()->DeleteSoon(
-          FROM_HERE, std::move(rtc_video_decoder_adapter));
     }
   } else {
     rtc_video_decoder_adapter = base::WrapUnique(new RTCVideoDecoderAdapter(
-        nullptr, std::move(decoder), media_task_runner, config));
-    if (rtc_video_decoder_adapter->InitializeSync(config))
+        nullptr, std::move(decoder), std::move(media_task_runner), config));
+  }
+  if (rtc_video_decoder_adapter) {
+    if (rtc_video_decoder_adapter->InitializeSync(config)) {
       return rtc_video_decoder_adapter;
-    // Initialization failed - post delete task and try next supported
-    // implementation, if any.
-    media_task_runner->DeleteSoon(FROM_HERE,
-                                  std::move(rtc_video_decoder_adapter));
+    }
+    rtc_video_decoder_adapter.reset();
   }
 
   // To mirror what RTCVideoDecoderStreamAdapter does a little more closely,
@@ -681,12 +643,12 @@ RTCVideoDecoderAdapter::RTCVideoDecoderAdapter(
   DVLOG(1) << __func__;
   decoder_info_.implementation_name = "ExternalDecoder (Unknown)";
   decoder_info_.is_hardware_accelerated =
-      gpu_factories ? true : IsHardwareAcceleratedDecoder(*video_decoder);
+      video_decoder ? video_decoder->IsPlatformDecoder() : true;
 
   weak_this_ = weak_this_factory_.GetWeakPtr();
 
-  auto change_status_callback =
-      CrossThreadBindRepeating(media::BindToCurrentLoop(base::BindRepeating(
+  auto change_status_callback = CrossThreadBindRepeating(
+      base::BindPostTaskToCurrentDefault(base::BindRepeating(
           &RTCVideoDecoderAdapter::ChangeStatus, weak_this_)));
   impl_ = std::make_unique<Impl>(gpu_factories, std::move(video_decoder),
                                  std::move(change_status_callback), weak_impl_);
@@ -989,7 +951,15 @@ void RTCVideoDecoderAdapter::DecrementCurrentDecoderCountForTesting() {
   Impl::g_num_decoders_--;
 }
 
-bool RTCVideoDecoderAdapter::Vp9HwSupportForSpatialLayers() {
+bool RTCVideoDecoderAdapter::Vp9HwSupportForSpatialLayers(
+    const media::VideoDecoderType decoder_type) {
+#if BUILDFLAG(IS_WIN)
+  // D3D11 supports decoding the VP9 kSVC stream, but DXVA not.
+  if (decoder_type == media::VideoDecoderType::kD3D11 &&
+      base::FeatureList::IsEnabled(media::kD3D11Vp9kSVCHWDecoding)) {
+    return true;
+  }
+#endif
   return base::FeatureList::IsEnabled(media::kVp9kSVCHWDecoding);
 }
 

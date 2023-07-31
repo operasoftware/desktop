@@ -27,7 +27,7 @@ bool LayoutNGFrameSet::IsOfType(LayoutObjectType type) const {
 bool LayoutNGFrameSet::IsChildAllowed(LayoutObject* child,
                                       const ComputedStyle&) const {
   NOT_DESTROYED();
-  return child->IsFrame() || child->IsLayoutNGFrameSet();
+  return child->IsFrame() || child->IsFrameSet();
 }
 
 void LayoutNGFrameSet::AddChild(LayoutObject* new_child,
@@ -43,7 +43,7 @@ void LayoutNGFrameSet::RemoveChild(LayoutObject* child) {
   To<HTMLFrameSetElement>(GetNode())->DirtyEdgeInfoAndFullPaintInvalidation();
 }
 
-void LayoutNGFrameSet::UpdateBlockLayout(bool relayout_children) {
+void LayoutNGFrameSet::UpdateBlockLayout() {
   if (IsOutOfFlowPositioned())
     UpdateOutOfFlowBlockLayout();
   else

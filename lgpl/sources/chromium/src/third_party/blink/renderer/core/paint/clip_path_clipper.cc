@@ -66,8 +66,7 @@ LayoutSVGResourceClipper* ResolveElementReference(
 // Is the reference box (as returned by LocalReferenceBox) for |clip_path_owner|
 // zoomed with EffectiveZoom()?
 static bool UsesZoomedReferenceBox(const LayoutObject& clip_path_owner) {
-  return !clip_path_owner.IsSVGChild() ||
-         clip_path_owner.IsSVGForeignObjectIncludingNG();
+  return !clip_path_owner.IsSVGChild() || clip_path_owner.IsSVGForeignObject();
 }
 
 CompositedPaintStatus CompositeClipPathStatus(Node* node) {
@@ -363,22 +362,6 @@ void ClipPathClipper::PaintClipPathAsMaskImage(
     }
   }
   context.Restore();
-}
-
-bool ClipPathClipper::ShouldUseMaskBasedClip(const LayoutObject& object) {
-  if (object.IsText() || !object.StyleRef().HasClipPath())
-    return false;
-  if (HasCompositeClipPathAnimation(object))
-    return true;
-  const auto* reference_clip =
-      DynamicTo<ReferenceClipPathOperation>(object.StyleRef().ClipPath());
-  if (!reference_clip)
-    return false;
-  LayoutSVGResourceClipper* resource_clipper =
-      ResolveElementReference(object, *reference_clip);
-  if (!resource_clipper)
-    return false;
-  return !resource_clipper->AsPath();
 }
 
 absl::optional<Path> ClipPathClipper::PathBasedClip(

@@ -29,8 +29,11 @@
 
 #include "third_party/blink/renderer/core/page/autoscroll_controller.h"
 
+#include "third_party/blink/public/web/web_frame_widget.h"
+#include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
@@ -452,6 +455,7 @@ void AutoscrollController::Animate() {
       PhysicalOffset::FromPointFRound(
           event_handler.LastKnownMousePositionInRootFrame()) +
       offset;
+  WebFrameWidget* widget = nullptr;
   switch (autoscroll_type_) {
     case kAutoscrollForDragAndDrop:
       ScheduleMainThreadAnimation();
@@ -465,7 +469,25 @@ void AutoscrollController::Animate() {
         StopAutoscroll();
         return;
       }
+
+      if (auto* client = autoscroll_layout_object_->GetFrame()->Client()) {
+        widget = client->GetWebFrame()->FrameWidget();
+      }
+
+      // If the selection changes as a result to UpdateSelectionForMouseDrag(),
+      // Render Frame will be notified, but it will not update
+      // the frame selection if it is not done from user event.
+      // As a result the Render Frame can store inconsistent selection data.
+      // Let's make sure this does not happen.
+      if (widget) {
+        widget->SetHandlingInputEvent(true);
+      }
+
       event_handler.UpdateSelectionForMouseDrag();
+
+      if (widget) {
+        widget->SetHandlingInputEvent(false);
+      }
 
       // UpdateSelectionForMouseDrag may call layout to cancel auto scroll
       // animation.

@@ -15,7 +15,10 @@ namespace blink {
 OperaColorsClientImpl::OperaColorsClientImpl(
     LocalFrame* frame,
     mojo::PendingAssociatedReceiver<mojom::blink::OperaColorsClient> receiver)
-    : frame_(frame), receiver_(this, std::move(receiver)) {}
+    : frame_(frame) {
+  receiver_.Bind(std::move(receiver),
+                 frame->GetTaskRunner(TaskType::kMiscPlatformAPI));
+}
 
 void OperaColorsClientImpl::BindMojoReceiver(
     LocalFrame* frame,
@@ -79,6 +82,7 @@ void OperaColorsClientImpl::SetColors(mojom::blink::OperaColorsPtr colors) {
 
 void OperaColorsClientImpl::Trace(Visitor* visitor) const {
   visitor->Trace(frame_);
+  visitor->Trace(receiver_);
 }
 
 }  // namespace blink

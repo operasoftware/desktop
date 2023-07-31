@@ -133,10 +133,10 @@ void FontBuilder::SetSize(const FontDescription::Size& size) {
   SetSize(font_description_, size);
 }
 
-void FontBuilder::SetSizeAdjust(float aspect_value) {
+void FontBuilder::SetSizeAdjust(const FontSizeAdjust& size_adjust) {
   Set(PropertySetFlag::kSizeAdjust);
 
-  font_description_.SetSizeAdjust(aspect_value);
+  font_description_.SetSizeAdjust(size_adjust);
 }
 
 void FontBuilder::SetLocale(scoped_refptr<const LayoutLocale> locale) {
@@ -376,9 +376,30 @@ void FontBuilder::UpdateAdjustedSize(FontDescription& font_description,
     return;
   }
 
-  const float size_adjust = font_description.SizeAdjust();
-  float aspect_value = font_data->GetFontMetrics().XHeight() / computed_size;
-  float adjusted_size = (size_adjust / aspect_value) * computed_size;
+  const FontSizeAdjust size_adjust = font_description.SizeAdjust();
+  // FIXME: The behavior for missing metrics has yet to be defined.
+  // https://github.com/w3c/csswg-drafts/issues/6384
+  float aspect_value = 1.0;
+  switch (size_adjust.GetMetric()) {
+    case FontSizeAdjust::Metric::kCapHeight:
+      aspect_value = font_data->GetFontMetrics().CapHeight() / computed_size;
+      break;
+    case FontSizeAdjust::Metric::kChWidth:
+      aspect_value = font_data->GetFontMetrics().ZeroWidth() / computed_size;
+      break;
+    case FontSizeAdjust::Metric::kIcWidth:
+      if (font_data->GetFontMetrics().IdeographicFullWidth().has_value()) {
+        aspect_value =
+            font_data->GetFontMetrics().IdeographicFullWidth().value() /
+            computed_size;
+      }
+      break;
+    case FontSizeAdjust::Metric::kExHeight:
+    default:
+      aspect_value = font_data->GetFontMetrics().XHeight() / computed_size;
+  }
+
+  float adjusted_size = (size_adjust.Value() / aspect_value) * computed_size;
   font_description.SetAdjustedSize(adjusted_size);
 }
 

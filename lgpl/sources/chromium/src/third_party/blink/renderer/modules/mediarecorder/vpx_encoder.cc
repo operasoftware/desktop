@@ -34,10 +34,14 @@ static int GetNumberOfThreadsForEncoding() {
 }
 
 VpxEncoder::VpxEncoder(
+    scoped_refptr<base::SequencedTaskRunner> encoding_task_runner,
     bool use_vp9,
     const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
     uint32_t bits_per_second)
-    : Encoder(on_encoded_video_cb, bits_per_second), use_vp9_(use_vp9) {
+    : Encoder(std::move(encoding_task_runner),
+              on_encoded_video_cb,
+              bits_per_second),
+      use_vp9_(use_vp9) {
   codec_config_.g_timebase.den = 0;        // Not initialized.
   alpha_codec_config_.g_timebase.den = 0;  // Not initialized.
 }
@@ -47,7 +51,8 @@ bool VpxEncoder::CanEncodeAlphaChannel() const {
 }
 
 void VpxEncoder::EncodeFrame(scoped_refptr<media::VideoFrame> frame,
-                             base::TimeTicks capture_timestamp) {
+                             base::TimeTicks capture_timestamp,
+                             bool request_keyframe) {
   using media::VideoFrame;
   TRACE_EVENT0("media", "VpxEncoder::EncodeFrame");
 
@@ -71,7 +76,7 @@ void VpxEncoder::EncodeFrame(scoped_refptr<media::VideoFrame> frame,
   }
 
   bool keyframe = false;
-  bool force_keyframe = false;
+  bool force_keyframe = request_keyframe;
   bool alpha_keyframe = false;
   std::string data;
   std::string alpha_data;
@@ -126,7 +131,7 @@ void VpxEncoder::EncodeFrame(scoped_refptr<media::VideoFrame> frame,
         std::fill(alpha_dummy_planes_.begin(), alpha_dummy_planes_.end(), 0x80);
       }
       // If we introduced a new alpha frame, force keyframe.
-      force_keyframe = !last_frame_had_alpha_;
+      force_keyframe = force_keyframe || !last_frame_had_alpha_;
       last_frame_had_alpha_ = true;
 
       DoEncode(encoder_.get(), frame_size, frame->data(VideoFrame::kYPlane),

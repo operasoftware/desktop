@@ -20,6 +20,7 @@
 
 namespace media {
 class MediaLog;
+struct PipelineMetadata;
 }  // namespace media
 
 namespace blink {
@@ -45,6 +46,7 @@ BLINK_MODULES_EXPORT void ReportMetrics(WebMediaPlayer::LoadType load_type,
 // Report metrics about pipeline errors.
 BLINK_MODULES_EXPORT void ReportPipelineError(
     WebMediaPlayer::LoadType load_type,
+    const media::PipelineMetadata& metadata,
     media::PipelineStatus error);
 
 // Wraps a WebSetSinkIdCompleteCallback into a

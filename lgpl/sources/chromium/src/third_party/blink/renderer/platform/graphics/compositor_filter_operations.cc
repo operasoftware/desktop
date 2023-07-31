@@ -116,12 +116,14 @@ void CompositorFilterOperations::AppendGpuShaderFilter(
     const SkSize& content_size,
     SkScalar frame_id,
     const SkPoint& mouse_position,
-    const SkColor4f& root_view_color) {
+    const SkColor4f& root_view_color,
+    uint64_t tick) {
   filter_operations_.Append(cc::FilterOperation::CreateGpuShaderFilter(
       sk_make_sp<cc::GpuShader>(
           shader.source().Clone(),
           cc::GpuShaderParams(std::move(args), content_size, frame_id,
-                              mouse_position, root_view_color)),
+                              mouse_position, root_view_color,
+                              base::TimeTicks::Now())),
       shader.NeedsMouseInput()));
 }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)

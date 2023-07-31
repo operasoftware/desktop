@@ -200,7 +200,8 @@ scoped_refptr<media::StreamParserBuffer> MakeVideoStreamParserBuffer(
 SourceBuffer::SourceBuffer(std::unique_ptr<WebSourceBuffer> web_source_buffer,
                            MediaSource* source,
                            EventQueue* async_event_queue)
-    : ExecutionContextLifecycleObserver(source->GetExecutionContext()),
+    : ActiveScriptWrappable<SourceBuffer>({}),
+      ExecutionContextLifecycleObserver(source->GetExecutionContext()),
       web_source_buffer_(std::move(web_source_buffer)),
       source_(source),
       track_defaults_(MakeGarbageCollected<TrackDefaultList>()),
@@ -233,9 +234,7 @@ SourceBuffer::SourceBuffer(std::unique_ptr<WebSourceBuffer> web_source_buffer,
     video_tracks_ = attachment->CreateVideoTrackList(tracer);
     DCHECK(video_tracks_);
   } else {
-    DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled(
-               GetExecutionContext()) &&
-           GetExecutionContext()->IsDedicatedWorkerGlobalScope());
+    DCHECK(GetExecutionContext()->IsDedicatedWorkerGlobalScope());
     DCHECK(!IsMainThread());
 
     // TODO(https://crbug.com/878133): Enable construction of media tracks that
@@ -261,11 +260,11 @@ void SourceBuffer::Dispose() {
 }
 
 AtomicString SourceBuffer::SegmentsKeyword() {
-  return "segments";
+  return AtomicString("segments");
 }
 
 AtomicString SourceBuffer::SequenceKeyword() {
-  return "sequence";
+  return AtomicString("sequence");
 }
 
 void SourceBuffer::setMode(const AtomicString& new_mode,
@@ -707,8 +706,8 @@ ScriptPromise SourceBuffer::appendEncodedChunks(
   }
 
   DCHECK(!append_encoded_chunks_resolver_);
-  append_encoded_chunks_resolver_ =
-      MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  append_encoded_chunks_resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   auto promise = append_encoded_chunks_resolver_->Promise();
 
   // Do remainder of steps of analogue of prepare append algorithm and sending
@@ -1392,7 +1391,7 @@ AtomicString SourceBuffer::DefaultTrackLabel(
   // Spec: https://w3c.github.io/media-source/#sourcebuffer-default-track-label
   const TrackDefault* track_default =
       GetTrackDefault(track_type, byte_stream_track_id);
-  return track_default ? AtomicString(track_default->label()) : "";
+  return track_default ? AtomicString(track_default->label()) : g_empty_atom;
 }
 
 AtomicString SourceBuffer::DefaultTrackLanguage(
@@ -1402,7 +1401,7 @@ AtomicString SourceBuffer::DefaultTrackLanguage(
   // https://w3c.github.io/media-source/#sourcebuffer-default-track-language
   const TrackDefault* track_default =
       GetTrackDefault(track_type, byte_stream_track_id);
-  return track_default ? AtomicString(track_default->language()) : "";
+  return track_default ? AtomicString(track_default->language()) : g_empty_atom;
 }
 
 void SourceBuffer::AddPlaceholderCrossThreadTracks(

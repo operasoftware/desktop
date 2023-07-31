@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
+import 'chrome://os-settings/lazy_load.js';
+
+import {Router, routes} from 'chrome://os-settings/os_settings.js';
 import {MojoInterfaceProviderImpl} from 'chrome://resources/ash/common/network/mojo_interface_provider.js';
 import {OncMojo} from 'chrome://resources/ash/common/network/onc_mojo.js';
 import {CrosNetworkConfigRemote} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/cros_network_config.mojom-webui.js';
@@ -154,6 +156,9 @@ suite('ApnSubpageTest', function() {
         props.typeProperties.cellular = {testProp: true};
         mojoApi_.setManagedPropertiesForTest(props);
         await flushTasks();
+        const getApnList = () =>
+            apnSubpage.shadowRoot.querySelector('apn-list');
+        assertTrue(getApnList().managedCellularProperties.testProp);
         apnSubpage.deviceState_ = {
           type: NetworkType.kCellular,
           scanning: true,
@@ -163,9 +168,24 @@ suite('ApnSubpageTest', function() {
         props.typeProperties.cellular = {testProp: false};
         mojoApi_.setManagedPropertiesForTest(props);
         await flushTasks();
-        assertTrue(
-            apnSubpage.managedProperties_.typeProperties.cellular.testProp);
+        assertTrue(getApnList().managedCellularProperties.testProp);
       });
+
+  test('Error state is propagated to <apn-list>', async function() {
+    let props = OncMojo.getDefaultManagedProperties(
+        NetworkType.kCellular, 'cellular_guid', 'cellular');
+    mojoApi_.setManagedPropertiesForTest(props);
+    await flushTasks();
+    const getApnList = () => apnSubpage.shadowRoot.querySelector('apn-list');
+    assertFalse(!!getApnList().errorState);
+
+    props = Object.assign({}, props);
+    const error = 'connect-failed';
+    props.errorState = error;
+    mojoApi_.setManagedPropertiesForTest(props);
+    await flushTasks();
+    assertEquals(error, getApnList().errorState);
+  });
 
   test('Close is called more than once.', async function() {
     let counter = 0;
@@ -175,8 +195,55 @@ suite('ApnSubpageTest', function() {
       counter++;
     };
     apnSubpage.close();
+    await flushTasks();
+
     apnSubpage.close();
+    await flushTasks();
+
     assertEquals(1, counter);
+    Router.getInstance().navigateToPreviousRoute = navigateToPreviousRoute;
+  });
+
+  test('Network removed while on subpage', async function() {
+    let counter = 0;
+    const navigateToPreviousRoute =
+        Router.getInstance().navigateToPreviousRoute;
+    Router.getInstance().navigateToPreviousRoute = () => {
+      counter++;
+    };
+
+    // Simulate the network being removed.
+    mojoApi_.resetForTest();
+    apnSubpage.onNetworkStateChanged(
+        OncMojo.getDefaultNetworkState(NetworkType.kCellular, 'cellular'));
+    await flushTasks();
+
+    assertEquals(1, counter);
+    Router.getInstance().navigateToPreviousRoute = navigateToPreviousRoute;
+  });
+
+  test('Network removed while not on subpage', async function() {
+    // Navigate to a different page.
+    const params = new URLSearchParams();
+    params.append('type', OncMojo.getNetworkTypeString(NetworkType.kCellular));
+    Router.getInstance().navigateTo(routes.INTERNET_NETWORKS, params);
+    await flushTasks();
+    assertEquals(routes.INTERNET_NETWORKS, Router.getInstance().currentRoute);
+
+    let counter = 0;
+    const navigateToPreviousRoute =
+        Router.getInstance().navigateToPreviousRoute;
+    Router.getInstance().navigateToPreviousRoute = () => {
+      counter++;
+    };
+
+    // Simulate the network being removed.
+    mojoApi_.resetForTest();
+    apnSubpage.onNetworkStateChanged(
+        OncMojo.getDefaultNetworkState(NetworkType.kCellular, 'cellular'));
+    await flushTasks();
+
+    assertEquals(0, counter);
     Router.getInstance().navigateToPreviousRoute = navigateToPreviousRoute;
   });
 });

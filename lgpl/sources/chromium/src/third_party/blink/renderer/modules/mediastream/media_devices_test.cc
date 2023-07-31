@@ -265,10 +265,7 @@ class MediaDevicesTest : public PageTestBase {
 
   MediaDevicesTest()
       : dispatcher_host_(std::make_unique<MockMediaDevicesDispatcherHost>()),
-        device_infos_(MakeGarbageCollected<MediaDeviceInfos>()) {
-    scoped_feature_list_.InitAndEnableFeature(
-        blink::features::kRegionCaptureExperimentalSubtypes);
-  }
+        device_infos_(MakeGarbageCollected<MediaDeviceInfos>()) {}
 
   MediaDevices* GetMediaDevices(LocalDOMWindow& window) {
     if (!media_devices_) {
@@ -807,7 +804,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdWithValidElement) {
   for (const char* id : kElementIds) {
     Element* const element = document.getElementById(id);
     dispatcher_host().SetNextCropId(
-        String(base::GUID::GenerateRandomV4().AsLowercaseString()));
+        String(base::Uuid::GenerateRandomV4().AsLowercaseString()));
     const ScriptPromise promise = media_devices->ProduceCropTarget(
         scope.GetScriptState(), element, scope.GetExceptionState());
 
@@ -817,36 +814,6 @@ TEST_F(MediaDevicesTest, ProduceCropIdWithValidElement) {
         << "Failed promise for element id=" << id;
     EXPECT_FALSE(scope.GetExceptionState().HadException());
   }
-}
-
-// kRegionCaptureExperimentalSubtypes is default-enabled,
-// functioning as a killswitch in case a regression is discovered
-// when cropping to an element other than a <div> or <iframe>,
-// in which case we can *partially* disable Region Capture.
-// This test ensures the continued viability of this killswitch.
-TEST_F(MediaDevicesTest, ProduceCropIdRejectedIfUnsupportedElementType) {
-  V8TestingScope scope;
-  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
-  ASSERT_TRUE(media_devices);
-
-  scoped_feature_list().Reset();
-  scoped_feature_list().InitAndDisableFeature(
-      blink::features::kRegionCaptureExperimentalSubtypes);
-  SetBodyContent(R"HTML(
-    <button id='test-button'>Click!</button>
-  )HTML");
-
-  Document& document = GetDocument();
-  Element* const button = document.getElementById("test-button");
-  const ScriptPromise button_promise = media_devices->ProduceCropTarget(
-      scope.GetScriptState(), button, scope.GetExceptionState());
-  platform()->RunUntilIdle();
-  EXPECT_TRUE(button_promise.IsEmpty());
-  EXPECT_TRUE(scope.GetExceptionState().HadException());
-  EXPECT_EQ(scope.GetExceptionState().CodeAs<DOMExceptionCode>(),
-            DOMExceptionCode::kNotSupportedError);
-  EXPECT_EQ(scope.GetExceptionState().Message(),
-            String("Support for this subtype is not yet implemented."));
 }
 
 TEST_F(MediaDevicesTest, ProduceCropIdRejectedIfDifferentWindow) {
@@ -879,7 +846,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdDuplicate) {
   auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
   ASSERT_TRUE(media_devices);
   dispatcher_host().SetNextCropId(
-      String(base::GUID::GenerateRandomV4().AsLowercaseString()));
+      String(base::Uuid::GenerateRandomV4().AsLowercaseString()));
 
   SetBodyContent(R"HTML(
     <div id='test-div'></div>
@@ -920,7 +887,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdStringFormat) {
   Document& document = GetDocument();
   Element* const div = document.getElementById("test-div");
   dispatcher_host().SetNextCropId(
-      String(base::GUID::GenerateRandomV4().AsLowercaseString()));
+      String(base::Uuid::GenerateRandomV4().AsLowercaseString()));
   const ScriptPromise promise = media_devices->ProduceCropTarget(
       scope.GetScriptState(), div, scope.GetExceptionState());
   ScriptPromiseTester tester(scope.GetScriptState(), promise);
@@ -929,10 +896,10 @@ TEST_F(MediaDevicesTest, ProduceCropIdStringFormat) {
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 
   const CropTarget* const crop_target =
-      V8CropTarget::ToImpl(tester.Value().V8Value().As<v8::Object>());
+      V8CropTarget::ToWrappable(scope.GetIsolate(), tester.Value().V8Value());
   const WTF::String& crop_id = crop_target->GetCropId();
   EXPECT_TRUE(crop_id.ContainsOnlyASCIIOrEmpty());
-  EXPECT_TRUE(base::GUID::ParseLowercase(crop_id.Ascii()).is_valid());
+  EXPECT_TRUE(base::Uuid::ParseLowercase(crop_id.Ascii()).is_valid());
 }
 #endif
 

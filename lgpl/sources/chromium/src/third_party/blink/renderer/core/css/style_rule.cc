@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/core/css/css_position_fallback_rule.h"
 #include "third_party/blink/renderer/core/css/css_property_rule.h"
 #include "third_party/blink/renderer/core/css/css_scope_rule.h"
+#include "third_party/blink/renderer/core/css/css_starting_style_rule.h"
 #include "third_party/blink/renderer/core/css/css_style_rule.h"
 #include "third_party/blink/renderer/core/css/css_supports_rule.h"
 #include "third_party/blink/renderer/core/css/css_try_rule.h"
@@ -140,6 +141,9 @@ void StyleRuleBase::Trace(Visitor* visitor) const {
     case kTry:
       To<StyleRuleTry>(this)->TraceAfterDispatch(visitor);
       return;
+    case kStartingStyle:
+      To<StyleRuleStartingStyle>(this)->TraceAfterDispatch(visitor);
+      return;
   }
   NOTREACHED();
 }
@@ -209,6 +213,9 @@ void StyleRuleBase::FinalizeGarbageCollectedObject() {
     case kTry:
       To<StyleRuleTry>(this)->~StyleRuleTry();
       return;
+    case kStartingStyle:
+      To<StyleRuleStartingStyle>(this)->~StyleRuleStartingStyle();
+      return;
   }
   NOTREACHED();
 }
@@ -257,6 +264,8 @@ StyleRuleBase* StyleRuleBase::Copy() const {
       return To<StyleRuleCounterStyle>(this)->Copy();
     case kPositionFallback:
       return To<StyleRulePositionFallback>(this)->Copy();
+    case kStartingStyle:
+      return To<StyleRuleStartingStyle>(this)->Copy();
     case kTry:
       NOTREACHED();
       return nullptr;
@@ -338,6 +347,10 @@ CSSRule* StyleRuleBase::CreateCSSOMWrapper(wtf_size_t position_hint,
     case kPositionFallback:
       rule = MakeGarbageCollected<CSSPositionFallbackRule>(
           To<StyleRulePositionFallback>(self), parent_sheet);
+      break;
+    case kStartingStyle:
+      rule = MakeGarbageCollected<CSSStartingStyleRule>(
+          To<StyleRuleStartingStyle>(self), parent_sheet);
       break;
     case kFontFeature:
     case kTry:
@@ -462,19 +475,15 @@ void StyleRule::TraceAfterDispatch(blink::Visitor* visitor) const {
 void StyleRuleBase::Reparent(StyleRule* old_parent, StyleRule* new_parent) {
   switch (GetType()) {
     case kStyle:
-      for (CSSSelector* s = DynamicTo<StyleRule>(this)->SelectorArray(); s;
-           s = CSSSelectorList::Next(*s)) {
-        if (s->Match() == CSSSelector::kPseudoClass &&
-            s->GetPseudoType() == CSSSelector::kPseudoParent) {
-          s->Reparent(old_parent, new_parent);
-        }
-      }
+      CSSSelectorList::Reparent(To<StyleRule>(this)->SelectorArray(),
+                                old_parent, new_parent);
       break;
     case kScope:
     case kLayerBlock:
     case kContainer:
     case kMedia:
     case kSupports:
+    case kStartingStyle:
       for (StyleRuleBase* child :
            DynamicTo<StyleRuleGroup>(this)->ChildRules()) {
         child->Reparent(old_parent, new_parent);
@@ -597,7 +606,13 @@ void StyleRuleScope::SetPreludeText(const ExecutionContext* execution_context,
   auto* parser_context =
       MakeGarbageCollected<CSSParserContext>(*execution_context);
   Vector<CSSParserToken, 32> tokens = CSSTokenizer(value).TokenizeToEOF();
+
+  StyleRule* old_parent = style_scope_->RuleForNesting();
+  // Note that we do not need to explicitly reparent <scope-end>
+  // (StyleScope::From), because that selector is reparsed as part of
+  // StyleScope::Parse.
   style_scope_ = StyleScope::Parse(tokens, parser_context, nullptr);
+  Reparent(old_parent, style_scope_->RuleForNesting());
 }
 
 StyleRuleGroup::StyleRuleGroup(RuleType type,
@@ -750,5 +765,9 @@ void StyleRuleContainer::TraceAfterDispatch(blink::Visitor* visitor) const {
   visitor->Trace(container_query_);
   StyleRuleCondition::TraceAfterDispatch(visitor);
 }
+
+StyleRuleStartingStyle::StyleRuleStartingStyle(
+    HeapVector<Member<StyleRuleBase>> rules)
+    : StyleRuleCondition(kStartingStyle, "", std::move(rules)) {}
 
 }  // namespace blink

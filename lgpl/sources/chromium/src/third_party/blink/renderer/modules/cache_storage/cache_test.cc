@@ -78,8 +78,8 @@ class ScopedFetcherForTests final
     }
 
     if (response_) {
-      auto* resolver =
-          MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+      auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+          script_state, exception_state.GetContext());
       const ScriptPromise promise = resolver->Promise();
       resolver->Resolve(response_);
       response_ = nullptr;
@@ -613,7 +613,7 @@ TEST_F(CacheStorageTest, MatchResponseTest) {
                    exception_state);
   ScriptValue script_value = GetResolveValue(result);
   Response* response =
-      V8Response::ToImplWithTypeCheck(GetIsolate(), script_value.V8Value());
+      V8Response::ToWrappable(GetIsolate(), script_value.V8Value());
   ASSERT_TRUE(response);
   EXPECT_EQ(response_url, response->url());
 }

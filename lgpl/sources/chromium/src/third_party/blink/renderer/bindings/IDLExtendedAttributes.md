@@ -554,7 +554,7 @@ Implementation: Given `[TreatNullAs=EmptyString]`, a JavaScript null is converte
 
 ### [StringContext=TrustedHTML|TrustedScript|TrustedScriptURL] _(t)_
 
-Standard: [TrustedType](https://w3c.github.io/webappsec-trusted-types/dist/spec/#!trustedtypes-extended-attribute)
+Standard: [TrustedType](https://w3c.github.io/trusted-types/dist/spec/#!trustedtypes-extended-attribute)
 
 Summary: Indicate that a DOMString for HTMLs and scripts or USVString for script URLs is to be supplemented with additional Trusted Types enforcement logic.
 
@@ -1319,43 +1319,10 @@ ScriptValue Object::attribute(ExecutionContext* context) {
 }
 ```
 
-### [CheckSecurity] _(i, m, a)_
+### [CheckSecurity] _(m, a)_
 
 Summary: Check whether a given access is allowed or not in terms of the
 same-origin security policy.
-
-*** note
-It is very important to use this attribute for interfaces and properties that
-are exposed cross-origin!
-***
-
-Usage for interfaces: `[CheckSecurity=Receiver]` enables a security check for
-all methods of an interface. The security check verifies that the caller still
-has access to the receiver object of the method when it is invoked. This is
-security-critical for interfaces that can be returned cross-origin, such as the
-Location or Window interface.
-
-```webidl
-[
-    CheckSecurity=Receiver
-] interface DOMWindow {
-    Selection? getSelection();
-};
-```
-
-Forgetting this attribute would make it possible to cache a method reference and
-invoke it on a cross-origin object:
-
-```js
-var iframe = document.body.appendChild(document.createElement('iframe'));
-var addEventListenerMethod = iframe.contentWindow.addEventListener;
-iframe.src = 'https://example.com';
-iframe.onload = function () {
-  addEventListenerMethod('pointermove', function (event) {
-    event.target.ownerDocument.body.innerText = 'Text from a different origin.';
-  });
-};
-```
 
 Usage for attributes and methods: `[CheckSecurity=ReturnValue]` enables a
 security check on that property. The security check verifies that the caller is
@@ -1678,6 +1645,8 @@ Basically all constant values are defined in the spec, and thus the values in Bl
 ### [ImplementedAs] _(i, m, s, a)_
 
 Summary: `[ImplementedAs]` specifies a method name in Blink, if the method name in an IDL file and the method name in Blink are different.
+
+[ImplementedAs] can also be used for dictionary members.
 
 `[ImplementedAs]` is _discouraged_. Please use only if absolutely necessary: rename Blink internal names to align with IDL.
 

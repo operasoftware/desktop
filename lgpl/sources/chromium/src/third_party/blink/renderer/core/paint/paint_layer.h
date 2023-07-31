@@ -90,37 +90,6 @@ enum PaintLayerIteration {
       kNegativeZOrderChildren | kNormalFlowChildren | kPositiveZOrderChildren
 };
 
-struct CORE_EXPORT PaintLayerRareData final
-    : public GarbageCollected<PaintLayerRareData> {
- public:
-  PaintLayerRareData();
-  PaintLayerRareData(const PaintLayerRareData&) = delete;
-  PaintLayerRareData& operator=(const PaintLayerRareData&) = delete;
-  ~PaintLayerRareData();
-
-  void Trace(Visitor* visitor) const;
-
-  // The offset for an in-flow relative-positioned PaintLayer. This is not
-  // set by any other style.
-  PhysicalOffset offset_for_in_flow_rel_position;
-
-  std::unique_ptr<gfx::Transform> transform;
-
-  // Pointer to the enclosing Layer that caused us to be paginated. It is 0 if
-  // we are not paginated.
-  //
-  // See LayoutMultiColumnFlowThread and
-  // https://sites.google.com/a/chromium.org/dev/developers/design-documents/multi-column-layout
-  // for more information about the multicol implementation. It's important to
-  // understand the difference between flow thread coordinates and visual
-  // coordinates when working with multicol in Layer, since Layer is one of the
-  // few places where we have to worry about the visual ones. Internally we try
-  // to use flow-thread coordinates whenever possible.
-  Member<PaintLayer> enclosing_pagination_layer;
-
-  Member<PaintLayerResourceInfo> resource_info;
-};
-
 // PaintLayer is an old object that handles lots of unrelated operations.
 //
 // We want it to die at some point and be replaced by more focused objects,
@@ -165,7 +134,7 @@ struct CORE_EXPORT PaintLayerRareData final
 //   PaintLayers.
 // - If the flag is false, the LayoutObject is painted like normal children (ie
 //   as if it didn't have a PaintLayer). The paint order is handled by
-//   BlockPainter::paintChild that looks at children LayoutObjects.
+//   NGBoxFragmentPainter.
 // This means that the self-painting flag changes the painting order in a subtle
 // way, which can potentially have visible consequences. Those bugs are called
 // painting inversion as we invert the order of painting for 2 elements
@@ -248,12 +217,9 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // The physical offset from this PaintLayer to its ContainingLayer.
   // Does not include any scroll offset of the ContainingLayer. Also does not
   // include offsets for positioned elements.
-  const PhysicalOffset& LocationWithoutPositionOffset() const {
-#if DCHECK_IS_ON()
-    DCHECK(!needs_position_update_);
-#endif
-    return location_without_position_offset_;
-  }
+  //
+  // Do not use this function.  We're going to remove this.
+  const PhysicalOffset& LocationWithoutPositionOffset() const;
 
   // This is the scroll offset that's actually used to display to the screen.
   // It should only be used in paint/compositing type use cases (includes hit
@@ -262,24 +228,16 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // ScrollableArea.
   gfx::Vector2d PixelSnappedScrolledContentOffset() const;
 
-  // FIXME: size() should DCHECK(!needs_position_update_) as well, but that
-  // fails in some tests, for example, fast/repaint/clipped-relative.html.
-  const LayoutSize& Size() const { return size_; }
-
 #if DCHECK_IS_ON()
+  // Do not use this function.  We're going to remove this.
   bool NeedsPositionUpdate() const { return needs_position_update_; }
 #endif
 
   bool IsRootLayer() const { return is_root_layer_; }
 
-  bool UpdateSize();
-  void UpdateSizeAndScrollingAfterLayout();
+  void UpdateScrollingAfterLayout();
 
   void UpdateLayerPositionsAfterLayout();
-
-  PaintLayer* EnclosingPaginationLayer() const {
-    return rare_data_ ? rare_data_->enclosing_pagination_layer : nullptr;
-  }
 
   void UpdateTransform();
 
@@ -307,30 +265,9 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   PaintLayer* ContainingLayer(const PaintLayer* ancestor = nullptr,
                               bool* skipped_ancestor = nullptr) const;
 
+  // Do not use this function.  We're going to remove this.
   void ConvertToLayerCoords(const PaintLayer* ancestor_layer,
                             PhysicalOffset&) const;
-  void ConvertToLayerCoords(const PaintLayer* ancestor_layer,
-                            PhysicalRect&) const;
-
-  // Does the same as convertToLayerCoords() when not in multicol. For multicol,
-  // however, convertToLayerCoords() calculates the offset in flow-thread
-  // coordinates (what the layout engine uses internally), while this method
-  // calculates the visual coordinates; i.e. it figures out which column the
-  // layer starts in and adds in the offset. See
-  // http://www.chromium.org/developers/design-documents/multi-column-layout for
-  // more info.
-  PhysicalOffset VisualOffsetFromAncestor(
-      const PaintLayer* ancestor_layer,
-      PhysicalOffset offset = PhysicalOffset()) const;
-
-  // Convert a bounding box from flow thread coordinates, relative to |this|, to
-  // visual coordinates, relative to |ancestorLayer|.
-  // See http://www.chromium.org/developers/design-documents/multi-column-layout
-  // for more info on these coordinate types.  This method requires this layer
-  // to be paginated; i.e. it must have an enclosingPaginationLayer().
-  void ConvertFromFlowThreadToVisualBoundingBoxInAncestor(
-      const PaintLayer* ancestor_layer,
-      PhysicalRect&) const;
 
   // The hitTest() method looks for mouse events by walking layers that
   // intersect the point from front to back.
@@ -339,11 +276,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   bool HitTest(const HitTestLocation& location,
                HitTestResult&,
                const PhysicalRect& hit_test_area);
-
-  // Bounding box relative to some ancestor layer. Pass offsetFromRoot if known.
-  PhysicalRect PhysicalBoundingBox(
-      const PhysicalOffset& offset_from_root) const;
-  PhysicalRect PhysicalBoundingBox(const PaintLayer* ancestor_layer) const;
 
   // Static position is set in parent's coordinate space.
   LayoutUnit StaticInlinePosition() const { return static_inline_position_; }
@@ -381,18 +313,20 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return position;
   }
 
-  // Note that this transform has the transform-origin baked in.
-  gfx::Transform* Transform() const {
-    return rare_data_ ? rare_data_->transform.get() : nullptr;
-  }
+  // Note that this transform has the transform-origin baked in. Due to this
+  // fact, this transform is pretty useless if we're fragmented, since each
+  // fragment has its own origin. Avoid calling this method if a box is
+  // fragmented. Ideally, we should have a DCHECK for being non-fragmented here,
+  // but that's going to fail currently. LayoutBox::MapVisualRectToContainer()
+  // calls this function without any checks, for instance.
+  gfx::Transform* Transform() const { return transform_.get(); }
 
   // Returns *Transform(), or identity matrix if Transform() is nullptr.
   gfx::Transform CurrentTransform() const;
 
   bool Preserves3D() const { return GetLayoutObject().Preserves3D(); }
   bool Has3DTransform() const {
-    return rare_data_ && rare_data_->transform &&
-           !rare_data_->transform->Is2dTransform();
+    return transform_ && !transform_->Is2dTransform();
   }
 
   // Returns |true| if any property that renders using filter operations is
@@ -452,9 +386,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
-  PaintLayerResourceInfo* ResourceInfo() const {
-    return rare_data_ ? rare_data_->resource_info.Get() : nullptr;
-  }
+  PaintLayerResourceInfo* ResourceInfo() const { return resource_info_; }
   PaintLayerResourceInfo& EnsureResourceInfo();
 
   // Filter reference box is the area over which the filter is computed, in the
@@ -470,10 +402,12 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
                              const ComputedStyle& new_style);
   void UpdateClipPath(const ComputedStyle* old_style,
                       const ComputedStyle& new_style);
+  void UpdateOffsetPath(const ComputedStyle* old_style,
+                        const ComputedStyle& new_style);
 
   Node* EnclosingNode() const;
 
-  bool IsInTopLayer() const;
+  bool IsInTopOrViewTransitionLayer() const;
 
   // FIXME: This should probably return a ScrollableArea but a lot of internal
   // methods are mistakenly exposed.
@@ -481,12 +415,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return scrollable_area_.Get();
   }
 
-  enum class GeometryMapperOption {
-    kUseGeometryMapper,
-    kDoNotUseGeometryMapper
-  };
-
-  PaintLayerClipper Clipper(GeometryMapperOption) const;
+  PaintLayerClipper Clipper() const;
 
   bool ScrollsOverflow() const;
 
@@ -619,11 +548,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
 #endif
 
   void DirtyStackingContextZOrderLists();
-
-  PhysicalOffset OffsetForInFlowRelPosition() const {
-    return rare_data_ ? rare_data_->offset_for_in_flow_rel_position
-                      : PhysicalOffset();
-  }
 
   bool KnownToClipSubtreeToPaddingBox() const;
 
@@ -758,16 +682,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   void UpdateTransformAfterStyleChange(const ComputedStyle* old_style,
                                        const ComputedStyle& new_style);
 
-  void UpdatePaginationRecursive(bool needs_pagination_update = false);
-  void ClearPaginationRecursive();
-
   void MarkCompositingContainerChainForNeedsRepaint();
-
-  PaintLayerRareData& EnsureRareData() {
-    if (!rare_data_)
-      rare_data_ = MakeGarbageCollected<PaintLayerRareData>();
-    return *rare_data_;
-  }
 
   void MergeNeedsPaintPhaseFlagsFrom(const PaintLayer& layer) {
     needs_paint_phase_descendant_outlines_ |=
@@ -805,6 +720,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   unsigned has_visible_self_painting_descendant_ : 1;
 
 #if DCHECK_IS_ON()
+  // TODO(crbug.com/1432839): Remove this.
   unsigned needs_position_update_ : 1;
 #endif
 
@@ -872,26 +788,21 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   Member<PaintLayer> first_;
   Member<PaintLayer> last_;
 
+  Member<PaintLayerScrollableArea> scrollable_area_;
+  Member<PaintLayerStackingNode> stacking_node_;
+  Member<PaintLayerResourceInfo> resource_info_;
+
   // Our (x,y) coordinates are in our containing layer's coordinate space,
   // excluding positioning offset and scroll.
+  // TODO(crbug.com/1432839): Remove this.
   PhysicalOffset location_without_position_offset_;
-
-  // The layer's size.
-  //
-  // If the associated LayoutBoxModelObject is a LayoutBox, it's its border
-  // box. Otherwise, this is the LayoutInline's lines' bounding box.
-  LayoutSize size_;
 
   // Cached normal flow values for absolute positioned elements with static
   // left/top values.
   LayoutUnit static_inline_position_;
   LayoutUnit static_block_position_;
 
-  Member<PaintLayerScrollableArea> scrollable_area_;
-
-  Member<PaintLayerStackingNode> stacking_node_;
-
-  Member<PaintLayerRareData> rare_data_;
+  std::unique_ptr<gfx::Transform> transform_;
 
   // For layer_list_mutation_allowed_.
   friend class PaintLayerListMutationDetector;

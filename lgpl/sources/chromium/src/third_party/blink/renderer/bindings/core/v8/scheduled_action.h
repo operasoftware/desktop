@@ -38,10 +38,10 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "v8/include/v8.h"
 
 namespace blink {
 
+class CallbackFunctionBase;
 class ExecutionContext;
 class ScriptState;
 class ScriptStateProtectingContext;
@@ -53,11 +53,11 @@ class ScheduledAction final : public GarbageCollected<ScheduledAction>,
 
  public:
   ScheduledAction(ScriptState*,
-                  ExecutionContext* target,
+                  ExecutionContext& target,
                   V8Function* handler,
                   const HeapVector<ScriptValue>& arguments);
   ScheduledAction(ScriptState*,
-                  ExecutionContext* target,
+                  ExecutionContext& target,
                   const String& handler);
 
   ScheduledAction(const ScheduledAction&) = delete;
@@ -72,6 +72,8 @@ class ScheduledAction final : public GarbageCollected<ScheduledAction>,
   void Trace(Visitor*) const;
 
   const char* NameInHeapSnapshot() const override { return "ScheduledAction"; }
+
+  CallbackFunctionBase* CallbackFunction();
 
  private:
   Member<ScriptStateProtectingContext> script_state_;

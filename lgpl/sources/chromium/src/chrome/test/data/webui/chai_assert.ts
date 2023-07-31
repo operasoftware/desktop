@@ -135,3 +135,15 @@ export function assertThrows(
 export function assertArrayEquals(expected: any[], actual: any[]) {
   assertDeepEquals(expected, actual);
 }
+
+export function assertStringContains(expected: string, contains: string) {
+  chai.expect(expected).to.have.string(contains);
+}
+
+/**
+ * @param value The value to check if strictly equals null (value === null).
+ * @param message Optional error message.
+ */
+export function assertNull(value: any, message?: string) {
+  chai.assert.isNull(value, message);
+}

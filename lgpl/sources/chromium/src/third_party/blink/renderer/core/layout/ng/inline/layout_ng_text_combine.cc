@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/layout/geometry/logical_rect.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/layout/geometry/writing_mode_converter.h"
+#include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_fragment_item.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node_data.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_ink_overflow.h"
@@ -220,7 +221,8 @@ PhysicalRect LayoutNGTextCombine::ComputeTextFrameRect(
                       PhysicalSize(one_em, line_height));
 }
 
-PhysicalRect LayoutNGTextCombine::RecalcContentsInkOverflow() const {
+PhysicalRect LayoutNGTextCombine::RecalcContentsInkOverflow(
+    const NGInlineCursor& cursor) const {
   const ComputedStyle& style = Parent()->StyleRef();
   DCHECK(style.GetFont().GetFontDescription().IsVerticalBaseline());
 
@@ -231,11 +233,10 @@ PhysicalRect LayoutNGTextCombine::RecalcContentsInkOverflow() const {
   if (style.HasAppliedTextDecorations()) {
     // |LayoutNGTextCombine| does not support decorating box, as it is not
     // supported in vertical flow and text-combine is only for vertical flow.
-    const LayoutRect decoration_rect =
-        NGInkOverflow::ComputeTextDecorationOverflow(
-            style, style.GetFont(),
-            /* offset_in_container */ PhysicalOffset(), ink_overflow,
-            /* inline_context */ nullptr);
+    const LayoutRect decoration_rect = NGInkOverflow::ComputeDecorationOverflow(
+        cursor, style, style.GetFont(),
+        /* offset_in_container */ PhysicalOffset(), ink_overflow,
+        /* inline_context */ nullptr);
     ink_overflow.Unite(decoration_rect);
   }
 

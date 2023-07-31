@@ -107,7 +107,6 @@ suite('ManageProfileTests', function() {
     element.profileName = 'Initial Fake Name';
     element.syncStatus = {
       supervisedUser: false,
-      childUser: false,
       statusAction: StatusAction.NO_ACTION,
     };
     document.body.appendChild(element);
@@ -125,12 +124,12 @@ suite('ManageProfileTests', function() {
         manageProfile.shadowRoot!.querySelector(
                                      'cr-profile-avatar-selector')!.shadowRoot!
             .querySelector('#avatar-grid')!.querySelectorAll<HTMLElement>(
-                '.avatar');
+                '.avatar-container > .avatar');
 
     assertEquals(3, items.length);
-    assertFalse(items[0]!.classList.contains('iron-selected'));
-    assertTrue(items[1]!.classList.contains('iron-selected'));
-    assertFalse(items[2]!.classList.contains('iron-selected'));
+    assertFalse(items[0]!.parentElement!.classList.contains('iron-selected'));
+    assertTrue(items[1]!.parentElement!.classList.contains('iron-selected'));
+    assertFalse(items[2]!.parentElement!.classList.contains('iron-selected'));
 
     items[1]!.click();
     const args = await browserProxy.whenCalled('setProfileIconToDefaultAvatar');
@@ -154,20 +153,6 @@ suite('ManageProfileTests', function() {
 
     const args = await browserProxy.whenCalled('setProfileName');
     assertEquals('New Name', args[0]);
-  });
-
-  test('ProfileNameIsDisabledForSupervisedUser', function() {
-    manageProfile.syncStatus = {
-      supervisedUser: true,
-      childUser: false,
-      statusAction: StatusAction.NO_ACTION,
-    };
-
-    const nameField = manageProfile.$.name;
-    assertTrue(!!nameField);
-
-    // Name field should be disabled for legacy supervised users.
-    assertTrue(!!nameField.disabled);
   });
 
   // Tests profile name updates pushed from the browser.

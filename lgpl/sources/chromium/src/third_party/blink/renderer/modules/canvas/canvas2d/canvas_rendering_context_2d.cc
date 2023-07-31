@@ -80,7 +80,6 @@
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/stroke_data.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/text/bidi_text_run.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -168,24 +167,6 @@ NoAllocDirectCallHost* CanvasRenderingContext2D::AsNoAllocDirectCallHost() {
 
 CanvasRenderingContext2D::~CanvasRenderingContext2D() = default;
 
-void CanvasRenderingContext2D::ValidateStateStackWithCanvas(
-    const cc::PaintCanvas* canvas) const {
-#if DCHECK_IS_ON()
-  if (canvas) {
-    // The canvas should always have an initial save frame, to support
-    // resetting the top level matrix and clip.
-    DCHECK_GT(canvas->getSaveCount(), 1);
-
-    if (context_lost_mode_ == kNotLostContext) {
-      DCHECK_EQ(static_cast<size_t>(canvas->getSaveCount()),
-                state_stack_.size() + 1);
-    }
-  }
-#endif
-  CHECK(state_stack_.front()
-            .Get());  // Temporary for investigating crbug.com/648510
-}
-
 bool CanvasRenderingContext2D::IsAccelerated() const {
   Canvas2DLayerBridge* layer_bridge = canvas()->GetCanvas2DLayerBridge();
   if (!layer_bridge)
@@ -200,19 +181,24 @@ bool CanvasRenderingContext2D::IsOriginTopLeft() const {
 }
 
 bool CanvasRenderingContext2D::IsComposited() const {
-  return IsAccelerated();
+  // The following case is necessary for handling the special case of canvases
+  // in the dev tools overlay.
+  auto* settings = canvas()->GetDocument().GetSettings();
+  if (settings && !settings->GetAcceleratedCompositingEnabled()) {
+    return false;
+  }
+  if (Canvas2DLayerBridge* layer_bridge = canvas()->GetCanvas2DLayerBridge()) {
+    return layer_bridge->IsComposited();
+  }
+  return false;
 }
 
 void CanvasRenderingContext2D::Stop() {
-  if (!isContextLost()) {
+  if (LIKELY(!isContextLost())) {
     // Never attempt to restore the context because the page is being torn down.
     context_restorable_ = false;
     LoseContext(kSyntheticLostContext);
   }
-}
-
-bool CanvasRenderingContext2D::isContextLost() const {
-  return context_lost_mode_ != kNotLostContext;
 }
 
 void CanvasRenderingContext2D::SendContextLostEventIfNeeded() {
@@ -339,7 +325,7 @@ void CanvasRenderingContext2D::SetShouldAntialias(bool do_aa) {
 }
 
 void CanvasRenderingContext2D::scrollPathIntoView() {
-  ScrollPathIntoViewInternal(path_);
+  ScrollPathIntoViewInternal(GetPath());
 }
 
 void CanvasRenderingContext2D::scrollPathIntoView(Path2D* path2d) {
@@ -347,8 +333,9 @@ void CanvasRenderingContext2D::scrollPathIntoView(Path2D* path2d) {
 }
 
 void CanvasRenderingContext2D::ScrollPathIntoViewInternal(const Path& path) {
-  if (!IsTransformInvertible() || path.IsEmpty())
+  if (UNLIKELY(!IsTransformInvertible() || path.IsEmpty())) {
     return;
+  }
 
   canvas()->GetDocument().UpdateStyleAndLayout(
       DocumentUpdateReason::kJavaScript);
@@ -465,10 +452,11 @@ void CanvasRenderingContext2D::WillDraw(
   }
 }
 
-void CanvasRenderingContext2D::FlushCanvas() {
+void CanvasRenderingContext2D::FlushCanvas(
+    CanvasResourceProvider::FlushReason reason) {
   if (canvas() && canvas()->GetCanvas2DLayerBridge() &&
       canvas()->GetCanvas2DLayerBridge()->ResourceProvider()) {
-    canvas()->GetCanvas2DLayerBridge()->ResourceProvider()->FlushCanvas();
+    canvas()->GetCanvas2DLayerBridge()->ResourceProvider()->FlushCanvas(reason);
   }
 }
 
@@ -502,12 +490,13 @@ void CanvasRenderingContext2D::setFont(const String& new_font) {
   // documents.
   if (!canvas()->GetDocument().GetFrame())
     return;
-  if (identifiability_study_helper_.ShouldUpdateBuilder()) {
+  if (UNLIKELY(identifiability_study_helper_.ShouldUpdateBuilder())) {
     identifiability_study_helper_.UpdateBuilder(
         CanvasOps::kSetFont, IdentifiabilityBenignStringToken(new_font));
   }
 
-  canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(canvas());
+  canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(
+      canvas(), DocumentUpdateReason::kCanvas);
 
   // The following early exit is dependent on the cache not being empty
   // because an empty cache may indicate that a style change has occured
@@ -664,10 +653,11 @@ bool CanvasRenderingContext2D::CanCreateCanvas2dResourceProvider() const {
   return canvas()->GetOrCreateCanvas2DLayerBridge();
 }
 
-scoped_refptr<StaticBitmapImage> blink::CanvasRenderingContext2D::GetImage() {
+scoped_refptr<StaticBitmapImage> blink::CanvasRenderingContext2D::GetImage(
+    CanvasResourceProvider::FlushReason reason) {
   if (!IsPaintable())
     return nullptr;
-  return canvas()->GetCanvas2DLayerBridge()->NewImageSnapshot();
+  return canvas()->GetCanvas2DLayerBridge()->NewImageSnapshot(reason);
 }
 
 ImageData* CanvasRenderingContext2D::getImageDataInternal(
@@ -685,10 +675,11 @@ ImageData* CanvasRenderingContext2D::getImageDataInternal(
       sx, sy, sw, sh, image_data_settings, exception_state);
 }
 
-void CanvasRenderingContext2D::FinalizeFrame(bool printing) {
+void CanvasRenderingContext2D::FinalizeFrame(
+    CanvasResourceProvider::FlushReason reason) {
   TRACE_EVENT0("blink", "CanvasRenderingContext2D::FinalizeFrame");
   if (IsPaintable())
-    canvas()->GetCanvas2DLayerBridge()->FinalizeFrame(printing);
+    canvas()->GetCanvas2DLayerBridge()->FinalizeFrame(reason);
 }
 
 CanvasRenderingContextHost*
@@ -735,8 +726,10 @@ static inline TextDirection ToTextDirection(
 
 String CanvasRenderingContext2D::direction() const {
   if (GetState().GetDirection() ==
-      CanvasRenderingContext2DState::kDirectionInherit)
-    canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(canvas());
+      CanvasRenderingContext2DState::kDirectionInherit) {
+    canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(
+        canvas(), DocumentUpdateReason::kCanvas);
+  }
   return ToTextDirection(GetState().GetDirection(), canvas()) ==
                  TextDirection::kRtl
              ? kRtlDirectionString
@@ -941,7 +934,8 @@ TextMetrics* CanvasRenderingContext2D::measureText(const String& text) {
   if (!canvas()->GetDocument().GetFrame())
     return MakeGarbageCollected<TextMetrics>();
 
-  canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(canvas());
+  canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(
+      canvas(), DocumentUpdateReason::kCanvas);
 
   const Font& font = AccessFont();
 
@@ -996,7 +990,8 @@ void CanvasRenderingContext2D::DrawTextInternal(
   // accessFont needs the style to be up to date, but updating style can cause
   // script to run, (e.g. due to autofocus) which can free the canvas (set size
   // to 0, for example), so update style before grabbing the PaintCanvas.
-  canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(canvas());
+  canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(
+      canvas(), DocumentUpdateReason::kCanvas);
 
   cc::PaintCanvas* c = GetOrCreatePaintCanvas();
   if (!c)
@@ -1007,7 +1002,7 @@ void CanvasRenderingContext2D::DrawTextInternal(
   if (max_width && (!std::isfinite(*max_width) || *max_width <= 0))
     return;
 
-  if (identifiability_study_helper_.ShouldUpdateBuilder()) {
+  if (UNLIKELY(identifiability_study_helper_.ShouldUpdateBuilder())) {
     identifiability_study_helper_.UpdateBuilder(
         paint_type == CanvasRenderingContext2DState::kFillPaintType
             ? CanvasOps::kFillText
@@ -1032,14 +1027,13 @@ void CanvasRenderingContext2D::DrawTextInternal(
   bool bidi_override =
       computed_style ? IsOverride(computed_style->GetUnicodeBidi()) : false;
 
-  TextRun text_run(text, 0, 0, TextRun::kAllowTrailingExpansion, direction,
-                   bidi_override);
+  TextRun text_run(text, direction, bidi_override);
   text_run.SetNormalizeSpace(true);
   // Draw the item text at the correct point.
   gfx::PointF location(ClampTo<float>(x),
                        ClampTo<float>(y + GetFontBaseline(*font_data)));
   gfx::RectF bounds;
-  double font_width = font.Width(text_run, nullptr, &bounds);
+  double font_width = font.Width(text_run, &bounds);
 
   bool use_max_width = (max_width && *max_width < font_width);
   double width = use_max_width ? *max_width : font_width;
@@ -1080,8 +1074,7 @@ void CanvasRenderingContext2D::DrawTextInternal(
       [this, text = std::move(text), direction, bidi_override, location](
           cc::PaintCanvas* c, const cc::PaintFlags* flags)  // draw lambda
       {
-        TextRun text_run(text, 0, 0, TextRun::kAllowTrailingExpansion,
-                         direction, bidi_override);
+        TextRun text_run(text, direction, bidi_override);
         text_run.SetNormalizeSpace(true);
         TextRunPaintInfo text_run_paint_info(text_run);
         this->AccessFont().DrawBidiText(c, text_run_paint_info, location,
@@ -1141,7 +1134,7 @@ CanvasRenderingContext2D::getContextAttributes() const {
 }
 
 void CanvasRenderingContext2D::drawFocusIfNeeded(Element* element) {
-  DrawFocusIfNeededInternal(path_, element);
+  DrawFocusIfNeededInternal(GetPath(), element);
 }
 
 void CanvasRenderingContext2D::drawFocusIfNeeded(Path2D* path2d,
@@ -1161,7 +1154,7 @@ void CanvasRenderingContext2D::DrawFocusIfNeededInternal(
   // element->focused(), because element->focused() isn't updated until after
   // focus events fire.
   if (element->GetDocument().FocusedElement() == element) {
-    if (identifiability_study_helper_.ShouldUpdateBuilder()) {
+    if (UNLIKELY(identifiability_study_helper_.ShouldUpdateBuilder())) {
       identifiability_study_helper_.UpdateBuilder(CanvasOps::kDrawFocusIfNeeded,
                                                   path_token);
     }
@@ -1176,8 +1169,9 @@ void CanvasRenderingContext2D::DrawFocusIfNeededInternal(
 bool CanvasRenderingContext2D::FocusRingCallIsValid(const Path& path,
                                                     Element* element) {
   DCHECK(element);
-  if (!IsTransformInvertible())
+  if (UNLIKELY(!IsTransformInvertible())) {
     return false;
+  }
   if (path.IsEmpty())
     return false;
   if (!element->IsDescendantOf(canvas()))
@@ -1243,6 +1237,11 @@ void CanvasRenderingContext2D::UpdateElementAccessibility(const Path& path,
 // once always accelerate fully lands.
 void CanvasRenderingContext2D::DisableAcceleration() {
   canvas()->DisableAcceleration();
+}
+
+bool CanvasRenderingContext2D::ShouldDisableAccelerationBecauseOfReadback()
+    const {
+  return canvas()->ShouldDisableAccelerationBecauseOfReadback();
 }
 
 bool CanvasRenderingContext2D::IsCanvas2DBufferValid() const {

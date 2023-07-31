@@ -44,7 +44,7 @@ GPUShaderModule* GPUShaderModule::Create(
       wgsl_code = UTF8StringFromUSVStringWithNullReplacedByReplacementCodePoint(
           wgsl_or_spirv->GetAsUSVString());
       wgsl_desc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
-      wgsl_desc.source = wgsl_code.c_str();
+      wgsl_desc.code = wgsl_code.c_str();
       dawn_desc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&wgsl_desc);
       break;
     }
@@ -107,7 +107,7 @@ void GPUShaderModule::OnCompilationInfoCallback(
   resolver->Resolve(result);
 }
 
-ScriptPromise GPUShaderModule::compilationInfo(ScriptState* script_state) {
+ScriptPromise GPUShaderModule::getCompilationInfo(ScriptState* script_state) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 

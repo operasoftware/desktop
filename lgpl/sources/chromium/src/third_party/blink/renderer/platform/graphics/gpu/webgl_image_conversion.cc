@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/gpu/webgl_image_conversion.h"
 
+#include <cstring>
 #include <limits>
 #include <memory>
 
@@ -11,6 +12,7 @@
 #include "base/numerics/checked_math.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/graphics/cpu/arm/webgl_image_conversion_neon.h"
+#include "third_party/blink/renderer/platform/graphics/cpu/loongarch64/webgl_image_conversion_lsx.h"
 #include "third_party/blink/renderer/platform/graphics/cpu/mips/webgl_image_conversion_msa.h"
 #include "third_party/blink/renderer/platform/graphics/cpu/x86/webgl_image_conversion_sse.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
@@ -416,7 +418,8 @@ const unsigned char g_shift_table[512] = {
     24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 13};
 
 uint16_t ConvertFloatToHalfFloat(float f) {
-  unsigned temp = *(reinterpret_cast<unsigned*>(&f));
+  unsigned temp;
+  std::memcpy(&temp, &f, 4);
   uint16_t signexp = (temp >> 23) & 0x1ff;
   return g_base_table[signexp] +
          ((temp & 0x007fffff) >> g_shift_table[signexp]);
@@ -834,7 +837,9 @@ float ConvertHalfFloatToFloat(uint16_t half) {
   uint32_t temp =
       g_mantissa_table[g_offset_table[half >> 10] + (half & 0x3ff)] +
       g_exponent_table[half >> 10];
-  return *(reinterpret_cast<float*>(&temp));
+  float ret;
+  std::memcpy(&ret, &temp, 4);
+  return ret;
 }
 
 /* BEGIN CODE SHARED WITH MOZILLA FIREFOX */
@@ -898,6 +903,10 @@ void Unpack<WebGLImageConversion::kDataFormatBGRA8, uint8_t, uint8_t>(
   simd::unpackOneRowOfBGRA8LittleToRGBA8MSA(source32, destination32,
                                             pixels_per_row);
 #endif
+#if defined(ARCH_CPU_LOONG_FAMILY)
+  simd::UnpackOneRowOfBGRA8LittleToRGBA8(source32, destination32,
+                                         pixels_per_row);
+#endif
   for (unsigned i = 0; i < pixels_per_row; ++i) {
     uint32_t bgra = source32[i];
 #if defined(ARCH_CPU_BIG_ENDIAN)
@@ -928,6 +937,10 @@ void Unpack<WebGLImageConversion::kDataFormatRGBA5551, uint16_t, uint8_t>(
 #if defined(HAVE_MIPS_MSA_INTRINSICS)
   simd::unpackOneRowOfRGBA5551ToRGBA8MSA(source, destination, pixels_per_row);
 #endif
+#if defined(ARCH_CPU_LOONG_FAMILY)
+  simd::UnpackOneRowOfRGBA5551LittleToRGBA8(source, destination,
+                                            pixels_per_row);
+#endif
 
   for (unsigned i = 0; i < pixels_per_row; ++i) {
     uint16_t packed_value = source[0];
@@ -957,6 +970,10 @@ void Unpack<WebGLImageConversion::kDataFormatRGBA4444, uint16_t, uint8_t>(
 #endif
 #if defined(HAVE_MIPS_MSA_INTRINSICS)
   simd::unpackOneRowOfRGBA4444ToRGBA8MSA(source, destination, pixels_per_row);
+#endif
+#if defined(ARCH_CPU_LOONG_FAMILY)
+  simd::UnpackOneRowOfRGBA4444LittleToRGBA8(source, destination,
+                                            pixels_per_row);
 #endif
   for (unsigned i = 0; i < pixels_per_row; ++i) {
     uint16_t packed_value = source[0];
@@ -1272,6 +1289,9 @@ void Pack<WebGLImageConversion::kDataFormatR8,
 #if defined(HAVE_MIPS_MSA_INTRINSICS)
   simd::packOneRowOfRGBA8LittleToR8MSA(source, destination, pixels_per_row);
 #endif
+#if defined(ARCH_CPU_LOONG_FAMILY)
+  simd::PackOneRowOfRGBA8LittleToR8(source, destination, pixels_per_row);
+#endif
   for (unsigned i = 0; i < pixels_per_row; ++i) {
     float scale_factor = source[3] ? 255.0f / source[3] : 1.0f;
     uint8_t source_r =
@@ -1373,6 +1393,9 @@ void Pack<WebGLImageConversion::kDataFormatRA8,
 #endif
 #if defined(HAVE_MIPS_MSA_INTRINSICS)
   simd::packOneRowOfRGBA8LittleToRA8MSA(source, destination, pixels_per_row);
+#endif
+#if defined(ARCH_CPU_LOONG_FAMILY)
+  simd::PackOneRowOfRGBA8LittleToRA8(source, destination, pixels_per_row);
 #endif
   for (unsigned i = 0; i < pixels_per_row; ++i) {
     float scale_factor = source[3] ? 255.0f / source[3] : 1.0f;
@@ -1566,6 +1589,9 @@ void Pack<WebGLImageConversion::kDataFormatRGBA8,
 #endif
 #if defined(HAVE_MIPS_MSA_INTRINSICS)
   simd::packOneRowOfRGBA8LittleToRGBA8MSA(source, destination, pixels_per_row);
+#endif
+#if defined(ARCH_CPU_LOONG_FAMILY)
+  simd::PackOneRowOfRGBA8LittleToRGBA8(source, destination, pixels_per_row);
 #endif
   for (unsigned i = 0; i < pixels_per_row; ++i) {
     float scale_factor = source[3] ? 255.0f / source[3] : 1.0f;
@@ -3805,7 +3831,7 @@ WebGLImageConversion::ImageExtractor::ImageExtractor(
 
       // TODO(fmalita): Partial frames are not supported currently: only fully
       // decoded frames make it through.  We could potentially relax this and
-      // use SkImage::MakeFromBitmap(bitmap) to make a copy.
+      // use SkImages::RasterFromBitmap(bitmap) to make a copy.
       skia_image = frame->FinalizePixelsAndGetImage();
     }
   }

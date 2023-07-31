@@ -5,7 +5,7 @@
 // clang-format off
 import {assert} from 'chrome://resources/js/assert_ts.js';
 import {webUIListenerCallback} from 'chrome://resources/js/cr.js';
-import {AppProtocolEntry, ChooserType, ContentSetting, ContentSettingsTypes, HandlerEntry, NotificationPermission, ProtocolEntry, RawChooserException, RawSiteException, RecentSitePermissions, SiteGroup, SiteSettingSource, SiteSettingsPrefsBrowserProxy, ZoomLevelEntry} from 'chrome://settings/lazy_load.js';
+import {AppProtocolEntry, ChooserType, ContentSetting, ContentSettingsTypes, HandlerEntry, NotificationPermission, FileSystemGrantsForOrigin, ProtocolEntry, RawChooserException, RawSiteException, RecentSitePermissions, SiteGroup, SiteSettingSource, SiteSettingsPrefsBrowserProxy, ZoomLevelEntry} from 'chrome://settings/lazy_load.js';
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
 import {createOriginInfo, createSiteGroup,createSiteSettingsPrefs, getContentSettingsTypeFromChooserType, SiteSettingsPref} from './test_util.js';
@@ -31,6 +31,7 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
   private cookieSettingDesciption_: string = '';
   private recentSitePermissions_: RecentSitePermissions[] = [];
   private reviewNotificationList_: NotificationPermission[] = [];
+  private fileSystemGrantsList_: FileSystemGrantsForOrigin[] = [];
 
   constructor() {
     super([
@@ -61,7 +62,7 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
       'setProtocolDefault',
       'setProtocolHandlerDefault',
       'updateIncognitoStatus',
-      'clearEtldPlus1DataAndCookies',
+      'clearSiteGroupDataAndCookies',
       'clearUnpartitionedOriginDataAndCookies',
       'clearPartitionedOriginDataAndCookies',
       'recordAction',
@@ -76,6 +77,9 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
       'getFpsMembershipLabel',
       'getNumCookiesString',
       'getExtensionName',
+      'getFileSystemGrants',
+      'revokeFileSystemGrant',
+      'revokeFileSystemGrants',
     ]);
 
 
@@ -293,7 +297,8 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
         const originInfo = createOriginInfo(origin, {usage: mockUsage});
         existing.origins.push(originInfo);
       } else {
-        const entry = createSiteGroup(etldPlus1Name, [origin], mockUsage);
+        const entry =
+            createSiteGroup(etldPlus1Name, etldPlus1Name, [origin], mockUsage);
         result.push(entry);
       }
     });
@@ -556,8 +561,8 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
   }
 
   /** @override */
-  clearEtldPlus1DataAndCookies() {
-    this.methodCalled('clearEtldPlus1DataAndCookies');
+  clearSiteGroupDataAndCookies() {
+    this.methodCalled('clearSiteGroupDataAndCookies');
   }
 
   /** @override */
@@ -566,9 +571,9 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
   }
 
   /** @override */
-  clearPartitionedOriginDataAndCookies(origin: string, etldPlus1: string) {
+  clearPartitionedOriginDataAndCookies(origin: string, groupingKey: string) {
     this.methodCalled(
-        'clearPartitionedOriginDataAndCookies', [origin, etldPlus1]);
+        'clearPartitionedOriginDataAndCookies', [origin, groupingKey]);
   }
 
   /** @override */
@@ -655,5 +660,23 @@ export class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy
   getExtensionName(id: string) {
     this.methodCalled('getExtensionName', id);
     return Promise.resolve(`Test Extension ${id}`);
+  }
+
+  setFileSystemGrants(fileSystemGrantsForOriginList:
+                          FileSystemGrantsForOrigin[]): void {
+    this.fileSystemGrantsList_ = fileSystemGrantsForOriginList;
+  }
+
+  getFileSystemGrants(): Promise<FileSystemGrantsForOrigin[]> {
+    this.methodCalled('getFileSystemGrants');
+    return Promise.resolve(this.fileSystemGrantsList_);
+  }
+
+  revokeFileSystemGrant(origin: string, filePath: string): void {
+    this.methodCalled('revokeFileSystemGrant', [origin, filePath]);
+  }
+
+  revokeFileSystemGrants(origin: string): void {
+    this.methodCalled('revokeFileSystemGrants', origin);
   }
 }

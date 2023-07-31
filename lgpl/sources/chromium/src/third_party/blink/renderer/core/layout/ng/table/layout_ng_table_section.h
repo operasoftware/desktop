@@ -8,26 +8,29 @@
 #include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/layout_ng_block.h"
-#include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table_section_interface.h"
 
 namespace blink {
 
 class LayoutNGTable;
+class LayoutNGTableRow;
 
 // NOTE:
 // Every child of LayoutNGTableSection must be LayoutNGTableRow.
-class CORE_EXPORT LayoutNGTableSection : public LayoutNGBlock,
-                                         public LayoutNGTableSectionInterface {
+class CORE_EXPORT LayoutNGTableSection : public LayoutNGBlock {
  public:
   explicit LayoutNGTableSection(Element*);
 
+  static LayoutNGTableSection* CreateAnonymousWithParent(const LayoutObject&);
+
   bool IsEmpty() const;
 
+  LayoutNGTableRow* FirstRow() const;
+  LayoutNGTableRow* LastRow() const;
   LayoutNGTable* Table() const;
 
   // LayoutBlock methods start.
 
-  void UpdateBlockLayout(bool relayout_children) override {
+  void UpdateBlockLayout() override {
     NOT_DESTROYED();
     NOTREACHED();
   }
@@ -58,7 +61,6 @@ class CORE_EXPORT LayoutNGTableSection : public LayoutNGBlock,
   // Whether a section has opaque background depends on many factors, e.g.
   // border spacing, border collapsing, missing cells, etc. For simplicity,
   // just conservatively assume all table sections are not opaque.
-  // Copied from LayoutTableSection,
   bool ForegroundIsKnownToBeOpaqueInRect(const PhysicalRect&,
                                          unsigned) const override {
     NOT_DESTROYED();
@@ -77,51 +79,13 @@ class CORE_EXPORT LayoutNGTableSection : public LayoutNGBlock,
 
   // LayoutBlock methods end.
 
-  // LayoutNGTableSectionInterface methods start.
+  void SetNeedsCellRecalc();
 
-  const LayoutNGTableSectionInterface* ToLayoutNGTableSectionInterface()
-      const final {
-    NOT_DESTROYED();
-    return this;
-  }
+  unsigned NumRows() const;
 
-  LayoutNGTableSectionInterface* ToLayoutNGTableSectionInterface() {
-    NOT_DESTROYED();
-    return this;
-  }
+  unsigned NumCols(unsigned) const;
 
-  const LayoutObject* ToLayoutObject() const final {
-    NOT_DESTROYED();
-    return this;
-  }
-
-  LayoutNGTableInterface* TableInterface() const final;
-
-  void SetNeedsCellRecalc() final;
-
-  bool IsRepeatingHeaderGroup() const final {
-    NOT_DESTROYED();
-    // Used in printing, not used in LayoutNG
-    return false;
-  }
-
-  bool IsRepeatingFooterGroup() const final {
-    NOT_DESTROYED();
-    // Used in printing, not used in LayoutNG
-    return false;
-  }
-
-  unsigned NumRows() const final;
-
-  unsigned NumCols(unsigned) const final;
-
-  unsigned NumEffectiveColumns() const final;
-
-  LayoutNGTableRowInterface* FirstRowInterface() const final;
-
-  LayoutNGTableRowInterface* LastRowInterface() const final;
-
-  // LayoutNGTableSectionInterface methods end.
+  unsigned NumEffectiveColumns() const;
 
  protected:
   bool IsOfType(LayoutObjectType type) const override {
@@ -129,13 +93,19 @@ class CORE_EXPORT LayoutNGTableSection : public LayoutNGBlock,
     return type == kLayoutObjectTableSection ||
            LayoutNGMixin<LayoutBlock>::IsOfType(type);
   }
+
+  // Table section paints background specially.
+  bool ComputeCanCompositeBackgroundAttachmentFixed() const override {
+    NOT_DESTROYED();
+    return false;
+  }
 };
 
 // wtf/casting.h helper.
 template <>
 struct DowncastTraits<LayoutNGTableSection> {
   static bool AllowFrom(const LayoutObject& object) {
-    return object.IsTableSection() && object.IsLayoutNGObject();
+    return object.IsTableSection();
   }
 };
 

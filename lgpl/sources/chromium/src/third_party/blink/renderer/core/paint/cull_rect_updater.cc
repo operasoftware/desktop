@@ -201,8 +201,11 @@ void CullRectUpdater::UpdateInternal(const CullRect& input_cull_rect) {
   const auto& object = starting_layer_.GetLayoutObject();
   if (object.GetFrameView()->ShouldThrottleRendering())
     return;
+  if (object.IsFragmentLessBox()) {
+    return;
+  }
 
-  object.GetFrameView()->PropagateCullRectNeedsUpdateForFrames();
+  object.GetFrameView()->SetCullRectNeedsUpdateForFrames(disable_expansion_);
 
   if (!starting_layer_.NeedsCullRectUpdate() &&
       !starting_layer_.DescendantNeedsCullRectUpdate() &&
@@ -247,6 +250,10 @@ void CullRectUpdater::UpdateRecursively(const Context& parent_context,
     return;
 
   const auto& object = layer.GetLayoutObject();
+  if (object.IsFragmentLessBox()) {
+    return;
+  }
+
   Context context = parent_context;
   if (object.IsAbsolutePositioned())
     context.current = context.absolute;
@@ -434,8 +441,9 @@ CullRect CullRectUpdater::ComputeFragmentCullRect(
     // (skipping |ChangedEnough|) in |ApplyPaintProperties|.
     if (!ShouldProactivelyUpdate(context, layer))
       old_cull_rect = fragment.GetCullRect();
-    bool expanded = cull_rect.ApplyPaintProperties(root_state_, parent_state,
-                                                   local_state, old_cull_rect);
+    bool expanded =
+        cull_rect.ApplyPaintProperties(root_state_, parent_state, local_state,
+                                       old_cull_rect, disable_expansion_);
     if (expanded && fragment.GetCullRect() != cull_rect)
       context.current.force_proactive_update = true;
   }
@@ -457,7 +465,8 @@ CullRect CullRectUpdater::ComputeFragmentContentsCullRect(
     if (!ShouldProactivelyUpdate(context, layer))
       old_contents_cull_rect = fragment.GetContentsCullRect();
     bool expanded = contents_cull_rect.ApplyPaintProperties(
-        root_state_, local_state, contents_state, old_contents_cull_rect);
+        root_state_, local_state, contents_state, old_contents_cull_rect,
+        disable_expansion_);
     if (expanded && fragment.GetContentsCullRect() != contents_cull_rect)
       context.current.force_proactive_update = true;
   }
@@ -565,7 +574,8 @@ FragmentCullRects::FragmentCullRects(FragmentData& fragment)
       contents_cull_rect(fragment.GetContentsCullRect()) {}
 
 OverriddenCullRectScope::OverriddenCullRectScope(PaintLayer& starting_layer,
-                                                 const CullRect& cull_rect) {
+                                                 const CullRect& cull_rect,
+                                                 bool disable_expansion) {
   outer_original_cull_rects_ = g_original_cull_rects;
 
   if (starting_layer.IsRootLayer() &&
@@ -579,7 +589,9 @@ OverriddenCullRectScope::OverriddenCullRectScope(PaintLayer& starting_layer,
   }
 
   g_original_cull_rects = &original_cull_rects_;
-  CullRectUpdater(starting_layer).UpdateInternal(cull_rect);
+  CullRectUpdater updater(starting_layer);
+  updater.disable_expansion_ = disable_expansion;
+  updater.UpdateInternal(cull_rect);
 }
 
 OverriddenCullRectScope::~OverriddenCullRectScope() {

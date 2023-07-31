@@ -16,7 +16,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_shadow_root_init.h"
 #include "third_party/blink/renderer/core/animation/animation_clock.h"
-#include "third_party/blink/renderer/core/animation/css/css_scroll_timeline.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
 #include "third_party/blink/renderer/core/css/cascade_layer.h"
 #include "third_party/blink/renderer/core/css/cascade_layer_map.h"
@@ -61,7 +60,6 @@
 #include "third_party/blink/renderer/core/html/html_style_element.h"
 #include "third_party/blink/renderer/core/layout/layout_counter.h"
 #include "third_party/blink/renderer/core/layout/layout_custom_scrollbar_part.h"
-#include "third_party/blink/renderer/core/layout/layout_list_marker.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/layout/list_marker.h"
@@ -136,11 +134,6 @@ class StyleEngineTest : public PageTestBase {
 
   String GetListMarkerText(LayoutObject* list_item) {
     LayoutObject* marker = ListMarker::MarkerFromListItem(list_item);
-    if (auto* legacy_marker = DynamicTo<LayoutListMarker>(marker)) {
-      const CounterStyle& counter_style = legacy_marker->GetCounterStyle();
-      return counter_style.GetPrefix() + legacy_marker->GetText() +
-             counter_style.GetSuffix();
-    }
     return ListMarker::Get(marker)->GetTextChild(*marker).GetText();
   }
 
@@ -172,8 +165,7 @@ StyleEngineTest::ScheduleInvalidationsForRules(TreeScope& tree_scope,
   sheet->ParseString(css_text);
   HeapHashSet<Member<RuleSet>> rule_sets;
   RuleSet& rule_set =
-      sheet->EnsureRuleSet(MediaQueryEvaluator(GetDocument().GetFrame()),
-                           kRuleHasDocumentSecurityOrigin);
+      sheet->EnsureRuleSet(MediaQueryEvaluator(GetDocument().GetFrame()));
   rule_set.CompactRulesIfNeeded();
   if (rule_set.NeedsFullRecalcForRuleSetInvalidation()) {
     return kRuleSetInvalidationFullRecalc;
@@ -4010,7 +4002,7 @@ TEST_F(StyleEngineContainerQueryTest,
   //
   // See implementation of `NodeLayoutUpgrade::ShouldUpgrade` for more
   // information.
-  GetDocument().UpdateStyleAndLayoutTreeForNode(a);
+  GetDocument().UpdateStyleAndLayoutTreeForNode(a, DocumentUpdateReason::kTest);
   EXPECT_FALSE(GetStyleEngine().StyleAffectedByLayout());
   EXPECT_FALSE(GetDocument().View()->NeedsLayout());
   EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*a));
@@ -4255,6 +4247,42 @@ TEST_F(StyleEngineTest, NoFastRejectForMultipleIs) {
   EXPECT_EQ(0u, stats->rules_fast_rejected);
 }
 
+TEST_F(StyleEngineTest, ScrollbarPartPseudoDoesNotMatchElement) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      .parent ::-webkit-scrollbar-button { background-color: red; }
+      .parent ::-webkit-scrollbar-corner { background-color: red; }
+      .parent ::-webkit-scrollbar-thumb { background-color: red; }
+      .parent ::-webkit-scrollbar-track { background-color: red; }
+      .parent ::-webkit-scrollbar-track-piece { background-color: red; }
+    </style>
+    <div class="parent">
+      <div class="child"></div>
+    </div>
+  )HTML");
+
+  UpdateAllLifecyclePhases();
+
+  StyleEngine& engine = GetStyleEngine();
+  // Even if the Stats() were already enabled, the following resets it to 0.
+  engine.SetStatsEnabled(true);
+
+  StyleResolverStats* stats = engine.Stats();
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(0u, stats->rules_matched);
+
+  Element* div = GetDocument().QuerySelector(".child");
+  ASSERT_TRUE(div);
+  div->SetInlineStyleProperty(CSSPropertyID::kColor, "green");
+
+  GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
+  GetStyleEngine().RecalcStyle();
+
+  // We have one UA rule for <div> that matches.
+  // None of the ::-webkit-scrollbar-* rules should match.
+  EXPECT_EQ(1u, stats->rules_matched);
+}
+
 TEST_F(StyleEngineTest, AudioUAStyleNameSpace) {
   GetDocument().body()->setInnerHTML(R"HTML(
     <audio id="html-audio"></audio>
@@ -4351,6 +4379,30 @@ TEST_F(StyleEngineTest, AtContainerUseCount) {
   )HTML");
   UpdateAllLifecyclePhases();
   EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kCSSAtRuleContainer));
+}
+
+TEST_F(StyleEngineTest, StyleQueryUseCount) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      @container (width = 200px) {
+        body { background: red; }
+      }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kCSSAtRuleContainer));
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kCSSStyleContainerQuery));
+
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      @container ((width > 0px) and style(--foo: bar)) {
+        body { background: lime; }
+      }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kCSSAtRuleContainer));
+  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kCSSStyleContainerQuery));
 }
 
 TEST_F(StyleEngineTest, NestingUseCount) {
@@ -5888,49 +5940,245 @@ TEST_F(StyleEngineTest, BorderWidthsAreRecalculatedWhenZoomChanges) {
   checkBorderWidth(1.0f);
 }
 
-TEST_F(StyleEngineTest, SubsequentSiblingRecalcFlatTree) {
-  GetDocument()
-      .documentElement()
-      ->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
-    <div id="host">
-      <template shadowroot=open>
-        <slot name=a></slot>
-      </template>
-      <div slot=a id=target></div>
-      <div></div>
-      <div></div>
-      <div></div>
-      <div></div>
-      <div slot=a></div>
-      <div></div>
-      <div></div>
-      <div></div>
-      <div></div>
-      <div slot=a></div>
-    </div>
-  )HTML");
+TEST_F(StyleEngineTest, AnimationDelayShorthandFlags) {
+  String css = "animation-delay:1s";
+  {
+    ScopedCSSAnimationDelayStartEndForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(1u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelay));
+  }
+  {
+    ScopedCSSAnimationDelayStartEndForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(2u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelayStart));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelayEnd));
+  }
+}
 
-  UpdateAllLifecyclePhasesForTest();
+TEST_F(StyleEngineTest, AnimationDelayStartEndFlags) {
+  String css = "animation-delay-start:1s;animation-delay-end:1s";
+  {
+    ScopedCSSAnimationDelayStartEndForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(0u, set->PropertyCount());
+  }
+  {
+    ScopedCSSAnimationDelayStartEndForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(2u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelayStart));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelayEnd));
+  }
+}
 
-  unsigned before_count = GetStyleEngine().StyleForElementCount();
+TEST_F(StyleEngineTest, AnimationShorthandFlags) {
+  String css = "animation: foo 1s";
+  {
+    ScopedScrollTimelineForTest scroll_timeline_enabled(false);
+    ScopedCSSAnimationDelayStartEndForTest start_end_enabled(false);
+    ScopedScrollTimelineCurrentTimeForTest current_time_enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(8u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDuration));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationTimingFunction));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelay));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationIterationCount));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDirection));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationFillMode));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationPlayState));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationName));
+  }
+  {
+    ScopedScrollTimelineForTest scroll_timeline_enabled(true);
+    ScopedCSSAnimationDelayStartEndForTest start_end_enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(11u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDuration));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationTimingFunction));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelay));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationIterationCount));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDirection));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationFillMode));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationPlayState));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationTimeline));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationRangeStart));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationRangeEnd));
+  }
+  {
+    ScopedScrollTimelineForTest scroll_timeline_enabled(true);
+    ScopedCSSAnimationDelayStartEndForTest start_end_enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(12u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDuration));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationTimingFunction));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelayStart));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDelayEnd));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationIterationCount));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationDirection));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationFillMode));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationPlayState));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationTimeline));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationRangeStart));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kAnimationRangeEnd));
+  }
+  // Note that the combination ScrollTimeline=false and
+  // CSSAnimationDelayStartEnd=true is not supported, via 'depends_on'
+  // in runtime_enabled_features.json5.
+  EXPECT_FALSE(!RuntimeEnabledFeatures::ScrollTimelineEnabled() &&
+               RuntimeEnabledFeatures::CSSAnimationDelayStartEndEnabled());
+}
 
-  Element* target = GetElementById("target");
-  ASSERT_TRUE(target);
+TEST_F(StyleEngineTest, ScrollTimelineAttachmentFlags) {
+  String css = "scroll-timeline-attachment: initial";
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(0u, set->PropertyCount());
+  }
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(1u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineAttachment));
+  }
+}
 
-  target->SetInlineStyleProperty(CSSPropertyID::kScrollTimelineName, "foo");
-  UpdateAllLifecyclePhasesForTest();
+TEST_F(StyleEngineTest, ViewTimelineAttachmentFlags) {
+  String css = "view-timeline-attachment: initial";
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(0u, set->PropertyCount());
+  }
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(1u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineAttachment));
+  }
+}
 
-  unsigned after_count = GetStyleEngine().StyleForElementCount();
+TEST_F(StyleEngineTest, ScrollTimelineShorthandFlagsInitial) {
+  String css = "scroll-timeline: initial";
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(2u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineAxis));
+  }
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(3u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineAxis));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineAttachment));
+  }
+}
 
-  // Only the slotted elements should get style recalc.
-  EXPECT_EQ(3u, after_count - before_count);
+TEST_F(StyleEngineTest, ScrollTimelineShorthandFlags) {
+  String css = "scroll-timeline: --foo block defer";
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(0u, set->PropertyCount());
+  }
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(3u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineAxis));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kScrollTimelineAttachment));
+  }
+}
+
+TEST_F(StyleEngineTest, ViewTimelineShorthandFlagsInitial) {
+  String css = "view-timeline: initial";
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(2u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineAxis));
+  }
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(3u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineAxis));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineAttachment));
+  }
+}
+
+TEST_F(StyleEngineTest, ViewTimelineShorthandFlags) {
+  String css = "view-timeline: --foo block defer";
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(false);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(0u, set->PropertyCount());
+  }
+  {
+    ScopedScrollTimelineAttachmentForTest enabled(true);
+    const CSSPropertyValueSet* set =
+        css_test_helpers::ParseDeclarationBlock(css);
+    ASSERT_TRUE(set);
+    EXPECT_EQ(3u, set->PropertyCount());
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineName));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineAxis));
+    EXPECT_TRUE(set->HasProperty(CSSPropertyID::kViewTimelineAttachment));
+  }
 }
 
 TEST_F(StyleEngineTest, InitialStyle_Recalc) {
   GetDocument().body()->setInnerHTML(R"HTML(
     <style>
-      #target { background-color: green; }
-      #target:initial { background-color: red; }
+      #target {
+        background-color: green;
+        @starting-style { background-color: red; }
+      }
     </style>
     <div id="target"></div>
   )HTML");
@@ -5947,12 +6195,12 @@ TEST_F(StyleEngineTest, InitialStyle_Recalc) {
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_EQ(GetStyleEngine().StyleForElementCount() - before_count, 1u)
-      << "The style recalc should not do a separate :initial pass since the "
-         "element already has a style";
+      << "The style recalc should not do a separate @starting-style pass since "
+         "the element already has a style";
   EXPECT_EQ(target->ComputedStyleRef().VisitedDependentColor(
                 GetCSSPropertyBackgroundColor()),
             green)
-      << "Make sure :initial does not match for the second pass";
+      << "Make sure @starting-style rules do not apply for the second pass";
   EXPECT_EQ(
       target->ComputedStyleRef().VisitedDependentColor(GetCSSPropertyColor()),
       lime)
@@ -5962,8 +6210,10 @@ TEST_F(StyleEngineTest, InitialStyle_Recalc) {
 TEST_F(StyleEngineTest, InitialStyle_FromDisplayNone) {
   GetDocument().body()->setInnerHTML(R"HTML(
     <style>
-      #target { background-color: green; }
-      #target:initial { background-color: red; }
+      #target {
+        background-color: green;
+        @starting-style { background-color: red; }
+      }
     </style>
     <div id="target" style="display:none"></div>
   )HTML");
@@ -5980,11 +6230,11 @@ TEST_F(StyleEngineTest, InitialStyle_FromDisplayNone) {
 
   EXPECT_EQ(GetStyleEngine().StyleForElementCount() - before_count, 2u)
       << "The style recalc needs to do two passes because the element was "
-         "display:none and :initial styles are matching";
+         "display:none and @starting-style styles are matching";
   EXPECT_EQ(target->ComputedStyleRef().VisitedDependentColor(
                 GetCSSPropertyBackgroundColor()),
             green)
-      << "Make sure :initial does not match for the second pass";
+      << "Make sure @starting-style do not apply for the second pass";
 }
 
 TEST_F(StyleEngineTest, InitialStyleCount_EnsureComputedStyle) {
@@ -5993,8 +6243,8 @@ TEST_F(StyleEngineTest, InitialStyleCount_EnsureComputedStyle) {
       #target {
         background-color: green;
         transition: background-color 100s step-end;
+        @starting-style { background-color: red; }
       }
-      #target:initial { background-color: red; }
     </style>
     <div id="target" style="display:none"></div>
   )HTML");
@@ -6013,12 +6263,12 @@ TEST_F(StyleEngineTest, InitialStyleCount_EnsureComputedStyle) {
   ASSERT_TRUE(none_style);
 
   EXPECT_EQ(GetStyleEngine().StyleForElementCount() - before_count, 1u)
-      << "No :initial pass for EnsureComputedStyle";
+      << "No @starting-style pass for EnsureComputedStyle";
 
   EXPECT_EQ(target->ComputedStyleRef().VisitedDependentColor(
                 GetCSSPropertyBackgroundColor()),
             green)
-      << "Transitions are not started and :initial does not apply in "
+      << "Transitions are not started and @starting-style does not apply in "
          "display:none";
 }
 

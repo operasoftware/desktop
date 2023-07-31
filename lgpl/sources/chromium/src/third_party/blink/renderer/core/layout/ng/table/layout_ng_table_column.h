@@ -41,6 +41,8 @@ class CORE_EXPORT LayoutNGTableColumn : public LayoutBox {
 
   LayoutSize Size() const override;
 
+  LayoutPoint Location() const override;
+
   // LayoutObject methods start.
 
   const char* GetName() const override {
@@ -70,6 +72,11 @@ class CORE_EXPORT LayoutNGTableColumn : public LayoutBox {
     return false;
   }
 
+  void SetColumnIndex(wtf_size_t column_idx) {
+    NOT_DESTROYED();
+    column_idx_ = column_idx;
+  }
+
  protected:
   // Required by LayoutBox, but not used.
   MinMaxSizes ComputeIntrinsicLogicalWidths() const override {
@@ -81,6 +88,12 @@ class CORE_EXPORT LayoutNGTableColumn : public LayoutBox {
   bool IsOfType(LayoutObjectType type) const override {
     NOT_DESTROYED();
     return type == kLayoutObjectTableCol || LayoutBox::IsOfType(type);
+  }
+
+  // Table row doesn't paint background by itself.
+  bool ComputeCanCompositeBackgroundAttachmentFixed() const override {
+    NOT_DESTROYED();
+    return false;
   }
 
  private:
@@ -110,13 +123,14 @@ class CORE_EXPORT LayoutNGTableColumn : public LayoutBox {
  private:
   unsigned span_ = 1;
   LayoutObjectChildList children_;
+  wtf_size_t column_idx_;
 };
 
 // wtf/casting.h helper.
 template <>
 struct DowncastTraits<LayoutNGTableColumn> {
   static bool AllowFrom(const LayoutObject& object) {
-    return object.IsLayoutTableCol() && object.IsLayoutNGObject();
+    return object.IsLayoutTableCol();
   }
 };
 

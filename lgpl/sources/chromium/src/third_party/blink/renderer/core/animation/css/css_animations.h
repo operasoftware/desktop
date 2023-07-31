@@ -85,7 +85,8 @@ class CORE_EXPORT CSSAnimations final {
                                        Element&,
                                        const ComputedStyleBuilder&,
                                        const ComputedStyle* parent_style,
-                                       StyleResolver*);
+                                       StyleResolver*,
+                                       bool can_trigger_animations);
   static void CalculateCompositorAnimationUpdate(
       CSSAnimationUpdate&,
       const Element& animating_element,
@@ -108,7 +109,8 @@ class CORE_EXPORT CSSAnimations final {
   static void CalculateTransitionUpdate(CSSAnimationUpdate&,
                                         Element& animating_element,
                                         const ComputedStyleBuilder&,
-                                        const ComputedStyle* old_style);
+                                        const ComputedStyle* old_style,
+                                        bool can_trigger_animations);
 
   static void SnapshotCompositorKeyframes(Element&,
                                           CSSAnimationUpdate&,
@@ -139,6 +141,8 @@ class CORE_EXPORT CSSAnimations final {
   void Trace(Visitor*) const;
 
  private:
+  friend class CSSAnimationsTest;
+
   class RunningAnimation final : public GarbageCollected<RunningAnimation> {
    public:
     RunningAnimation(Animation* animation, NewCSSAnimation new_animation)
@@ -148,19 +152,16 @@ class CORE_EXPORT CSSAnimations final {
           specified_timing(new_animation.timing),
           style_rule(new_animation.style_rule),
           style_rule_version(new_animation.style_rule_version),
-          play_state_list(new_animation.play_state_list) {
-      if (animation->timeline() && animation->timeline()->IsViewTimeline()) {
-        scroll_offsets =
-            To<ViewTimeline>(animation->timeline())->GetResolvedScrollOffsets();
-      }
-    }
+          play_state_list(new_animation.play_state_list) {}
 
-    AnimationTimeline* Timeline() const { return animation->timeline(); }
+    AnimationTimeline* Timeline() const {
+      return animation->TimelineInternal();
+    }
     const absl::optional<TimelineOffset>& RangeStart() const {
-      return animation->GetRangeStart();
+      return animation->GetRangeStartInternal();
     }
     const absl::optional<TimelineOffset>& RangeEnd() const {
-      return animation->GetRangeEnd();
+      return animation->GetRangeEndInternal();
     }
 
     void Update(UpdatedCSSAnimation update) {
@@ -169,11 +170,6 @@ class CORE_EXPORT CSSAnimations final {
       style_rule_version = update.style_rule_version;
       play_state_list = update.play_state_list;
       specified_timing = update.specified_timing;
-      if (update.animation->timeline() &&
-          update.animation->timeline()->IsViewTimeline()) {
-        scroll_offsets = To<ViewTimeline>(update.animation->timeline())
-                             ->GetResolvedScrollOffsets();
-      }
     }
 
     void Trace(Visitor* visitor) const {
@@ -188,7 +184,6 @@ class CORE_EXPORT CSSAnimations final {
     Member<StyleRuleKeyframes> style_rule;
     unsigned style_rule_version;
     Vector<EAnimPlayState> play_state_list;
-    absl::optional<ScrollTimeline::ScrollOffsets> scroll_offsets;
   };
 
   struct RunningTransition : public GarbageCollected<RunningTransition> {
@@ -208,26 +203,55 @@ class CORE_EXPORT CSSAnimations final {
     DISALLOW_NEW();
 
    public:
-    void SetScrollTimeline(const ScopedCSSName& name, CSSScrollTimeline*);
+    void SetScrollTimeline(const ScopedCSSName& name, ScrollTimeline*);
     const CSSScrollTimelineMap& GetScrollTimelines() const {
       return scroll_timelines_;
     }
-    void SetViewTimeline(const ScopedCSSName& name, CSSViewTimeline*);
+    void SetViewTimeline(const ScopedCSSName& name, ViewTimeline*);
     const CSSViewTimelineMap& GetViewTimelines() const {
       return view_timelines_;
     }
+
+    void SetDeferredTimeline(const ScopedCSSName& name, DeferredTimeline*);
+    const CSSDeferredTimelineMap& GetDeferredTimelines() const {
+      return deferred_timelines_;
+    }
+
+    void SetTimelineAttachment(ScrollSnapshotTimeline*, DeferredTimeline*);
+    DeferredTimeline* GetTimelineAttachment(ScrollSnapshotTimeline*);
+    const TimelineAttachmentMap& GetTimelineAttachments() const {
+      return timeline_attachments_;
+    }
+
+    // TODO(crbug.com/1446702): Remove scroll/view-timeline-attachment.
+    void SetAttachingTimeline(ScrollTimelineAttachment*, ScrollTimeline*);
+    ScrollTimeline* GetAttachingTimeline(ScrollTimelineAttachment*);
+    const AttachingTimelineMap& GetAttachingTimelines() const {
+      return attaching_timelines_;
+    }
+
     bool IsEmpty() const {
-      return scroll_timelines_.empty() && view_timelines_.empty();
+      return scroll_timelines_.empty() && view_timelines_.empty() &&
+             deferred_timelines_.empty() && timeline_attachments_.empty() &&
+             attaching_timelines_.empty();
     }
     void Clear() {
       scroll_timelines_.clear();
       view_timelines_.clear();
+      deferred_timelines_.clear();
+      timeline_attachments_.clear();
+      attaching_timelines_.clear();
     }
     void Trace(Visitor*) const;
 
    private:
     CSSScrollTimelineMap scroll_timelines_;
     CSSViewTimelineMap view_timelines_;
+    CSSDeferredTimelineMap deferred_timelines_;
+    TimelineAttachmentMap timeline_attachments_;
+
+    // TODO(crbug.com/1446702): Remove scroll/view-timeline-attachment.
+    AttachingTimelineMap attaching_timelines_;
   };
 
   TimelineData timeline_data_;
@@ -283,7 +307,8 @@ class CORE_EXPORT CSSAnimations final {
   static void CalculateTransitionUpdateForPropertyHandle(
       TransitionUpdateState&,
       const PropertyHandle&,
-      size_t transition_index);
+      size_t transition_index,
+      bool animate_all);
 
   static void CalculateAnimationActiveInterpolations(
       CSSAnimationUpdate&,
@@ -298,6 +323,9 @@ class CORE_EXPORT CSSAnimations final {
   static void CalculateViewTimelineUpdate(CSSAnimationUpdate&,
                                           Element& animating_element,
                                           const ComputedStyleBuilder&);
+  static void CalculateDeferredTimelineUpdate(CSSAnimationUpdate&,
+                                              Element& animating_element,
+                                              const ComputedStyleBuilder&);
 
   static CSSScrollTimelineMap CalculateChangedScrollTimelines(
       Element& animating_element,
@@ -307,29 +335,72 @@ class CORE_EXPORT CSSAnimations final {
       Element& animating_element,
       const CSSViewTimelineMap* existing_view_timelines,
       const ComputedStyleBuilder&);
+  static CSSDeferredTimelineMap CalculateChangedDeferredTimelines(
+      Element& animating_element,
+      const CSSDeferredTimelineMap* existing_deferred_timelines,
+      const ComputedStyleBuilder&);
+
+  template <typename MapType>
+  static const MapType* GetExistingTimelines(const TimelineData*);
+  template <typename MapType>
+  static const MapType* GetChangedTimelines(const CSSAnimationUpdate*);
+
+  // Invokes `callback` for each timeline, taking both existing timelines
+  // and pending changes into account.
+  template <typename TimelineType, typename CallbackFunc>
+  static void ForEachTimeline(const TimelineData*,
+                              const CSSAnimationUpdate*,
+                              CallbackFunc);
+
+  template <typename TimelineType>
+  static void CalculateChangedTimelineAttachments(
+      Element& animating_element,
+      const TimelineData*,
+      const CSSAnimationUpdate&,
+      const TimelineAttachmentMap* existing_attachments,
+      TimelineAttachmentMap& result);
+
+  static void CalculateTimelineAttachmentUpdate(CSSAnimationUpdate&,
+                                                Element& animating_element);
+
+  // TODO(crbug.com/1446702): Remove scroll/view-timeline-attachment.
+  template <typename TimelineType>
+  static void CollectTimelinesWithAttachmentInto(
+      const TimelineData*,
+      const CSSAnimationUpdate*,
+      TimelineAttachment,
+      CSSTimelineMap<TimelineType>& result);
+
+  // TODO(crbug.com/1446702): Remove scroll/view-timeline-attachment.
+  template <typename TimelineType>
+  static void CalculateChangedAttachingTimelines(
+      const CSSTimelineMap<TimelineType>& ancestor_attached_timelines,
+      const CSSTimelineMap<TimelineType>& deferred_timelines,
+      const AttachingTimelineMap* existing_attaching_timelines,
+      AttachingTimelineMap& changed_attaching_timelines);
+
+  // TODO(crbug.com/1446702): Remove scroll/view-timeline-attachment.
+  static void CalculateAttachingTimelinesUpdate(CSSAnimationUpdate&,
+                                                Element& animating_element);
 
   static const TimelineData* GetTimelineData(const Element&);
 
-  static ScrollTimeline* FindTimelineForNode(const ScopedCSSName& name,
-                                             Node*,
-                                             const CSSAnimationUpdate*);
-  static CSSScrollTimeline* FindScrollTimelineForElement(
-      const ScopedCSSName&,
-      const CSSAnimationUpdate*,
-      const TimelineData*);
-  static CSSViewTimeline* FindViewTimelineForElement(const ScopedCSSName& name,
-                                                     const CSSAnimationUpdate*,
-                                                     const TimelineData*);
+  static ScrollSnapshotTimeline* FindTimelineForNode(const ScopedCSSName& name,
+                                                     Node*,
+                                                     const CSSAnimationUpdate*);
   template <typename TimelineType>
-  static TimelineType* FindTimelineForElement(
-      const ScopedCSSName& name,
-      const CSSTimelineMap<TimelineType>* existing_timelines,
-      const CSSTimelineMap<TimelineType>* changed_timelines);
+  static TimelineType* FindTimelineForElement(const ScopedCSSName& name,
+                                              const TimelineData*,
+                                              const CSSAnimationUpdate*);
 
-  static ScrollTimeline* FindPreviousSiblingAncestorTimeline(
+  static ScrollSnapshotTimeline* FindAncestorTimeline(
       const ScopedCSSName& name,
       Node*,
       const CSSAnimationUpdate*);
+
+  static DeferredTimeline* FindDeferredTimeline(const ScopedCSSName& name,
+                                                Element*,
+                                                const CSSAnimationUpdate*);
 
   static AnimationTimeline* ComputeTimeline(
       Element*,

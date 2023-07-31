@@ -29,7 +29,6 @@ export function createCupsPrinterInfo(
     },
     printerProtocol: 'ipp',
     printerQueue: 'moreinfohere',
-    printerStatus: '',
     printServerUri: '',
   };
   return printer;
@@ -62,7 +61,6 @@ export function createPrinterListEntry(
       },
       printerProtocol: 'ipp',
       printerQueue: 'moreinfohere',
-      printerStatus: '',
       printServerUri: '',
     },
     printerType: printerType,

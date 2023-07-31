@@ -42,6 +42,11 @@
 #include "media/fuchsia/video/fuchsia_decoder_factory.h"
 #endif
 
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#include "base/features/feature_utils.h"
+#include "base/features/submodule_features.h"
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+
 using DecoderDetails = blink::VideoDecoderBroker::DecoderDetails;
 
 namespace WTF {
@@ -219,6 +224,16 @@ class MediaVideoTaskWrapper {
           /*allow_overlays=*/false);
 #endif
     }
+
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+    if (base::IsFeatureEnabled(base::kFeaturePlatformH264DecoderInGpu) &&
+        hardware_preference_ == HardwarePreference::kPreferSoftware) {
+      auto mojo_decoder_factory = std::make_unique<media::MojoDecoderFactory>(
+          media_interface_factory_.get());
+      mojo_decoder_factory->set_require_software_decoder();
+      external_decoder_factory = std::move(mojo_decoder_factory);
+    }
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
     if (hardware_preference_ == HardwarePreference::kPreferHardware) {
       decoder_factory_ = std::move(external_decoder_factory);

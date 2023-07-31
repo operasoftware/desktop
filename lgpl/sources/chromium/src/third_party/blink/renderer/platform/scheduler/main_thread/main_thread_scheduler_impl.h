@@ -91,6 +91,25 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
       public RenderWidgetSignals::Observer,
       public base::trace_event::TraceLog::AsyncEnabledStateObserver {
  public:
+  // Tracks prioritization of the next frame. This is used in conjunction with
+  // `UseCase` and other signals to compute the priority of the compositor task
+  // queue.
+  enum class RenderingPrioritizationState {
+    // No prioritization for a specific frame.
+    kNone,
+    // A frame has not been produced after a certain threshold, so prioritize
+    // the next frame (but don't block input).
+    kRenderingStarved,
+    // The total duration of render blocking tasks since the last frame exceeds
+    // a certain threshold, so prioritize the next frame (matching
+    // render-blocking priority).
+    kRenderingStarvedByRenderBlocking,
+    // The user is waiting for the result of a discrete input event, e.g. clicks
+    // or typing. The next frame is prioritized at highest priority (matching
+    // input).
+    kWaitingForInputResponse,
+  };
+
   // Don't use except for tracing.
   struct TaskDescriptionForTracing {
     TaskType task_type;
@@ -104,30 +123,6 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
 
   struct SchedulingSettings {
     SchedulingSettings();
-
-    // Background page priority experiment (crbug.com/848835).
-    bool low_priority_background_page;
-    bool best_effort_background_page;
-
-    // Task and subframe priority experiment (crbug.com/852380).
-    bool low_priority_subframe;
-    bool low_priority_throttleable;
-    bool low_priority_subframe_throttleable;
-    bool low_priority_hidden_frame;
-
-    // Ads priority experiment (crbug.com/856150).
-    bool low_priority_ad_frame;
-    bool best_effort_ad_frame;
-
-    // Origin type priority experiment (crbug.com/856158).
-    bool low_priority_cross_origin;
-
-    // Prioritize compositing and loading tasks until first contentful paint.
-    // (crbug.com/971191)
-    bool prioritize_compositing_and_loading_during_early_loading;
-
-    // Prioritise one BeginMainFrame after an input task.
-    bool prioritize_compositing_after_input;
 
     // If enabled, base::SingleThreadTaskRunner::GetCurrentDefault() and
     // base::SequencedTaskRunner::GetCurrentDefault() returns the current active
@@ -162,12 +157,11 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   ~MainThreadSchedulerImpl() override;
 
   // WebThreadScheduler implementation:
+  scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> DeprecatedDefaultTaskRunner()
+      override;
   std::unique_ptr<MainThread> CreateMainThread() override;
   std::unique_ptr<WebAgentGroupScheduler> CreateWebAgentGroupScheduler()
-      override;
-  // Note: this is also shared by the ThreadScheduler interface.
-  scoped_refptr<base::SingleThreadTaskRunner> NonWakingTaskRunner() override;
-  scoped_refptr<base::SingleThreadTaskRunner> DeprecatedDefaultTaskRunner()
       override;
   void SetRendererHidden(bool hidden) override;
   void SetRendererBackgrounded(bool backgrounded) override;
@@ -175,23 +169,26 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   void PauseTimersForAndroidWebView() override;
   void ResumeTimersForAndroidWebView() override;
 #endif
-  bool ShouldYieldForHighPriorityWork() override;
-  void AddTaskObserver(base::TaskObserver* task_observer) override;
-  void RemoveTaskObserver(base::TaskObserver* task_observer) override;
-  void Shutdown() override;
-  void AddRAILModeObserver(RAILModeObserver* observer) override;
-  void RemoveRAILModeObserver(RAILModeObserver const* observer) override;
   void SetRendererProcessType(WebRendererProcessType type) override;
-  Vector<WebInputEventAttribution> GetPendingUserInputInfo(
-      bool include_continuous) const override;
-  blink::MainThreadScheduler* ToMainThreadScheduler() override;
+
+  // WebThreadScheduler and ThreadScheduler implementation:
+  void Shutdown() override;
 
   // MainThreadScheduler implementation:
+  scoped_refptr<base::SingleThreadTaskRunner> NonWakingTaskRunner() override;
   [[nodiscard]] std::unique_ptr<MainThreadScheduler::RendererPauseHandle>
   PauseScheduler() override;
   v8::Isolate* Isolate() override;
+  AgentGroupScheduler* CreateAgentGroupScheduler() override;
+  AgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
+  void AddRAILModeObserver(RAILModeObserver* observer) override;
+  void RemoveRAILModeObserver(RAILModeObserver const* observer) override;
+  Vector<WebInputEventAttribution> GetPendingUserInputInfo(
+      bool include_continuous) const override;
+  void StartIdlePeriodForTesting() override;
 
   // ThreadScheduler implementation:
+  bool ShouldYieldForHighPriorityWork() override;
   void PostIdleTask(const base::Location&, Thread::IdleTask) override;
   void PostNonNestableIdleTask(const base::Location&,
                                Thread::IdleTask) override;
@@ -200,11 +197,24 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
                            Thread::IdleTask) override;
   scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> CleanupTaskRunner() override;
-  scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
-  AgentGroupScheduler* CreateAgentGroupScheduler() override;
-  AgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
-  void SetV8Isolate(v8::Isolate* isolate) override;
   base::TimeTicks MonotonicallyIncreasingVirtualTime() override;
+  void AddTaskObserver(base::TaskObserver* task_observer) override;
+  void RemoveTaskObserver(base::TaskObserver* task_observer) override;
+  void SetV8Isolate(v8::Isolate* isolate) override;
+  TaskAttributionTracker* GetTaskAttributionTracker() override;
+  void InitializeTaskAttributionTracker(
+      std::unique_ptr<TaskAttributionTracker> tracker) override;
+  blink::MainThreadScheduler* ToMainThreadScheduler() override;
+
+  // ThreadSchedulerBase implementation:
+  scoped_refptr<base::SingleThreadTaskRunner> ControlTaskRunner() override;
+  const base::TickClock* GetTickClock() const override;
+  MainThreadSchedulerHelper& GetHelper() override { return helper_; }
+
+  // RenderWidgetSignals::Observer implementation:
+  void SetAllRenderWidgetsHidden(bool hidden) override;
+  void SetHasVisibleRenderWidgetWithTouchHandler(
+      bool has_visible_render_widget_with_touch_handler) override;
 
   scoped_refptr<WidgetScheduler> CreateWidgetScheduler();
   void WillBeginFrame(const viz::BeginFrameArgs& args);
@@ -240,36 +250,8 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
 
   scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner();
 
-  // The following functions are defined in both WebThreadScheduler and
-  // ThreadScheduler, and have the same function signatures -- see above.
-  // This class implements those functions for both base classes.
-  //
-  // void Shutdown() override;
-  //
-  // TODO(yutak): Reduce the overlaps and simplify.
-
-  // RenderWidgetSignals::Observer implementation:
-  void SetAllRenderWidgetsHidden(bool hidden) override;
-  void SetHasVisibleRenderWidgetWithTouchHandler(
-      bool has_visible_render_widget_with_touch_handler) override;
-
-  // ThreadSchedulerImpl implementation:
-  scoped_refptr<base::SingleThreadTaskRunner> ControlTaskRunner() override;
-  const base::TickClock* GetTickClock() const override;
-  MainThreadSchedulerHelper& GetHelper() override { return helper_; }
-
   scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner();
   base::TimeTicks NowTicks() const;
-
-  TaskAttributionTracker* GetTaskAttributionTracker() override {
-    return main_thread_only().task_attribution_tracker.get();
-  }
-
-  void InitializeTaskAttributionTracker(
-      std::unique_ptr<TaskAttributionTracker> tracker) override {
-    DCHECK(!main_thread_only().task_attribution_tracker);
-    main_thread_only().task_attribution_tracker = std::move(tracker);
-  }
 
   // Returns a new task queue created with given params.
   scoped_refptr<MainThreadTaskQueue> NewTaskQueue(
@@ -324,9 +306,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   MainThreadSchedulerHelper* GetSchedulerHelperForTesting();
   IdleTimeEstimator* GetIdleTimeEstimatorForTesting();
   base::TimeTicks CurrentIdleTaskDeadlineForTesting() const;
-  void RunIdleTasksForTesting(base::OnceClosure callback);
-  void EndIdlePeriodForTesting(base::OnceClosure callback,
-                               base::TimeTicks time_remaining);
+  void EndIdlePeriodForTesting(base::TimeTicks time_remaining);
   bool PolicyNeedsUpdateForTesting();
 
   std::unique_ptr<CPUTimeBudgetPool> CreateCPUTimeBudgetPoolForTesting(
@@ -336,12 +316,17 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   virtual void OnMainFramePaint();
 
   void OnShutdownTaskQueue(const scoped_refptr<MainThreadTaskQueue>& queue);
+  void OnDetachTaskQueue(MainThreadTaskQueue&);
 
+  // TODO(crbug.com/1143007): Pass `queue` by reference now that the queue is
+  // guaranteed to be alive.
   void OnTaskStarted(
       MainThreadTaskQueue* queue,
       const base::sequence_manager::Task& task,
       const base::sequence_manager::TaskQueue::TaskTiming& task_timing);
 
+  // TODO(crbug.com/1143007): Pass `queue` by reference now that the queue is
+  // guaranteed to be alive.
   void OnTaskCompleted(
       base::WeakPtr<MainThreadTaskQueue> queue,
       const base::sequence_manager::Task& task,
@@ -371,11 +356,6 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     return main_thread_only().compositor_priority;
   }
 
-  bool should_prioritize_loading_with_compositing() const {
-    return main_thread_only()
-        .current_policy.should_prioritize_loading_with_compositing();
-  }
-
   bool main_thread_compositing_is_fast() const {
     return main_thread_only().main_thread_compositing_is_fast;
   }
@@ -385,7 +365,7 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   }
 
  protected:
-  // ThreadSchedulerImpl implementation:
+  // ThreadSchedulerBase implementation:
   WTF::Vector<base::OnceClosure>& GetOnTaskCompletionCallbacks() override;
 
   scoped_refptr<MainThreadTaskQueue> ControlTaskQueue();
@@ -479,13 +459,6 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     bool& frozen_when_backgrounded() { return frozen_when_backgrounded_; }
     bool frozen_when_backgrounded() const { return frozen_when_backgrounded_; }
 
-    bool& should_prioritize_loading_with_compositing() {
-      return should_prioritize_loading_with_compositing_;
-    }
-    bool should_prioritize_loading_with_compositing() const {
-      return should_prioritize_loading_with_compositing_;
-    }
-
     bool& should_freeze_compositor_task_queue() {
       return should_freeze_compositor_task_queue_;
     }
@@ -517,8 +490,6 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     bool operator==(const Policy& other) const {
       return rail_mode_ == other.rail_mode_ &&
              frozen_when_backgrounded_ == other.frozen_when_backgrounded_ &&
-             should_prioritize_loading_with_compositing_ ==
-                 other.should_prioritize_loading_with_compositing_ &&
              should_freeze_compositor_task_queue_ ==
                  other.should_freeze_compositor_task_queue_ &&
              should_defer_task_queues_ == other.should_defer_task_queues_ &&
@@ -536,7 +507,6 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
    private:
     RAILMode rail_mode_{RAILMode::kAnimation};
     bool frozen_when_backgrounded_{false};
-    bool should_prioritize_loading_with_compositing_{false};
     bool should_freeze_compositor_task_queue_{false};
     bool should_defer_task_queues_{false};
     bool should_pause_task_queues_{false};
@@ -582,6 +552,10 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   void WriteIntoTraceLocked(perfetto::TracedValue context,
                             base::TimeTicks optional_now) const;
   void CreateTraceEventObjectSnapshotLocked() const;
+
+  // Shuts down empty detached task queues, which are being kept alive to run
+  // pending tasks.
+  void ShutdownEmptyDetachedTaskQueues();
 
   static bool ShouldPrioritizeInputEvent(const WebInputEvent& web_input_event);
 
@@ -685,6 +659,10 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
   // Computes the priority for compositing based on the current use case.
   // Returns nullopt if the use case does not need to set the priority.
   absl::optional<TaskPriority> ComputeCompositorPriorityFromUseCase() const;
+
+  // Computes the compositor task queue priority for the next main frame based
+  // on the current `RenderingPrioritizationState`.
+  absl::optional<TaskPriority> ComputeCompositorPriorityForMainFrame() const;
 
   static void RunIdleTask(Thread::IdleTask, base::TimeTicks deadline);
 
@@ -833,12 +811,6 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
                std::vector<scoped_refptr<MainThreadTaskQueue>>>
         running_queues;
 
-    // High-priority for compositing events after input. This will cause
-    // compositing events get a higher priority until the start of the next
-    // animation frame.
-    TraceableState<bool, TracingCategory::kDefault>
-        prioritize_compositing_after_input;
-
     // List of callbacks to execute after the current task.
     WTF::Vector<base::OnceClosure> on_task_completion_callbacks;
 
@@ -849,14 +821,19 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     // After 100ms with nothing running from this queue, the compositor will
     // be set to kVeryHighPriority until a frame is run.
     TraceableState<TaskPriority, TracingCategory::kDefault> compositor_priority;
-    base::TimeTicks last_frame_time;
-    bool should_prioritize_compositor_task_queue_after_delay;
-    bool have_seen_a_frame;
 
+    TraceableState<RenderingPrioritizationState, TracingCategory::kDefault>
+        main_frame_prioritization_state;
+    // Signals needed to compute the `main_frame_prioritization_state`.
+    base::TimeTicks last_frame_time;
+    bool is_current_task_main_frame = false;
     // Set when a discrete input event is handled on the main thread. This is
     // used by the kPrioritizeCompositingAfterInput experiment to determine if
     // the next frame should be prioritized.
-    bool did_handle_discrete_input_event = false;
+    bool is_current_task_discrete_input = false;
+    // Cumulative non-continuous time spent running render-blocking tasks since
+    // the last frame.
+    base::TimeDelta rendering_blocking_duration_since_last_frame;
 
     WTF::Vector<AgentGroupSchedulerScope> agent_group_scheduler_scope_stack;
 
@@ -865,6 +842,9 @@ class PLATFORM_EXPORT MainThreadSchedulerImpl
     std::unique_ptr<TaskAttributionTracker> task_attribution_tracker;
     Persistent<HeapHashSet<WeakMember<AgentGroupSchedulerImpl>>>
         agent_group_schedulers;
+    // Task queues that have been detached from their scheduler and may have
+    // pending tasks that need to run.
+    WTF::HashSet<scoped_refptr<MainThreadTaskQueue>> detached_task_queues;
   };
 
   struct AnyThread {

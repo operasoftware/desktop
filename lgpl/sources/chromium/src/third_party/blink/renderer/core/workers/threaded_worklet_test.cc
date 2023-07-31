@@ -4,6 +4,7 @@
 
 #include <bitset>
 
+#include "base/gtest_prod_util.h"
 #include "base/task/single_thread_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/v8_cache_options.mojom-blink.h"
@@ -37,7 +38,9 @@ class ThreadedWorkletObjectProxyForTest final
       ThreadedWorkletMessagingProxy* messaging_proxy,
       ParentExecutionContextTaskRunners* parent_execution_context_task_runners)
       : ThreadedWorkletObjectProxy(messaging_proxy,
-                                   parent_execution_context_task_runners) {}
+                                   parent_execution_context_task_runners,
+                                   /*parent_agent_group_task_runner=*/nullptr) {
+  }
 
  protected:
   void CountFeature(WebFeature feature) override {

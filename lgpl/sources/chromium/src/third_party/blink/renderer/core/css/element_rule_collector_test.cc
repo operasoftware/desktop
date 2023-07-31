@@ -72,7 +72,8 @@ class ElementRuleCollectorTest : public PageTestBase {
     MatchRequest request(rule_set, scope);
 
     collector.CollectMatchingRules(request);
-    collector.SortAndTransferMatchedRules();
+    collector.SortAndTransferMatchedRules(/*is_vtt_embedded_style=*/false,
+                                          /*tracker=*/nullptr);
 
     const MatchedPropertiesVector& vector = result.GetMatchedProperties();
     if (!vector.size()) {
@@ -116,7 +117,8 @@ class ElementRuleCollectorTest : public PageTestBase {
 
     collector.SetMode(SelectorChecker::kCollectingCSSRules);
     collector.CollectMatchingRules(request);
-    collector.SortAndTransferMatchedRules();
+    collector.SortAndTransferMatchedRules(/*is_vtt_embedded_style=*/false,
+                                          /*tracker=*/nullptr);
 
     return collector.MatchedCSSRuleList();
   }
@@ -325,10 +327,10 @@ TEST_F(ElementRuleCollectorTest, MatchesNonUniversalHighlights) {
     }
     MediaQueryEvaluator* medium =
         MakeGarbageCollected<MediaQueryEvaluator>(GetDocument().GetFrame());
-    RuleSet& rules = sheet->EnsureRuleSet(*medium, kRuleHasNoSpecialState);
+    RuleSet& rules = sheet->EnsureRuleSet(*medium);
     auto* rule = To<StyleRule>(CSSParser::ParseRule(
-        sheet->ParserContext(), sheet, /*parent_rule_for_nesting=*/nullptr,
-        selector + " { color: green }"));
+        sheet->ParserContext(), sheet, CSSNestingType::kNone,
+        /*parent_rule_for_nesting=*/nullptr, selector + " { color: green }"));
     rules.AddStyleRule(rule, *medium, kRuleHasNoSpecialState);
 
     MatchResult result;

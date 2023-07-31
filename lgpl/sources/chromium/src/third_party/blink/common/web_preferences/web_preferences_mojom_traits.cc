@@ -23,10 +23,6 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
       !data.ReadCursiveFontFamilyMap(&out->cursive_font_family_map) ||
       !data.ReadFantasyFontFamilyMap(&out->fantasy_font_family_map) ||
       !data.ReadMathFontFamilyMap(&out->math_font_family_map) ||
-      !data.ReadLazyFrameLoadingDistanceThresholdsPx(
-          &out->lazy_frame_loading_distance_thresholds_px) ||
-      !data.ReadLazyImageLoadingDistanceThresholdsPx(
-          &out->lazy_image_loading_distance_thresholds_px) ||
       !data.ReadDefaultEncoding(&out->default_encoding) ||
       !data.ReadTextTrackBackgroundColor(&out->text_track_background_color) ||
       !data.ReadTextTrackTextColor(&out->text_track_text_color) ||
@@ -38,6 +34,8 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
       !data.ReadTextTrackWindowColor(&out->text_track_window_color) ||
       !data.ReadTextTrackWindowRadius(&out->text_track_window_radius) ||
       !data.ReadPrimaryPointerType(&out->primary_pointer_type) ||
+      !data.ReadOutputDeviceUpdateAbilityType(
+          &out->output_device_update_ability_type) ||
       !data.ReadPrimaryHoverType(&out->primary_hover_type) ||
       !data.ReadViewportStyle(&out->viewport_style) ||
       !data.ReadAnimationPolicy(&out->animation_policy) ||
@@ -121,6 +119,8 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->pointer_events_max_touch_points = data.pointer_events_max_touch_points();
   out->available_pointer_types = data.available_pointer_types();
   out->available_hover_types = data.available_hover_types();
+  out->output_device_update_ability_type =
+      data.output_device_update_ability_type();
   out->dont_send_key_events_to_javascript =
       data.dont_send_key_events_to_javascript();
   out->barrel_button_for_drag_enabled = data.barrel_button_for_drag_enabled();
@@ -214,6 +214,10 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->do_not_update_selection_on_mutating_selection_range =
       data.do_not_update_selection_on_mutating_selection_range();
   out->autoplay_policy = data.autoplay_policy();
+  out->require_transient_activation_for_get_display_media =
+      data.require_transient_activation_for_get_display_media();
+  out->require_transient_activation_for_show_file_or_directory_picker =
+      data.require_transient_activation_for_show_file_or_directory_picker();
   out->preferred_color_scheme = data.preferred_color_scheme();
   out->preferred_contrast = data.preferred_contrast();
   out->picture_in_picture_enabled = data.picture_in_picture_enabled();

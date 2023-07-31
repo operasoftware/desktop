@@ -330,9 +330,7 @@ NGBreakStatus BreakBeforeChildIfNeeded(
 
 // Insert a break before the child, and propagate space shortage if needed.
 // |block_size_override| should only be supplied when you wish to propagate a
-// different block-size than that of the provided layout result. If
-// |flex_column_break_after| is supplied, then we need to update the
-// break-after value for the column, as well.
+// different block-size than that of the provided layout result.
 void BreakBeforeChild(
     const NGConstraintSpace&,
     NGLayoutInputNode child,
@@ -341,8 +339,7 @@ void BreakBeforeChild(
     absl::optional<NGBreakAppeal> appeal,
     bool is_forced_break,
     NGBoxFragmentBuilder*,
-    absl::optional<LayoutUnit> block_size_override = absl::nullopt,
-    EBreakBetween* flex_column_break_after = nullptr);
+    absl::optional<LayoutUnit> block_size_override = absl::nullopt);
 
 // Propagate the block-size of unbreakable content. This is used to inflate the
 // initial minimal column block-size when balancing columns, before we calculate
@@ -454,10 +451,12 @@ inline const NGColumnSpannerPath* FollowColumnSpannerPath(
   return nullptr;
 }
 
-// Calculate the constraint space for columns of a multi-column layout.
-NGConstraintSpace CreateConstraintSpaceForColumns(
+// Set up a constraint space for columns in multi-column layout, or for pages
+// when printing; as specified by fragmentation_type.
+NGConstraintSpace CreateConstraintSpaceForFragmentainer(
     const NGConstraintSpace& parent_space,
-    LogicalSize column_size,
+    NGFragmentationType fragmentation_type,
+    LogicalSize fragmentainer_size,
     LogicalSize percentage_resolution_size,
     bool allow_discard_start_margin,
     bool balance_columns,

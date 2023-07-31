@@ -50,9 +50,12 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-shared.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_code_cache_loader.h"
@@ -213,6 +216,22 @@ void LogCnameAliasMetrics(const CnameAliasMetricInfo& info) {
     UMA_HISTOGRAM_COUNTS_1000(
         "SubresourceFilter.CnameAlias.Renderer.RedundantCount",
         info.redundant_count);
+  }
+}
+
+absl::optional<mojom::WebFeature> PreflightResultToWebFeature(
+    network::mojom::PrivateNetworkAccessPreflightResult result) {
+  using Result = network::mojom::PrivateNetworkAccessPreflightResult;
+
+  switch (result) {
+    case Result::kNone:
+      return absl::nullopt;
+    case Result::kError:
+      return mojom::WebFeature::kPrivateNetworkAccessPreflightError;
+    case Result::kSuccess:
+      return mojom::WebFeature::kPrivateNetworkAccessPreflightSuccess;
+    case Result::kWarning:
+      return mojom::WebFeature::kPrivateNetworkAccessPreflightWarning;
   }
 }
 
@@ -445,6 +464,7 @@ void ResourceLoader::CodeCacheRequest::MaybeSendCachedCode(
 ResourceLoader::ResourceLoader(ResourceFetcher* fetcher,
                                ResourceLoadScheduler* scheduler,
                                Resource* resource,
+                               ContextLifecycleNotifier* context,
                                ResourceRequestBody request_body,
                                uint32_t inflight_keepalive_bytes)
     : scheduler_client_id_(ResourceLoadScheduler::kInvalidClientId),
@@ -454,6 +474,7 @@ ResourceLoader::ResourceLoader(ResourceFetcher* fetcher,
       request_body_(std::move(request_body)),
       inflight_keepalive_bytes_(inflight_keepalive_bytes),
       is_cache_aware_loading_activated_(false),
+      progress_receiver_(this, context),
       cancel_timer_(fetcher_->GetTaskRunner(),
                     this,
                     &ResourceLoader::CancelTimerFired) {
@@ -498,6 +519,7 @@ void ResourceLoader::Trace(Visitor* visitor) const {
   visitor->Trace(response_body_loader_);
   visitor->Trace(data_pipe_completion_notifier_);
   visitor->Trace(cancel_timer_);
+  visitor->Trace(progress_receiver_);
   ResourceLoadSchedulerClient::Trace(visitor);
 }
 
@@ -806,8 +828,11 @@ bool ResourceLoader::WillFollowRedirect(
         mojom::WebFeature::kAuthorizationCoveredByWildcard);
   }
 
+  CountPrivateNetworkAccessPreflightResult(
+      passed_redirect_response.PrivateNetworkAccessPreflightResult());
+
   if (resource_->GetResourceRequest().HttpHeaderFields().Contains(
-          net::HttpRequestHeaders::kAuthorization) &&
+          http_names::kAuthorization) &&
       !SecurityOrigin::AreSameOrigin(resource_->LastResourceRequest().Url(),
                                      new_url)) {
     fetcher_->GetUseCounter().CountUse(
@@ -909,6 +934,12 @@ bool ResourceLoader::WillFollowRedirect(
   fetcher_->RecordResourceTimingOnRedirect(resource_.Get(), redirect_response,
                                            new_url);
 
+  // `Context().PrepareRequest()` below may update the value of
+  // `new_request->GetSharedStorageWritable()`. If it does, we will need to
+  // remove the corresponding header.
+  bool need_to_check_for_shared_storage_writable_change =
+      new_request->GetSharedStorageWritable() && removed_headers;
+
   // The following two calls may rewrite the new_request->Url() to
   // something else not for rejecting redirect but for other reasons.
   // E.g. WebFrameTestClient::WillSendRequest() and
@@ -937,6 +968,11 @@ bool ResourceLoader::WillFollowRedirect(
   DCHECK_EQ(new_request->GetRequestContext(), request_context);
   DCHECK_EQ(new_request->GetMode(), request_mode);
   DCHECK_EQ(new_request->GetCredentialsMode(), credentials_mode);
+
+  if (need_to_check_for_shared_storage_writable_change &&
+      !new_request->GetSharedStorageWritable()) {
+    removed_headers->push_back(http_names::kSharedStorageWritable.Ascii());
+  }
 
   if (new_request->Url() != KURL(new_url)) {
     CancelForRedirectAccessCheckError(new_request->Url(),
@@ -1010,6 +1046,9 @@ void ResourceLoader::DidReceiveResponseInternal(
     fetcher_->GetUseCounter().CountDeprecation(
         mojom::WebFeature::kAuthorizationCoveredByWildcard);
   }
+
+  CountPrivateNetworkAccessPreflightResult(
+      response.PrivateNetworkAccessPreflightResult());
 
   if (request.IsAutomaticUpgrade()) {
     LogMixedAutoupgradeMetrics(MixedContentAutoupgradeStatus::kResponseReceived,
@@ -1127,8 +1166,7 @@ void ResourceLoader::DidReceiveResponseInternal(
   // Range header: https://fetch.spec.whatwg.org/#main-fetch
   if (response.GetType() == network::mojom::FetchResponseType::kOpaque &&
       response.HttpStatusCode() == 206 && response.HasRangeRequested() &&
-      !initial_request.HttpHeaderFields().Contains(
-          net::HttpRequestHeaders::kRange)) {
+      !initial_request.HttpHeaderFields().Contains(http_names::kRange)) {
     HandleError(ResourceError::CancelledDueToAccessCheckError(
         response.CurrentRequestUrl(), ResourceRequestBlockedReason::kOther));
     return;
@@ -1320,6 +1358,10 @@ void ResourceLoader::DidFail(const WebURLError& error,
                                error.reason(), request.GetUkmSourceId(),
                                fetcher_->UkmRecorder(), resource_);
   }
+
+  CountPrivateNetworkAccessPreflightResult(
+      error.private_network_access_preflight_result());
+
   resource_->SetEncodedDataLength(encoded_data_length);
   resource_->SetEncodedBodyLength(encoded_body_length);
   resource_->SetDecodedBodyLength(decoded_body_length);
@@ -1726,6 +1768,22 @@ bool ResourceLoader::ShouldBlockRequestBasedOnSubresourceFilterDnsAliasCheck(
   }
 
   return false;
+}
+
+void ResourceLoader::CountPrivateNetworkAccessPreflightResult(
+    network::mojom::PrivateNetworkAccessPreflightResult result) {
+  absl::optional<mojom::WebFeature> feature =
+      PreflightResultToWebFeature(result);
+  if (!feature.has_value()) {
+    return;
+  }
+
+  // We do not call `CountDeprecation()` because sending a deprecation report
+  // would leak cross-origin information about the target of the fetch. Already,
+  // the presence of this information in the renderer process is suboptimal, but
+  // as of writing this is the best way to count a feature use detected in the
+  // network service.
+  fetcher_->GetUseCounter().CountUse(*feature);
 }
 
 void ResourceLoader::CancelIfWebBundleTokenMatches(

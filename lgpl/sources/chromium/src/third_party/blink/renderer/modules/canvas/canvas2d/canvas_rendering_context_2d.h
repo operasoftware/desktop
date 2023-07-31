@@ -99,7 +99,9 @@ class MODULES_EXPORT CanvasRenderingContext2D final
   V8RenderingContext* AsV8RenderingContext() final;
   NoAllocDirectCallHost* AsNoAllocDirectCallHost() final;
 
-  bool isContextLost() const override;
+  bool isContextLost() const final {
+    return context_lost_mode_ != kNotLostContext;
+  }
 
   bool ShouldAntialias() const override;
   void SetShouldAntialias(bool) override;
@@ -167,6 +169,7 @@ class MODULES_EXPORT CanvasRenderingContext2D final
     return CanvasRenderingContext::WouldTaintOrigin(source);
   }
   void DisableAcceleration() override;
+  bool ShouldDisableAccelerationBecauseOfReadback() const override;
 
   int Width() const final;
   int Height() const final;
@@ -185,14 +188,13 @@ class MODULES_EXPORT CanvasRenderingContext2D final
   SkColorInfo CanvasRenderingContextSkColorInfo() const override {
     return color_params_.GetSkColorInfo();
   }
-  scoped_refptr<StaticBitmapImage> GetImage() final;
+  scoped_refptr<StaticBitmapImage> GetImage(
+      CanvasResourceProvider::FlushReason) final;
 
   sk_sp<PaintFilter> StateGetFilter() final;
   void SnapshotStateForFilter() final;
 
-  void ValidateStateStackWithCanvas(const cc::PaintCanvas*) const final;
-
-  void FinalizeFrame(bool printing = false) override;
+  void FinalizeFrame(CanvasResourceProvider::FlushReason) override;
 
   CanvasRenderingContextHost* GetCanvasRenderingContextHost() override;
   ExecutionContext* GetTopExecutionContext() const override;
@@ -203,7 +205,7 @@ class MODULES_EXPORT CanvasRenderingContext2D final
 
   void WillDrawImage(CanvasImageSource*) const final;
 
-  void FlushCanvas() override;
+  void FlushCanvas(CanvasResourceProvider::FlushReason) override;
 
   void Trace(Visitor*) const override;
 

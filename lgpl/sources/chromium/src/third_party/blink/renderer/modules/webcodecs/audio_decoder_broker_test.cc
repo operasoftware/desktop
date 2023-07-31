@@ -97,7 +97,7 @@ class FakeMojoMediaClient : public media::MojoMediaClient {
 
   std::unique_ptr<media::AudioDecoder> CreateAudioDecoder(
       scoped_refptr<base::SequencedTaskRunner> task_runner,
-      media::MediaLog* media_log) override {
+      std::unique_ptr<media::MediaLog> media_log) override {
     return std::make_unique<FakeAudioDecoder>();
   }
 };

@@ -142,11 +142,18 @@ class ThrottlingURLLoader::ForwardingThrottleDelegate
   // URLLoaderThrottle::Delegate:
   void CancelWithError(int error_code,
                        base::StringPiece custom_reason) override {
+    CancelWithExtendedError(error_code, 0, custom_reason);
+  }
+
+  void CancelWithExtendedError(int error_code,
+                               int extended_reason_code,
+                               base::StringPiece custom_reason) override {
     if (!loader_)
       return;
 
     ScopedDelegateCall scoped_delegate_call(this);
-    loader_->CancelWithError(error_code, custom_reason);
+    loader_->CancelWithExtendedError(error_code, extended_reason_code,
+                                     custom_reason);
   }
 
   void Resume() override {
@@ -236,6 +243,10 @@ class ThrottlingURLLoader::ForwardingThrottleDelegate
   }
 
   void Detach() { loader_ = nullptr; }
+
+  void DidRestartForCriticalClientHint() override {
+    loader_->DidRestartForCriticalClientHint();
+  }
 
  private:
   // This class helps ThrottlingURLLoader to keep track of whether it is being
@@ -559,6 +570,10 @@ void ThrottlingURLLoader::StartNow() {
         // Use status code 307 to preserve the method, so POST requests work.
         net::HTTP_TEMPORARY_REDIRECT, throttle_will_start_redirect_url_,
         absl::nullopt, false, false, false);
+
+    // Set Critical-CH restart info and clear for next redirect.
+    redirect_info.critical_ch_restart_time = critical_ch_restart_time_;
+    critical_ch_restart_time_ = base::TimeTicks();
 
     bool should_clear_upload = false;
     net::RedirectUtil::UpdateHttpRequest(
@@ -934,12 +949,20 @@ void ThrottlingURLLoader::OnClientConnectionError() {
 
 void ThrottlingURLLoader::CancelWithError(int error_code,
                                           base::StringPiece custom_reason) {
+  CancelWithExtendedError(error_code, 0, custom_reason);
+}
+
+void ThrottlingURLLoader::CancelWithExtendedError(
+    int error_code,
+    int extended_reason_code,
+    base::StringPiece custom_reason) {
   if (loader_completed_)
     return;
 
   network::URLLoaderCompletionStatus status;
   status.error_code = error_code;
   status.completion_time = base::TimeTicks::Now();
+  status.extended_error_code = extended_reason_code;
 
   deferred_stage_ = DEFERRED_NONE;
   DisconnectClient(custom_reason);

@@ -54,6 +54,7 @@ class MockVideoDecoder : public media::VideoDecoder {
   MockVideoDecoder()
       : current_decoder_type_(media::VideoDecoderType::kTesting) {}
 
+  bool IsPlatformDecoder() const override { return is_platform_decoder_; }
   media::VideoDecoderType GetDecoderType() const override {
     return current_decoder_type_;
   }
@@ -88,8 +89,13 @@ class MockVideoDecoder : public media::VideoDecoder {
     current_decoder_type_ = expected_decoder_type;
   }
 
+  void set_platform_decoder(bool is_platform_decoder) {
+    is_platform_decoder_ = is_platform_decoder;
+  }
+
  private:
   media::VideoDecoderType current_decoder_type_;
+  bool is_platform_decoder_ = true;
 };
 
 // Wraps a callback as a webrtc::DecodedImageCallback.
@@ -824,25 +830,18 @@ TEST_P(RTCVideoDecoderAdapterTest,
 
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 TEST_P(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_UseGpuFactories) {
-  video_decoder_->SetDecoderType(media::VideoDecoderType::kMojo);
   ASSERT_TRUE(CreateAndInitialize());
   EXPECT_TRUE(adapter_wrapper_->GetDecoderInfo().is_hardware_accelerated);
 }
 
-TEST_P(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_Mojo) {
-  video_decoder_->SetDecoderType(media::VideoDecoderType::kMojo);
+TEST_P(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_PlatformDecoder) {
+  video_decoder_->set_platform_decoder(true);
   ASSERT_TRUE(CreateAndInitializeDirectly());
   EXPECT_TRUE(adapter_wrapper_->GetDecoderInfo().is_hardware_accelerated);
 }
 
-TEST_P(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_VT) {
-  video_decoder_->SetDecoderType(media::VideoDecoderType::kVT);
-  ASSERT_TRUE(CreateAndInitializeDirectly());
-  EXPECT_FALSE(adapter_wrapper_->GetDecoderInfo().is_hardware_accelerated);
-}
-
-TEST_P(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_WMF) {
-  video_decoder_->SetDecoderType(media::VideoDecoderType::kWMF);
+TEST_P(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_NotPlatformDecoder) {
+  video_decoder_->set_platform_decoder(false);
   ASSERT_TRUE(CreateAndInitializeDirectly());
   EXPECT_FALSE(adapter_wrapper_->GetDecoderInfo().is_hardware_accelerated);
 }

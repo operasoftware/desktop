@@ -66,6 +66,7 @@ class Vector2dF;
 namespace blink {
 
 class AccessibleNode;
+class AnchorElementObserver;
 class AnchorScrollData;
 class AriaNotificationOptions;
 class Attr;
@@ -89,7 +90,7 @@ class EditContext;
 class ElementAnimations;
 class ElementInternals;
 class ElementIntersectionObserverData;
-class ElementRareDataBase;
+class ElementRareDataVector;
 class ExceptionState;
 class FocusOptions;
 class GetInnerHTMLOptions;
@@ -593,23 +594,22 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void AttachLayoutTree(AttachContext&) override;
   void DetachLayoutTree(bool performing_reattach = false) override;
 
-  virtual LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout);
+  virtual LayoutObject* CreateLayoutObject(const ComputedStyle&);
   virtual bool LayoutObjectIsNeeded(const DisplayStyle&) const;
   bool LayoutObjectIsNeeded(const ComputedStyle&) const;
 
   const ComputedStyle* ParentComputedStyle() const;
 
-  // Returns a StyleRecalcChange to be combined with the outer
-  // StyleRecalcChange. This is used to recalculate the style of subsequent
-  // siblings.
-  StyleRecalcChange RecalcStyle(const StyleRecalcChange,
-                                const StyleRecalcContext&);
+  void RecalcStyle(const StyleRecalcChange, const StyleRecalcContext&);
   void RecalcStyleForTraversalRootAncestor();
   void RebuildLayoutTreeForTraversalRootAncestor() {
     RebuildFirstLetterLayoutTree();
     WhitespaceAttacher whitespace_attacher;
     RebuildMarkerLayoutTree(whitespace_attacher);
     HandleSubtreeModifications();
+  }
+  void RebuildLayoutTreeForSizeContainerAncestor() {
+    RebuildFirstLetterLayoutTree();
   }
   bool NeedsRebuildChildLayoutTrees(
       const WhitespaceAttacher& whitespace_attacher) const {
@@ -655,16 +655,19 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // Returns a pointer to the crop-ID if one was set; nullptr otherwise.
   const RegionCaptureCropId* GetRegionCaptureCropId() const;
 
-  // Support for all elements with region capture is currently experimental.
-  virtual bool IsSupportedByRegionCapture() const;
-
   ShadowRoot* attachShadow(const ShadowRootInit*, ExceptionState&);
 
   // Returns true if the attachment was successful.
-  bool AttachDeclarativeShadowRoot(HTMLTemplateElement*,
-                                   ShadowRootType,
-                                   FocusDelegation,
-                                   SlotAssignmentMode);
+  bool AttachStreamingDeclarativeShadowRoot(HTMLTemplateElement&,
+                                            ShadowRootType,
+                                            FocusDelegation,
+                                            SlotAssignmentMode);
+  // TODO(crbug.com/1396384) Remove this entire function when the older version
+  // of declarative shadow DOM is removed.
+  bool AttachDeprecatedNonStreamingDeclarativeShadowRoot(HTMLTemplateElement&,
+                                                         ShadowRootType,
+                                                         FocusDelegation,
+                                                         SlotAssignmentMode);
 
   ShadowRoot& CreateUserAgentShadowRoot();
   ShadowRoot& AttachShadowRootInternal(
@@ -785,6 +788,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // ComputedStyle is up to date;
   // e.g. by calling Document::UpdateStyleAndLayoutTree().
   bool IsFocusable() const;
+  virtual bool HasNoFocusableChildren() const;
   virtual bool IsKeyboardFocusable() const;
   virtual bool IsMouseFocusable() const;
   // IsBaseElementFocusable() is used by some subclasses to check if the base
@@ -868,7 +872,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // parsing a special case in this respect should be avoided if possible.
   virtual void FinishParsingChildren();
 
-  virtual void BeginParsingChildren() { SetIsFinishedParsingChildren(false); }
+  void BeginParsingChildren() { SetIsFinishedParsingChildren(false); }
 
   // Returns the pseudo element for the given PseudoId type.
   // |view_transition_name| is used to uniquely identify a pseudo element
@@ -971,20 +975,6 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // dispatched to event listeners, and prevents DOMActivate events from being
   // sent at all.
   virtual bool IsDisabledFormControl() const { return false; }
-
-  // Return true if we should force legacy layout on this element and all
-  // descendants. Note that even if this element returns true, it's not implied
-  // that all descendants will return the same. Once an element needs to force
-  // legacy layout, though, the layout engine knows that it will have to perform
-  // legacy layout on the entire subtree, unless this is overridden by
-  // ShouldForceNGLayout().
-  bool ShouldForceLegacyLayout() const {
-    if (!HasRareData())
-      return false;
-    return StyleShouldForceLegacyLayout() || ShouldForceLegacyLayoutForChild();
-  }
-
-  void ResetForceLegacyLayoutForPrinting();
 
   void SetCustomElementDefinition(CustomElementDefinition*);
   CustomElementDefinition* GetCustomElementDefinition() const;
@@ -1154,8 +1144,14 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool AffectedByMultipleHas() const;
   void SetAffectedByMultipleHas();
 
-  void SaveIntrinsicSize(ResizeObserverSize* size);
-  const ResizeObserverSize* LastIntrinsicSize() const;
+  // This is meant to be used by document's resize observer to notify that the
+  // size has changed.
+  void LastRememberedSizeChanged(ResizeObserverSize* size);
+
+  void SetLastRememberedInlineSize(absl::optional<LayoutUnit>);
+  void SetLastRememberedBlockSize(absl::optional<LayoutUnit>);
+  absl::optional<LayoutUnit> LastRememberedInlineSize() const;
+  absl::optional<LayoutUnit> LastRememberedBlockSize() const;
 
   // Returns a unique pseudo element for the given |pseudo_id| and
   // |view_transition_name| originating from this DOM element.
@@ -1195,10 +1191,13 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void RemoveAnchorScrollData();
   AnchorScrollData* GetAnchorScrollData() const;
 
-  // Returns true if any popover is anchored to this element.
-  bool HasAnchoredPopover() const;
-  void DecrementAnchoredPopoverCount();
-  void IncrementAnchoredPopoverCount();
+  // Returns true if any element is implicitly anchored to this element.
+  bool HasImplicitlyAnchoredElement() const;
+  void DecrementImplicitlyAnchoredElementCount();
+  void IncrementImplicitlyAnchoredElementCount();
+
+  AnchorElementObserver& EnsureAnchorElementObserver();
+  AnchorElementObserver* GetAnchorElementObserver() const;
 
   // https://drafts.csswg.org/css-anchor-1/#implicit-anchor-element
   Element* ImplicitAnchorElement();
@@ -1295,11 +1294,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // are met.
   void HideNonce();
 
-  // Adjust the state of legacy layout forcing for this element (and its
-  // subtree). Input is the state inherited from the parent element. Output will
-  // be modified if required by this element.
-  void AdjustForceLegacyLayout(const ComputedStyle*,
-                               bool* should_force_legacy_layout);
+  // Mark for style invalidation/recalc for :lang() selectors to pick up the
+  // changes.
+  void LangAttributeChanged();
 
  private:
   friend class AXObject;
@@ -1535,65 +1532,15 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
                             bool include_shadow_roots,
                             ExceptionState&);
 
-  ElementRareDataBase* GetElementRareData() const;
-  ElementRareDataBase& EnsureElementRareData();
+  ElementRareDataVector* GetElementRareData() const;
+  ElementRareDataVector& EnsureElementRareData();
 
   void RemoveAttrNodeList();
   void DetachAllAttrNodesFromElement();
   void DetachAttrNodeFromElementWithValue(Attr*, const AtomicString& value);
   void DetachAttrNodeAtIndex(Attr*, wtf_size_t index);
 
-  // Return whether the computed style of this element causes need for legacy
-  // layout.
-  bool StyleShouldForceLegacyLayout() const {
-    if (!HasRareData())
-      return false;
-    return StyleShouldForceLegacyLayoutInternal();
-  }
-  bool StyleShouldForceLegacyLayoutInternal() const;
-  void SetStyleShouldForceLegacyLayout(bool force) {
-    if (!force && !HasRareData())
-      return;
-    SetStyleShouldForceLegacyLayoutInternal(force);
-  }
   FRIEND_TEST_ALL_PREFIXES(LayoutNGTextCombineTest, LegacyQuote);
-  void SetStyleShouldForceLegacyLayoutInternal(bool);
-
-  // Return whether this element needs legacy layout because of a child.
-  bool ShouldForceLegacyLayoutForChild() const {
-    if (!HasRareData())
-      return false;
-    return ShouldForceLegacyLayoutForChildInternal();
-  }
-  bool ShouldForceLegacyLayoutForChildInternal() const;
-  void SetShouldForceLegacyLayoutForChild(bool force) {
-    if (!force && !HasRareData())
-      return;
-    SetShouldForceLegacyLayoutForChildInternal(force);
-  }
-  void SetShouldForceLegacyLayoutForChildInternal(bool);
-
-  // Update ForceLegacyLayout flags for this element, and for ancestors, if
-  // necessary. We cannot establish a ForceLegacyLayout subtree at an arbitrary
-  // element; it needs to be a block formatting context root.
-  // Returns true if we need to reattach this element or any ancestor element.
-  bool UpdateForceLegacyLayout(const ComputedStyle& new_style,
-                               const ComputedStyle* old_style);
-
-  // If this element requires legacy layout, and we can't tell for sure that it
-  // is going to establish a new formatting context, we need to force legacy
-  // layout on ancestors until we reach one that we're sure that will establish
-  // a new formatting context. LayoutNG and legacy layout cannot cooperate
-  // within a formatting context.
-  // Returns true if we need to reattach this element or any ancestor element.
-  bool ForceLegacyLayoutInFormattingContext(const ComputedStyle& new_style);
-
-  // If this element requires legacy layout, and we're inside a fragmentation
-  // context, we need to force legacy layout for the entire fragmentation
-  // context. LayoutNG block fragmentation and legacy block fragmentation cannot
-  // cooperate within a fragmentation context.
-  // Returns true if we need to reattach this element or any ancestor element.
-  bool ForceLegacyLayoutInFragmentationContext(const ComputedStyle& new_style);
 
   void SynchronizeContentAttributeAndElementReference(
       const QualifiedName& name);
@@ -1602,6 +1549,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   void PseudoStateChanged(CSSSelector::PseudoType pseudo,
                           AffectedByPseudoStateChange&&);
+
+  void ProcessContainIntrinsicSizeChanges();
+
+  bool ShouldUpdateLastRememberedBlockSize() const;
+  bool ShouldUpdateLastRememberedInlineSize() const;
 
   enum class HighlightRecalc {
     // No highlight recalc is needed.

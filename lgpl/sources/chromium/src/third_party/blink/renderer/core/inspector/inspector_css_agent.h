@@ -38,7 +38,6 @@
 #include "third_party/blink/renderer/core/inspector/inspector_dom_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_style_sheet.h"
 #include "third_party/blink/renderer/core/inspector/protocol/css.h"
-#include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
@@ -159,6 +158,7 @@ class CORE_EXPORT InspectorCSSAgent final
       protocol::Maybe<
           protocol::Array<protocol::CSS::InheritedPseudoElementMatches>>*,
       protocol::Maybe<protocol::Array<protocol::CSS::CSSKeyframesRule>>*,
+      protocol::Maybe<protocol::Array<protocol::CSS::CSSPositionFallbackRule>>*,
       protocol::Maybe<int>*) override;
   protocol::Response getInlineStylesForNode(
       int node_id,
@@ -319,6 +319,9 @@ class CORE_EXPORT InspectorCSSAgent final
   protocol::Response MultipleStyleTextsActions(
       std::unique_ptr<protocol::Array<protocol::CSS::StyleDeclarationEdit>>,
       HeapVector<Member<StyleSheetAction>>* actions);
+
+  std::unique_ptr<protocol::Array<protocol::CSS::CSSPositionFallbackRule>>
+  PositionFallbackRulesForNode(Element* element);
 
   // If the |animating_element| is a pseudo element, then |element| is a
   // reference to its originating DOM element.

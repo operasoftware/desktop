@@ -28,7 +28,6 @@
 
 // FIXME: explain all uses of [CrossOrigin]
 [
-    CheckSecurity=Receiver,
     ImplementedAs=DOMWindow,
     Global=Window,
     Exposed=Window
@@ -107,11 +106,6 @@
     [MeasureAs=WindowReleaseEvents] void releaseEvents();
 
     [Replaceable, SameObject] readonly attribute External external;
-
-    // Cooperative Scheduling of Background Tasks
-    // https://www.w3.org/TR/requestidlecallback/#window_extensions
-    [Measure] long requestIdleCallback(IdleRequestCallback callback, optional IdleRequestOptions options = {});
-    void cancelIdleCallback(long handle);
 
     // CSS Object Model (CSSOM)
     // https://drafts.csswg.org/cssom/#extensions-to-the-window-interface
@@ -204,7 +198,7 @@
     // https://w3c.github.io/webappsec-secure-contexts/#monkey-patching-global-object
     readonly attribute boolean isSecureContext;
 
-    // TrustedTypes API: http://github.com/wicg/trusted-types
+    // TrustedTypes API: http://github.com/w3c/trusted-types
     [CallWith=ScriptState] readonly attribute TrustedTypePolicyFactory trustedTypes;
 
     // Anonymous iframe:

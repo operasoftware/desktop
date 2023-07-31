@@ -886,6 +886,8 @@ class WebMediaPlayerImplTest
 
   base::ScopedTestFeatureOverride gpu_audio_decoder_enabled_{
       base::kFeaturePlatformAacDecoderInGpu, true};
+  base::ScopedTestFeatureOverride gpu_video_decoder_enabled_{
+      base::kFeaturePlatformH264DecoderInGpu, true};
 
   // "Media" thread. This is necessary because WMPI destruction waits on a
   // WaitableEvent.
@@ -1860,6 +1862,20 @@ TEST_F(WebMediaPlayerImplTest, Waiting_NoDecryptionKey) {
   EXPECT_CALL(encrypted_client_, DidResumePlaybackBlockedForKey());
 
   OnWaiting(media::WaitingReason::kNoDecryptionKey);
+}
+
+TEST_F(WebMediaPlayerImplTest, Waiting_SecureSurfaceLost) {
+  InitializeWebMediaPlayerImpl();
+
+  LoadAndWaitForReadyState(kVideoOnlyTestFile,
+                           WebMediaPlayer::kReadyStateHaveFutureData);
+  wmpi_->SetRate(1.0);
+  Play();
+
+  EXPECT_FALSE(IsSuspended());
+
+  OnWaiting(media::WaitingReason::kSecureSurfaceLost);
+  EXPECT_TRUE(IsSuspended());
 }
 
 ACTION(ReportHaveEnough) {

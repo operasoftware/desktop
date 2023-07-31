@@ -256,6 +256,9 @@ class CORE_EXPORT WebLocalFrameImpl final
       int composition_end,
       const WebVector<ui::ImeTextSpan>& ime_text_spans) override;
   void ExtendSelectionAndDelete(int before, int after) override;
+  void ExtendSelectionAndReplace(int before,
+                                 int after,
+                                 const WebString& replacement_text) override;
   void MoveRangeSelectionExtent(const gfx::Point&) override;
   void ReplaceSelection(const WebString&) override;
   void DeleteSurroundingText(int before, int after) override;
@@ -316,7 +319,7 @@ class CORE_EXPORT WebLocalFrameImpl final
                       const WebNode& constrain_to_node) override;
   bool WillPrintSoon() override;
   float GetPrintPageShrink(uint32_t page) override;
-  float PrintPage(uint32_t page_to_print, cc::PaintCanvas*) override;
+  void PrintPage(uint32_t page_to_print, cc::PaintCanvas*) override;
   void PrintEnd() override;
   void DispatchAfterPrintEvent() override;
   bool GetPrintPresetOptionsForPlugin(const WebNode&,
@@ -371,6 +374,9 @@ class CORE_EXPORT WebLocalFrameImpl final
           session_storage_area) override;
   void AddHitTestOnTouchStartCallback(
       base::RepeatingCallback<void(const WebHitTestResult&)> callback) override;
+  void SetResourceCacheRemote(
+      CrossVariantMojoRemote<mojom::blink::ResourceCacheInterfaceBase> remote)
+      override;
 
   // WebNavigationControl overrides:
   bool DispatchBeforeUnloadEvent(bool) override;
@@ -389,8 +395,8 @@ class CORE_EXPORT WebLocalFrameImpl final
           soft_navigation_heuristics_task_id) override;
   void SetIsNotOnInitialEmptyDocument() override;
   bool IsOnInitialEmptyDocument() override;
-  void WillPotentiallyStartOutermostMainFrameNavigation(
-      const WebURL&) const override;
+  void MaybeStartOutermostMainFrameNavigation(
+      const WebVector<WebURL>& urls) const override;
   bool WillStartNavigation(const WebNavigationInfo&) override;
   void DidDropNavigation() override;
   void DownloadURL(
@@ -417,6 +423,7 @@ class CORE_EXPORT WebLocalFrameImpl final
       const DocumentToken& document_token,
       std::unique_ptr<blink::WebPolicyContainer> policy_container,
       const StorageKey& storage_key,
+      const KURL& creator_base_url,
       network::mojom::blink::WebSandboxFlags sandbox_flags =
           network::mojom::blink::WebSandboxFlags::kNone);
   LocalFrame* GetFrame() const { return frame_.Get(); }
@@ -434,7 +441,8 @@ class CORE_EXPORT WebLocalFrameImpl final
       const WebString& name,
       network::mojom::blink::WebSandboxFlags,
       const DocumentToken& document_token,
-      std::unique_ptr<WebPolicyContainer>);
+      std::unique_ptr<WebPolicyContainer>,
+      const WebURL& creator_base_url);
   static WebLocalFrameImpl* CreateProvisional(
       WebLocalFrameClient*,
       InterfaceRegistry*,
@@ -466,8 +474,7 @@ class CORE_EXPORT WebLocalFrameImpl final
 
   RemoteFrame* CreateFencedFrame(
       HTMLFencedFrameElement*,
-      mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>,
-      mojom::blink::FencedFrameMode);
+      mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>);
 
   void DidChangeContentsSize(const gfx::Size&);
 
@@ -546,6 +553,9 @@ class CORE_EXPORT WebLocalFrameImpl final
   // Copy the current selection to the pboard.
   void CopyToFindPboard();
 
+  // Center the selection in the viewport.
+  void CenterSelection() override;
+
   // Shows a context menu with commands relevant to a specific element on
   // the given frame. Additional context data and location are supplied.
   void ShowContextMenu(
@@ -569,6 +579,9 @@ class CORE_EXPORT WebLocalFrameImpl final
   void AddInspectorIssueImpl(mojom::blink::InspectorIssueCode code) override;
   void AddGenericIssueImpl(mojom::blink::GenericIssueErrorType error_type,
                            int violating_node_id) override;
+  void AddGenericIssueImpl(mojom::blink::GenericIssueErrorType error_type,
+                           int violating_node_id,
+                           const WebString& violating_node_attribute) override;
 
  private:
   friend LocalFrameClientImpl;
@@ -626,6 +639,7 @@ class CORE_EXPORT WebLocalFrameImpl final
       std::unique_ptr<PolicyContainer> policy_container,
       const StorageKey& storage_key,
       ukm::SourceId document_ukm_source_id,
+      const KURL& creator_base_url,
       network::mojom::blink::WebSandboxFlags sandbox_flags =
           network::mojom::blink::WebSandboxFlags::kNone);
 

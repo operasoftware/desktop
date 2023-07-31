@@ -75,8 +75,6 @@ class MODULES_EXPORT PaintRenderingContext2D : public ScriptWrappable,
   sk_sp<PaintFilter> StateGetFilter() final;
   void SnapshotStateForFilter() final {}
 
-  void ValidateStateStackWithCanvas(const cc::PaintCanvas*) const final;
-
   bool HasAlpha() const final { return context_settings_->alpha(); }
 
   // PaintRenderingContext2D cannot lose it's context.
@@ -95,10 +93,9 @@ class MODULES_EXPORT PaintRenderingContext2D : public ScriptWrappable,
   DOMMatrix* getTransform() final;
   void resetTransform() final;
 
-  void FlushCanvas() final {}
+  void FlushCanvas(CanvasResourceProvider::FlushReason) final {}
 
   PaintRecord GetRecord();
-  cc::PaintCanvas* GetDrawingPaintCanvas();
 
   ExecutionContext* GetTopExecutionContext() const override {
     return global_scope_.Get();

@@ -348,6 +348,9 @@ void LocalFrameClientImpl::Detached(FrameDetachType type) {
   // place at this point since we are no longer associated with the Page.
   web_frame_->SetClient(nullptr);
 
+  if (type == FrameDetachType::kSwap) {
+    client->WillSwap();
+  }
   client->WillDetach();
 
   // We only notify the browser process when the frame is being detached for
@@ -400,7 +403,6 @@ void LocalFrameClientImpl::DispatchDidHandleOnloadEvents() {
 }
 
 void LocalFrameClientImpl::DidFinishSameDocumentNavigation(
-    HistoryItem* item,
     WebHistoryCommitType commit_type,
     bool is_synchronously_committed,
     mojom::blink::SameDocumentNavigationType same_document_navigation_type,
@@ -425,6 +427,9 @@ void LocalFrameClientImpl::DidFinishSameDocumentNavigation(
           .NotifyBrowserInitiatedSameDocumentNavigation();
     }
   }
+}
+void LocalFrameClientImpl::DidFailAsyncSameDocumentCommit() {
+  web_frame_->Client()->DidFailAsyncSameDocumentCommit();
 }
 
 void LocalFrameClientImpl::DispatchDidOpenDocumentInputStream(const KURL& url) {
@@ -531,7 +536,9 @@ void LocalFrameClientImpl::BeginNavigation(
     const LocalFrameToken* initiator_frame_token,
     std::unique_ptr<SourceLocation> source_location,
     mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
-        initiator_policy_container_keep_alive_handle) {
+        initiator_policy_container_keep_alive_handle,
+    bool is_container_initiated,
+    bool is_fullscreen_requested) {
   if (!web_frame_->Client())
     return;
 
@@ -581,19 +588,15 @@ void LocalFrameClientImpl::BeginNavigation(
   }
 
   navigation_info->impression = impression;
+  navigation_info->is_fullscreen_requested = is_fullscreen_requested;
 
-  // Propagate `has_storage_access` to the next document under certain
-  // circumstances. This corresponds to the "snapshotting source snapshot
-  // params" change and some of the "create navigation params by fetching"
-  // changes in the Storage Access API spec:
-  // https://privacycg.github.io/storage-access/#navigation
+  // Allow cookie access via Storage Access API during the navigation, if the
+  // initiator has obtained storage access. Note that the network service still
+  // applies cookie semantics and user settings, and that this bool is not
+  // trusted by the browser process. (The Storage Access API is only relevant
+  // when third-party cookies are blocked.)
   navigation_info->has_storage_access =
-      origin_window && origin_window->HasStorageAccess() &&
-      navigation_info->initiator_frame_token.has_value() &&
-      navigation_info->initiator_frame_token.value() ==
-          web_frame_->GetLocalFrameToken() &&
-      web_frame_->GetSecurityOrigin().IsSameOriginWith(
-          WebSecurityOrigin::Create(navigation_info->url_request.Url()));
+      origin_window && origin_window->HasStorageAccess();
 
   // Can be null.
   LocalFrame* local_parent_frame = GetLocalParentFrame(web_frame_);
@@ -690,6 +693,7 @@ void LocalFrameClientImpl::BeginNavigation(
                                                     .GetSandboxFlags();
 
   navigation_info->href_translate = href_translate;
+  navigation_info->is_container_initiated = is_container_initiated;
 
   web_frame_->Client()->BeginNavigation(std::move(navigation_info));
 }
@@ -709,25 +713,18 @@ void LocalFrameClientImpl::DidStopLoading() {
     web_frame_->Client()->DidStopLoading();
 }
 
-bool LocalFrameClientImpl::NavigateBackForward(
+void LocalFrameClientImpl::NavigateBackForward(
     int offset,
     absl::optional<scheduler::TaskAttributionId>
         soft_navigation_heuristics_task_id) const {
   WebViewImpl* webview = web_frame_->ViewImpl();
   DCHECK(webview->Client());
   DCHECK(web_frame_->Client());
-
   DCHECK(offset);
-  if (offset > webview->HistoryForwardListCount())
-    return false;
-  if (offset < -webview->HistoryBackListCount())
-    return false;
-
   bool has_user_gesture =
       LocalFrame::HasTransientUserActivation(web_frame_->GetFrame());
   web_frame_->GetFrame()->GetLocalFrameHostRemote().GoToEntryAtOffset(
       offset, has_user_gesture, soft_navigation_heuristics_task_id);
-  return true;
 }
 
 void LocalFrameClientImpl::DidDispatchPingLoader(const KURL& url) {
@@ -765,17 +762,9 @@ void LocalFrameClientImpl::DidObserveLoadingBehavior(
 }
 
 void LocalFrameClientImpl::DidObserveSubresourceLoad(
-    uint32_t number_of_subresources_loaded,
-    uint32_t number_of_subresource_loads_handled_by_service_worker,
-    bool pervasive_payload_requested,
-    int64_t pervasive_bytes_fetched,
-    int64_t total_bytes_fetched) {
+    const SubresourceLoadMetrics& subresource_load_metrics) {
   if (web_frame_->Client()) {
-    web_frame_->Client()->DidObserveSubresourceLoad(
-        number_of_subresources_loaded,
-        number_of_subresource_loads_handled_by_service_worker,
-        pervasive_payload_requested, pervasive_bytes_fetched,
-        total_bytes_fetched);
+    web_frame_->Client()->DidObserveSubresourceLoad(subresource_load_metrics);
   }
 }
 
@@ -917,9 +906,8 @@ RemoteFrame* LocalFrameClientImpl::AdoptPortal(HTMLPortalElement* portal) {
 RemoteFrame* LocalFrameClientImpl::CreateFencedFrame(
     HTMLFencedFrameElement* fenced_frame,
     mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>
-        receiver,
-    mojom::blink::FencedFrameMode mode) {
-  return web_frame_->CreateFencedFrame(fenced_frame, std::move(receiver), mode);
+        receiver) {
+  return web_frame_->CreateFencedFrame(fenced_frame, std::move(receiver));
 }
 
 WebPluginContainerImpl* LocalFrameClientImpl::CreatePlugin(

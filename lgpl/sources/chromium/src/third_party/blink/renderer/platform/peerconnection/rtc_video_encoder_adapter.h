@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_VIDEO_ENCODER_ADAPTER_H_
 
 #include <memory>
+#include <string>
 
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
@@ -15,6 +16,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_encoder.h"
+#include "media/video/video_encoder_info.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/webrtc/api/video_codecs/video_encoder.h"
@@ -60,6 +62,7 @@ class PLATFORM_EXPORT RTCVideoEncoderAdapter final
       EncoderTask task,
       const base::Location& location = FROM_HERE);
 
+  void OnEncoderInfoUpdated(const media::VideoEncoderInfo& encoder_info);
   void OnEncodedFrameReady(
       media::VideoEncoderOutput output,
       absl::optional<media::VideoEncoder::CodecDescription> codec_description);
@@ -68,6 +71,7 @@ class PLATFORM_EXPORT RTCVideoEncoderAdapter final
 
   // Performs the actual video encoding.
   std::unique_ptr<media::VideoEncoder> encoder_;
+  std::string encoder_implementation_name_;
   bool encoder_initialized_ = false;
 
   // Where all media::VideoEncoder API calls happen.

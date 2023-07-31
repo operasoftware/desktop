@@ -77,14 +77,19 @@ void LogUnimplementedPropertyID(const CSSProperty& property) {
               << property.GetPropertyName() << "'.";
 }
 
-void UseCountAnimationDelayZero(Document& document,
-                                const ComputedStyle& style) {
+// Tally counts of animation duration being zero when querying a property on
+// an element that has at least one active animation. We are interested in
+// direct queries of the duration property as well as coincidental queries in
+// order to gauge the impact of changing the default duration from 0 to auto.
+void UseCountIfAnimationDurationZero(Document& document,
+                                     const ComputedStyle& style,
+                                     mojom::blink::WebFeature feature) {
   if (const CSSAnimationData* animation_data = style.Animations()) {
-    const Vector<absl::optional<double>>& duration =
-        animation_data->DurationList();
-    if (duration.size() == 1u && duration[0] == 0.0) {
-      UseCounter::Count(document,
-                        WebFeature::kCSSGetComputedAnimationDelayZero);
+    for (absl::optional<double> duration : animation_data->DurationList()) {
+      if (duration == 0.0) {
+        UseCounter::Count(document, feature);
+        return;
+      }
     }
   }
 }
@@ -274,7 +279,7 @@ void CSSComputedStyleDeclaration::UpdateStyleAndLayoutTreeIfNeeded(
         CSSProperty::Get(property_name->Id()).IsLayoutDependentProperty();
     if (is_for_layout_dependent_property) {
       owner->GetDocument().UpdateStyleAndLayout(
-          DocumentUpdateReason::kJavaScript);
+          DocumentUpdateReason::kComputedStyle);
       // The style recalc could have caused the styled node to be discarded or
       // replaced if it was a PseudoElement so we need to update it.
       styled_node = StyledNode();
@@ -287,12 +292,14 @@ void CSSComputedStyleDeclaration::UpdateStyleAndLayoutTreeIfNeeded(
   // property set by the UA stylesheet is queried.
   if (IsTransitionPseudoElement(styled_node->GetPseudoId())) {
     if (auto* view = document.View()) {
-      view->UpdateLifecycleToPrePaintClean(DocumentUpdateReason::kJavaScript);
+      view->UpdateLifecycleToPrePaintClean(
+          DocumentUpdateReason::kComputedStyle);
     }
     return;
   }
 
-  document.UpdateStyleAndLayoutTreeForNode(styled_node);
+  document.UpdateStyleAndLayoutTreeForNode(
+      styled_node, DocumentUpdateReason::kComputedStyle);
 }
 
 void CSSComputedStyleDeclaration::UpdateStyleAndLayoutIfNeeded(
@@ -339,9 +346,24 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
     return nullptr;
   }
 
-  if (property_class.PropertyID() == CSSPropertyID::kAnimation ||
-      property_class.PropertyID() == CSSPropertyID::kAnimationDelay) {
-    UseCountAnimationDelayZero(styled_node->GetDocument(), *style);
+  // Tally property value fetches when there is a running animation with zero
+  // duration.
+  //   1. duration shorthand
+  //   2. obscure webkit property for baseline.
+  if (property_class.PropertyID() == CSSPropertyID::kAnimationDuration) {
+    UseCountIfAnimationDurationZero(
+        styled_node->GetDocument(), *style,
+        WebFeature::kCSSGetComputedAnimationDurationZero);
+  }
+
+  // For a baseline comparison, we use a property unrelated to animations (and
+  // likely to be obscure). If reading this property and duration happens to
+  // be zero, then it is by shear coincidence and the reader is probably not
+  // interested in the distinction between 0 and 'auto' for the duration value.
+  if (property_class.PropertyID() == CSSPropertyID::kWebkitFontSmoothing) {
+    UseCountIfAnimationDurationZero(
+        styled_node->GetDocument(), *style,
+        WebFeature::kCSSGetComputedWebkitFontSmoothingAnimationDurationZero);
   }
 
   const CSSValue* value = property_class.CSSValueFromComputedStyle(

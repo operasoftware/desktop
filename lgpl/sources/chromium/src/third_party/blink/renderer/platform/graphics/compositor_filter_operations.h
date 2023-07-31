@@ -59,7 +59,8 @@ class PLATFORM_EXPORT CompositorFilterOperations {
                              const SkSize& content_size,
                              SkScalar frame_id,
                              const SkPoint& mouse_position,
-                             const SkColor4f& root_view_color);
+                             const SkColor4f& root_view_color,
+                             uint64_t tick);
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   void Clear();

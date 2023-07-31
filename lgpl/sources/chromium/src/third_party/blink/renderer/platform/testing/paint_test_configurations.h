@@ -12,25 +12,47 @@
 #include "cc/base/features.h"
 #include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "ui/native_theme/native_theme_features.h"
 
 namespace blink {
 
 enum {
   kUnderInvalidationChecking = 1 << 0,
   kScrollUnification = 1 << 1,
+  kSolidColorLayers = 1 << 2,
+  kCompositeScrollAfterPaint = 1 << 3,
+  kUsedColorSchemeRootScrollbars = 1 << 4,
+  kFluentScrollbar = 1 << 5,
 };
 
 class PaintTestConfigurations
     : public testing::WithParamInterface<unsigned>,
-      private ScopedPaintUnderInvalidationCheckingForTest {
+      private ScopedPaintUnderInvalidationCheckingForTest,
+      private ScopedSolidColorLayersForTest,
+      private ScopedCompositeScrollAfterPaintForTest,
+      private ScopedUsedColorSchemeRootScrollbarsForTest {
  public:
   PaintTestConfigurations()
-      : ScopedPaintUnderInvalidationCheckingForTest(
-            GetParam() & kUnderInvalidationChecking) {
-    if (GetParam() & kScrollUnification)
-      feature_list_.InitAndEnableFeature(::features::kScrollUnification);
-    else
-      feature_list_.InitAndDisableFeature(::features::kScrollUnification);
+      : ScopedPaintUnderInvalidationCheckingForTest(GetParam() &
+                                                    kUnderInvalidationChecking),
+        ScopedSolidColorLayersForTest(GetParam() & kSolidColorLayers),
+        ScopedCompositeScrollAfterPaintForTest(GetParam() &
+                                               kCompositeScrollAfterPaint),
+        ScopedUsedColorSchemeRootScrollbarsForTest(
+            GetParam() & kUsedColorSchemeRootScrollbars) {
+    std::vector<base::test::FeatureRef> enabled_features = {};
+    std::vector<base::test::FeatureRef> disabled_features = {};
+    if (GetParam() & kScrollUnification) {
+      enabled_features.push_back(::features::kScrollUnification);
+    } else {
+      disabled_features.push_back(::features::kScrollUnification);
+    }
+    if (GetParam() & kFluentScrollbar) {
+      enabled_features.push_back(::features::kFluentScrollbar);
+    } else {
+      disabled_features.push_back(::features::kFluentScrollbar);
+    }
+    feature_list_.InitWithFeatures(enabled_features, disabled_features);
   }
   ~PaintTestConfigurations() override {
     // Must destruct all objects before toggling back feature flags.
@@ -47,11 +69,19 @@ class PaintTestConfigurations
   base::test::ScopedFeatureList feature_list_;
 };
 
-// For now this has only one configuration, but can be extended in the future
-// to include more configurations.
-#define INSTANTIATE_PAINT_TEST_SUITE_P(test_class) \
-  INSTANTIATE_TEST_SUITE_P(All, test_class,        \
-                           ::testing::Values(0, kScrollUnification))
+// Note: If a new test fails with kCompositeScrollAfterPaint, please add the
+// following at the beginning of the test to skip it temporarily:
+//  if (RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()) {
+//    // TODO(crbug.com/1414885): Fix this test.
+//    return;
+//  }
+#define INSTANTIATE_PAINT_TEST_SUITE_P(test_class)                       \
+  INSTANTIATE_TEST_SUITE_P(                                              \
+      All, test_class,                                                   \
+      ::testing::Values(0, kScrollUnification, kSolidColorLayers,        \
+                        kCompositeScrollAfterPaint,                      \
+                        kCompositeScrollAfterPaint | kScrollUnification, \
+                        kUsedColorSchemeRootScrollbars, kFluentScrollbar))
 
 }  // namespace blink
 

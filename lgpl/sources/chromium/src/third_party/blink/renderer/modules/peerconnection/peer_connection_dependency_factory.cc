@@ -12,8 +12,6 @@
 #include <vector>
 
 #include "base/feature_list.h"
-#include "base/features/feature_utils.h"
-#include "base/features/submodule_features.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
@@ -31,6 +29,7 @@
 #include "media/base/decoder_factory.h"
 #include "media/base/media_permission.h"
 #include "media/media_buildflags.h"
+#include "media/mojo/mojom/interface_factory.mojom.h"
 #include "media/video/gpu_video_accelerator_factories.h"
 #include "net/net_buildflags.h"
 #include "third_party/blink/public/common/features.h"
@@ -100,18 +99,6 @@ struct CrossThreadCopier<base::RepeatingCallback<void(base::TimeDelta)>>
 }  // namespace WTF
 
 namespace blink {
-
-// Feature flag for driving the Metronome by VSyncs instead of by timer.
-BASE_FEATURE(kVSyncDecoding,
-             "VSyncDecoding",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Feature parameter controlling VSyncDecoding tick durations during occluded
-// tabs.
-const base::FeatureParam<base::TimeDelta>
-    kVSyncDecodingHiddenOccludedTickDuration{
-        &kVSyncDecoding, "occluded_tick_duration", base::Hertz(10)};
-
 namespace {
 
 using PassKey = base::PassKey<PeerConnectionDependencyFactory>;
@@ -216,7 +203,7 @@ class PeerConnectionStaticDeps {
     webrtc::ThreadWrapper::current()->set_send_allowed(true);
     if (!metronome_source_) {
       std::unique_ptr<MetronomeSource::TickProvider> tick_provider;
-      if (base::FeatureList::IsEnabled(kVSyncDecoding)) {
+      if (base::FeatureList::IsEnabled(features::kVSyncDecoding)) {
         vsync_provider_.emplace(
             Platform::Current()->VideoFrameCompositorTaskRunner(),
             To<LocalDOMWindow>(context)
@@ -228,7 +215,7 @@ class PeerConnectionStaticDeps {
         tick_provider = VSyncTickProvider::Create(
             *vsync_provider_, chrome_worker_thread_.task_runner(),
             std::make_unique<TimerBasedTickProvider>(
-                kVSyncDecodingHiddenOccludedTickDuration.Get()));
+                features::kVSyncDecodingHiddenOccludedTickDuration.Get()));
       } else {
         tick_provider = std::make_unique<TimerBasedTickProvider>(
             TimerBasedTickProvider::kDefaultPeriod);
@@ -482,11 +469,6 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
   StaticDeps().InitializeNetworkThread();
   StaticDeps().InitializeSignalingThread();
 
-#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-  if (base::IsFeatureEnabled(base::kFeatureExternalOpenH264Encoder))
-    webrtc::DisableRtcUseH264Encoder();
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-
 #if defined(OPERA_DESKTOP) && BUILDFLAG(IS_LINUX)
   // H.264 support must be built into the FFmpeg library loaded by Opera.
   if (!media::platform_mime_util::IsPlatformVideoDecoderAvailable())
@@ -551,6 +533,8 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
           &PeerConnectionDependencyFactory::InitializeSignalingThread,
           WrapCrossThreadPersistent(this),
           Platform::Current()->GetRenderingColorSpace(),
+          CrossThreadUnretained(
+              Platform::Current()->GetMediaInterfaceFactory()),
           Platform::Current()->MediaThreadTaskRunner(),
 #if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
           CrossThreadUnretained(
@@ -571,6 +555,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
 
 void PeerConnectionDependencyFactory::InitializeSignalingThread(
     const gfx::ColorSpace& render_color_space,
+    media::mojom::InterfaceFactory* media_interface_factory,
     scoped_refptr<base::SequencedTaskRunner> media_task_runner,
     media::GpuVideoAcceleratorFactories* external_software_factories,
     media::GpuVideoAcceleratorFactories* gpu_factories,
@@ -620,7 +605,8 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
         }
     )");
   socket_factory_ = std::make_unique<IpcPacketSocketFactory>(
-      p2p_socket_dispatcher_.Get(), traffic_annotation);
+      p2p_socket_dispatcher_.Get(), traffic_annotation, /*batch_udp_packets=*/
+      base::FeatureList::IsEnabled(features::kWebRtcSendPacketBatch));
 
   gpu_factories_ = gpu_factories;
   // base::Unretained is safe below, because
@@ -640,8 +626,8 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
                               base::Unretained(&webrtc_video_perf_reporter_)));
   std::unique_ptr<webrtc::VideoDecoderFactory> webrtc_decoder_factory =
       blink::CreateWebrtcVideoDecoderFactory(
-          gpu_factories, media_decoder_factory, std::move(media_task_runner),
-          render_color_space,
+          gpu_factories, media_decoder_factory, media_interface_factory,
+          std::move(media_task_runner), render_color_space,
           base::BindRepeating(&WebrtcVideoPerfReporter::StoreWebrtcVideoStats,
                               base::Unretained(&webrtc_video_perf_reporter_)));
 
@@ -701,7 +687,7 @@ bool PeerConnectionDependencyFactory::PeerConnectionFactoryCreated() {
   return !!pc_factory_;
 }
 
-scoped_refptr<webrtc::PeerConnectionInterface>
+rtc::scoped_refptr<webrtc::PeerConnectionInterface>
 PeerConnectionDependencyFactory::CreatePeerConnection(
     const webrtc::PeerConnectionInterface::RTCConfiguration& config,
     blink::WebLocalFrame* web_frame,
@@ -724,8 +710,7 @@ PeerConnectionDependencyFactory::CreatePeerConnection(
   auto pc_or_error = GetPcFactory()->CreatePeerConnectionOrError(
       config, std::move(dependencies));
   if (pc_or_error.ok()) {
-    // Convert from rtc::scoped_refptr to scoped_refptr
-    return pc_or_error.value().get();
+    return pc_or_error.value();
   } else {
     // Convert error
     ThrowExceptionFromRTCError(pc_or_error.error(), exception_state);
@@ -857,7 +842,11 @@ scoped_refptr<webrtc::VideoTrackInterface>
 PeerConnectionDependencyFactory::CreateLocalVideoTrack(
     const String& id,
     webrtc::VideoTrackSourceInterface* source) {
-  return GetPcFactory()->CreateVideoTrack(id.Utf8(), source).get();
+  return GetPcFactory()
+      ->CreateVideoTrack(
+          rtc::scoped_refptr<webrtc::VideoTrackSourceInterface>(source),
+          id.Utf8())
+      .get();
 }
 
 webrtc::IceCandidateInterface*

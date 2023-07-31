@@ -120,6 +120,15 @@ class DocumentLoaderTest : public testing::TestWithParam<bool> {
         url_test_helpers::ToKURL("http://example.com/foo.html"),
         test::CoreTestDataPath("foo.html"));
     url_test_helpers::RegisterMockedURLLoad(
+        url_test_helpers::ToKURL("http://user:@example.com/foo.html"),
+        test::CoreTestDataPath("foo.html"));
+    url_test_helpers::RegisterMockedURLLoad(
+        url_test_helpers::ToKURL("http://:pass@example.com/foo.html"),
+        test::CoreTestDataPath("foo.html"));
+    url_test_helpers::RegisterMockedURLLoad(
+        url_test_helpers::ToKURL("http://user:pass@example.com/foo.html"),
+        test::CoreTestDataPath("foo.html"));
+    url_test_helpers::RegisterMockedURLLoad(
         url_test_helpers::ToKURL("https://example.com/foo.html"),
         test::CoreTestDataPath("foo.html"));
     url_test_helpers::RegisterMockedURLLoad(
@@ -129,17 +138,17 @@ class DocumentLoaderTest : public testing::TestWithParam<bool> {
         url_test_helpers::ToKURL("http://192.168.1.1/foo.html"),
         test::CoreTestDataPath("foo.html"), WebString::FromUTF8("text/html"),
         URLLoaderMockFactory::GetSingletonInstance(),
-        network::mojom::IPAddressSpace::kPrivate);
+        network::mojom::IPAddressSpace::kLocal);
     url_test_helpers::RegisterMockedURLLoad(
         url_test_helpers::ToKURL("https://192.168.1.1/foo.html"),
         test::CoreTestDataPath("foo.html"), WebString::FromUTF8("text/html"),
         URLLoaderMockFactory::GetSingletonInstance(),
-        network::mojom::IPAddressSpace::kPrivate);
+        network::mojom::IPAddressSpace::kLocal);
     url_test_helpers::RegisterMockedURLLoad(
         url_test_helpers::ToKURL("http://somethinglocal/foo.html"),
         test::CoreTestDataPath("foo.html"), WebString::FromUTF8("text/html"),
         URLLoaderMockFactory::GetSingletonInstance(),
-        network::mojom::IPAddressSpace::kLocal);
+        network::mojom::IPAddressSpace::kLoopback);
   }
 
   void TearDown() override {
@@ -583,7 +592,7 @@ TEST_P(DocumentLoaderTest, SameOriginNavigation_WithStorageAccess) {
       WebNavigationParams::CreateWithHTMLBufferForTesting(
           SharedBuffer::Create(), same_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
-  params->has_storage_access = true;
+  params->load_with_storage_access = true;
   LocalFrame* local_frame =
       To<LocalFrame>(web_view_impl->GetPage()->MainFrame());
   base::HistogramTester histogram_tester;
@@ -836,6 +845,25 @@ TEST_P(DocumentLoaderTest, DecodedBodyDataWithBlockedParser) {
 
   // DecodedBodyLoader uppercases all data.
   EXPECT_EQ(MainFrame()->GetDocument().Body().TextContent(), "FOO");
+}
+
+TEST_P(DocumentLoaderTest, EmbeddedCredentialsNavigation) {
+  struct TestCase {
+    const char* url;
+    const bool useCounted;
+  } test_cases[] = {{"http://example.com/foo.html", false},
+                    {"http://user:@example.com/foo.html", true},
+                    {"http://:pass@example.com/foo.html", true},
+                    {"http://user:pass@example.com/foo.html", true}};
+  for (const auto& test_case : test_cases) {
+    WebViewImpl* web_view_impl =
+        web_view_helper_.InitializeAndLoad(test_case.url);
+    Document* document =
+        To<LocalFrame>(web_view_impl->GetPage()->MainFrame())->GetDocument();
+    EXPECT_EQ(test_case.useCounted,
+              document->IsUseCounted(
+                  WebFeature::kTopLevelDocumentWithEmbeddedCredentials));
+  }
 }
 
 }  // namespace

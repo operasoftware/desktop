@@ -15,6 +15,10 @@
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_decoder_adapter.h"
 
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#include "base/features/feature_utils.h"
+#include "base/features/submodule_features.h"
+#include "media/mojo/clients/mojo_video_decoder.h"
+#include "media/mojo/mojom/interface_factory.mojom.h"
 #if BUILDFLAG(IS_MAC)
 #include "media/filters/vt_video_decoder.h"
 #elif BUILDFLAG(IS_WIN)
@@ -69,8 +73,12 @@ class ScopedVideoDecoder : public webrtc::VideoDecoder {
 }  // namespace
 
 RTCPlatformSWVideoDecoderFactory::RTCPlatformSWVideoDecoderFactory(
-    scoped_refptr<base::SequencedTaskRunner> media_task_runner)
-    : media_task_runner_(std::move(media_task_runner)) {}
+    media::mojom::InterfaceFactory* media_interface_factory,
+    scoped_refptr<base::SequencedTaskRunner> media_task_runner,
+    const gfx::ColorSpace& render_color_space)
+    : media_interface_factory_(media_interface_factory),
+      media_task_runner_(std::move(media_task_runner)),
+      render_color_space_(render_color_space) {}
 
 RTCPlatformSWVideoDecoderFactory::~RTCPlatformSWVideoDecoderFactory() = default;
 
@@ -81,13 +89,25 @@ RTCPlatformSWVideoDecoderFactory::CreateVideoDecoder(
 
   std::unique_ptr<media::VideoDecoder> platform_decoder;
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+  if (base::IsFeatureEnabled(base::kFeaturePlatformH264DecoderInGpu)) {
+    mojo::PendingRemote<media::mojom::VideoDecoder> video_decoder_remote;
+    media_interface_factory_->CreateVideoDecoder(
+        video_decoder_remote.InitWithNewPipeAndPassReceiver(),
+        /*dst_video_decoder=*/{});
+
+    platform_decoder = std::make_unique<media::MojoVideoDecoder>(
+        media_task_runner_, /*gpu_factories=*/nullptr, &media_log_,
+        std::move(video_decoder_remote),
+        /*request_overlay_info_cb=*/base::DoNothing(), render_color_space_);
+  } else {
 #if BUILDFLAG(IS_MAC)
-  platform_decoder =
-      std::make_unique<media::VTVideoDecoder>(media_task_runner_);
+    platform_decoder =
+        std::make_unique<media::VTVideoDecoder>(media_task_runner_);
 #elif BUILDFLAG(IS_WIN)
-  platform_decoder =
-      std::make_unique<media::WMFVideoDecoder>(media_task_runner_);
+    platform_decoder =
+        std::make_unique<media::WMFVideoDecoder>(media_task_runner_);
 #endif
+  }
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
   if (platform_decoder) {

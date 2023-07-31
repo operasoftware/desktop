@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy_violation_type.h"
+#include "third_party/blink/renderer/core/inspector/protocol/audits.h"
 
 namespace WTF {
 class String;
@@ -45,16 +46,19 @@ enum class RendererCorsIssueCode {
 
 enum class AttributionReportingIssueType {
   kPermissionPolicyDisabled,
-  kPermissionPolicyNotDelegated,
   kUntrustworthyReportingOrigin,
   kInsecureContext,
   kInvalidRegisterSourceHeader,
   kInvalidRegisterTriggerHeader,
-  kInvalidEligibleHeader,
-  kTooManyConcurrentRequests,
   kSourceAndTriggerHeaders,
   kSourceIgnored,
   kTriggerIgnored,
+  kOsSourceIgnored,
+  kOsTriggerIgnored,
+  kInvalidRegisterOsSourceHeader,
+  kInvalidRegisterOsTriggerHeader,
+  kWebAndOsHeaders,
+  kNoWebOrOsSupport,
 };
 
 enum class SharedArrayBufferIssueType {
@@ -162,9 +166,17 @@ class CORE_EXPORT AuditsIssue {
       SourceLocation* source_location,
       absl::optional<base::UnguessableToken> issue_id);
 
+  static protocol::Audits::GenericIssueErrorType
+  GenericIssueErrorTypeToProtocol(
+      mojom::blink::GenericIssueErrorType error_type);
+
   static void ReportGenericIssue(LocalFrame* frame,
                                  mojom::blink::GenericIssueErrorType error_type,
                                  int violating_node_id);
+  static void ReportGenericIssue(LocalFrame* frame,
+                                 mojom::blink::GenericIssueErrorType error_type,
+                                 int violating_node_id,
+                                 const String& violating_node_attribute);
 
  private:
   explicit AuditsIssue(std::unique_ptr<protocol::Audits::InspectorIssue> issue);

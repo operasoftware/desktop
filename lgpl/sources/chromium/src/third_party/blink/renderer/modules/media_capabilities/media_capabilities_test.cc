@@ -392,6 +392,8 @@ class MediaCapabilitiesTestContext {
  private:
   base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
       base::kFeaturePlatformAacDecoderInGpu, true};
+  base::ScopedTestFeatureOverride enable_h264_decoder_in_gpu_{
+      base::kFeaturePlatformH264DecoderInGpu, true};
 
   V8TestingScope v8_scope_;
   ScopedTestingPlatformSupport<MockPlatform> mock_platform_;
@@ -1398,6 +1400,7 @@ TEST(MediaCapabilitiesTests, WebrtcDecodePowerEfficientIsSmooth) {
       blink::CreateWebrtcVideoDecoderFactory(
           mock_gpu_factories.get(),
           Platform::Current()->GetMediaDecoderFactory(),
+          Platform::Current()->GetMediaInterfaceFactory(),
           Platform::Current()->MediaThreadTaskRunner(),
           Platform::Current()->GetRenderingColorSpace(), base::DoNothing()),
       blink::CreateWebrtcAudioDecoderFactory());
@@ -1438,6 +1441,7 @@ TEST(MediaCapabilitiesTests, WebrtcDecodeOverridePowerEfficientIsSmooth) {
   WebrtcDecodingInfoHandler decoding_info_handler(
       blink::CreateWebrtcVideoDecoderFactory(
           &mock_gpu_factories, Platform::Current()->GetMediaDecoderFactory(),
+          Platform::Current()->GetMediaInterfaceFactory(),
           Platform::Current()->MediaThreadTaskRunner(),
           Platform::Current()->GetRenderingColorSpace(), base::DoNothing()),
       blink::CreateWebrtcAudioDecoderFactory());

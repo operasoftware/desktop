@@ -34,6 +34,7 @@
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-shared.h"
 #include "third_party/blink/public/mojom/frame/media_player_action.mojom-shared.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-shared.h"
+#include "third_party/blink/public/mojom/loader/resource_cache.mojom-shared.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-shared.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-shared.h"
 #include "third_party/blink/public/mojom/portal/portal.mojom-shared.h"
@@ -140,7 +141,8 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
       std::unique_ptr<blink::WebPolicyContainer> policy_container,
       WebFrame* opener = nullptr,
       const WebString& name = WebString(),
-      network::mojom::WebSandboxFlags = network::mojom::WebSandboxFlags::kNone);
+      network::mojom::WebSandboxFlags = network::mojom::WebSandboxFlags::kNone,
+      const WebURL& base_url = WebURL());
 
   // Used to create a provisional local frame. Currently, it's possible for a
   // provisional navigation not to commit (i.e. it might turn into a download),
@@ -458,6 +460,13 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
   }
 
   void AddGenericIssue(mojom::GenericIssueErrorType error_type,
+                       int violating_node_id,
+                       const WebString& violating_node_attribute) {
+    AddGenericIssueImpl(error_type, violating_node_id,
+                        violating_node_attribute);
+  }
+
+  void AddGenericIssue(mojom::GenericIssueErrorType error_type,
                        int violating_node_id) {
     AddGenericIssueImpl(error_type, violating_node_id);
   }
@@ -504,6 +513,7 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
       base::i18n::TextDirection direction) = 0;
 
   // Selection -----------------------------------------------------------
+  virtual void CenterSelection() = 0;
 
   virtual bool HasSelection() const = 0;
 
@@ -559,6 +569,9 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
       int composition_end,
       const WebVector<ui::ImeTextSpan>& ime_text_spans) = 0;
   virtual void ExtendSelectionAndDelete(int before, int after) = 0;
+  virtual void ExtendSelectionAndReplace(int before,
+                                         int after,
+                                         const WebString& replacement_text) = 0;
 
   // Moves the selection extent point. This function does not allow the
   // selection to collapse. If the new extent is set to the same position as
@@ -765,10 +778,8 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
   // not in printing mode.
   virtual float GetPrintPageShrink(uint32_t page) = 0;
 
-  // Prints one page, and returns the calculated page shrinking factor
-  // (usually between 1/1.33 and 1/2).  Returns 0 if the page number is
-  // invalid or not in printing mode.
-  virtual float PrintPage(uint32_t page_to_print, cc::PaintCanvas*) = 0;
+  // Prints one page.
+  virtual void PrintPage(uint32_t page_to_print, cc::PaintCanvas*) = 0;
 
   // Reformats the WebFrame for screen display.
   virtual void PrintEnd() = 0;
@@ -931,6 +942,10 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
       base::RepeatingCallback<void(const blink::WebHitTestResult&)>
           callback) = 0;
 
+  // Sets a ResourceCache hosted by another frame.
+  virtual void SetResourceCacheRemote(
+      CrossVariantMojoRemote<mojom::ResourceCacheInterfaceBase> remote) = 0;
+
  protected:
   explicit WebLocalFrame(mojom::TreeScopeType scope,
                          const LocalFrameToken& frame_token)
@@ -949,7 +964,10 @@ class BLINK_EXPORT WebLocalFrame : public WebFrame {
   virtual void AddGenericIssueImpl(
       blink::mojom::GenericIssueErrorType error_type,
       int violating_node_id) = 0;
-
+  virtual void AddGenericIssueImpl(
+      blink::mojom::GenericIssueErrorType error_type,
+      int violating_node_id,
+      const WebString& violating_node_attribute) = 0;
   virtual void CreateFrameWidgetInternal(
       base::PassKey<WebLocalFrame> pass_key,
       CrossVariantMojoAssociatedRemote<mojom::FrameWidgetHostInterfaceBase>

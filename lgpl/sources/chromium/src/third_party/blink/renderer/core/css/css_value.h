@@ -56,7 +56,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   bool IsBasicShapeValue() const {
     return class_type_ >= kBasicShapeCircleClass &&
-           class_type_ <= kBasicShapeRectClass;
+           class_type_ <= kBasicShapeXYWHClass;
   }
   bool IsBasicShapeCircleValue() const {
     return class_type_ == kBasicShapeCircleClass;
@@ -104,6 +104,10 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return class_type_ >= kLinearGradientClass &&
            class_type_ <= kConicGradientClass;
   }
+  bool IsImageSetOptionValue() const {
+    return class_type_ == kImageSetOptionClass;
+  }
+  bool IsImageSetTypeValue() const { return class_type_ == kImageSetTypeClass; }
   bool IsImageSetValue() const { return class_type_ == kImageSetClass; }
   bool IsImageValue() const { return class_type_ == kImageClass; }
   bool IsInheritedValue() const { return class_type_ == kInheritedClass; }
@@ -213,6 +217,10 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   }
   bool IsScopedValue() const { return !needs_tree_scope_population_; }
 
+#if DCHECK_IS_ON()
+  String ClassTypeToString() const;
+#endif
+
   void TraceAfterDispatch(blink::Visitor* visitor) const {}
   void Trace(Visitor*) const;
 
@@ -295,6 +303,9 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
     kShaderValueClass,
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
+    kImageSetOptionClass,
+    kImageSetTypeClass,
 
     // List class types must appear after ValueListClass.
     kValueListClass,

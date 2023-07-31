@@ -42,6 +42,8 @@ class DecoderTemplateTest : public testing::Test {
  private:
   base::ScopedTestFeatureOverride gpu_audio_decoder_enabled{
       base::kFeaturePlatformAacDecoderInGpu, true};
+  base::ScopedTestFeatureOverride gpu_video_decoder_enabled{
+      base::kFeaturePlatformH264DecoderInGpu, true};
 };
 
 template <>

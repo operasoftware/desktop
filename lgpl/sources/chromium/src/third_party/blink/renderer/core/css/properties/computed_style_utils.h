@@ -32,6 +32,10 @@ class StyleIntrinsicLength;
 class StylePropertyShorthand;
 class StyleTimeline;
 
+namespace cssvalue {
+class CSSContentDistributionValue;
+}
+
 enum class CSSValuePhase { kComputedValue, kUsedValue };
 
 class CORE_EXPORT ComputedStyleUtils {
@@ -106,9 +110,9 @@ class CORE_EXPORT ComputedStyleUtils {
   static CSSValue* ValueForPositionOffset(const ComputedStyle&,
                                           const CSSProperty&,
                                           const LayoutObject*);
-  static CSSValueList* ValueForItemPositionWithOverflowAlignment(
+  static CSSValue* ValueForItemPositionWithOverflowAlignment(
       const StyleSelfAlignmentData&);
-  static CSSValueList*
+  static cssvalue::CSSContentDistributionValue*
   ValueForContentPositionAndDistributionWithOverflowAlignment(
       const StyleContentAlignmentData&);
   static CSSValue* ValueForLineHeight(const ComputedStyle&);
@@ -116,6 +120,7 @@ class CORE_EXPORT ComputedStyleUtils {
   static CSSValueList* ValueForFontFamily(const FontFamily&);
   static CSSValueList* ValueForFontFamily(const ComputedStyle&);
   static CSSPrimitiveValue* ValueForFontSize(const ComputedStyle&);
+  static CSSValue* ValueForFontSizeAdjust(const ComputedStyle&);
   static CSSPrimitiveValue* ValueForFontStretch(const ComputedStyle&);
   static CSSValue* ValueForFontStyle(const ComputedStyle&);
   static CSSNumericLiteralValue* ValueForFontWeight(const ComputedStyle&);
@@ -151,7 +156,8 @@ class CORE_EXPORT ComputedStyleUtils {
   static CSSValue* ValueForAnimationDelayStart(const Timing::Delay& delay);
   static CSSValue* ValueForAnimationDelayEnd(const Timing::Delay& delay);
   static CSSValue* ValueForAnimationDirection(Timing::PlaybackDirection);
-  static CSSValue* ValueForAnimationDuration(const absl::optional<double>&);
+  static CSSValue* ValueForAnimationDuration(const absl::optional<double>&,
+                                             bool resolve_auto_to_zero);
   static CSSValue* ValueForAnimationFillMode(Timing::FillMode);
   static CSSValue* ValueForAnimationIterationCount(double iteration_count);
   static CSSValue* ValueForAnimationPlayState(EAnimPlayState);
@@ -168,7 +174,9 @@ class CORE_EXPORT ComputedStyleUtils {
   static CSSValue* ValueForAnimationDelayStartList(const CSSTimingData*);
   static CSSValue* ValueForAnimationDelayEndList(const CSSTimingData*);
   static CSSValue* ValueForAnimationDirectionList(const CSSAnimationData*);
-  static CSSValue* ValueForAnimationDurationList(const CSSTimingData*);
+  static CSSValue* ValueForAnimationDurationList(const CSSAnimationData*,
+                                                 CSSValuePhase phase);
+  static CSSValue* ValueForAnimationDurationList(const CSSTransitionData*);
   static CSSValue* ValueForAnimationFillModeList(const CSSAnimationData*);
   static CSSValue* ValueForAnimationIterationCountList(const CSSAnimationData*);
   static CSSValue* ValueForAnimationPlayStateList(const CSSAnimationData*);
@@ -180,7 +188,8 @@ class CORE_EXPORT ComputedStyleUtils {
   static CSSValue* ValueForAnimationTimelineList(const CSSAnimationData*);
 
   static CSSValue* SingleValueForTimelineShorthand(const ScopedCSSName* name,
-                                                   TimelineAxis);
+                                                   TimelineAxis,
+                                                   TimelineAttachment);
   static CSSValueList* ValuesForBorderRadiusCorner(const LengthSize&,
                                                    const ComputedStyle&);
   static CSSValue* ValueForBorderRadiusCorner(const LengthSize&,
@@ -305,6 +314,8 @@ class CORE_EXPORT ComputedStyleUtils {
   static CSSValue* ValueForIntrinsicLength(
       const ComputedStyle&,
       const absl::optional<StyleIntrinsicLength>&);
+  static CSSValue* ValueForScrollStart(const ComputedStyle&,
+                                       const ScrollStartData&);
   static std::unique_ptr<CrossThreadStyleValue>
   CrossThreadStyleValueFromCSSStyleValue(CSSStyleValue* style_value);
 

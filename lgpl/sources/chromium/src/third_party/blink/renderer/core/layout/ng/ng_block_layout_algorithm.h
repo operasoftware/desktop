@@ -69,8 +69,10 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   NOINLINE const NGLayoutResult* HandleNonsuccessfulLayoutResult(
       const NGLayoutResult*);
 
-  NOINLINE const NGLayoutResult* LayoutWithInlineChildLayoutContext(
-      const NGLayoutInputNode& first_child);
+  NOINLINE const NGLayoutResult* LayoutWithSimpleInlineChildLayoutContext(
+      const NGInlineNode& child);
+  NOINLINE const NGLayoutResult* LayoutWithOptimalInlineChildLayoutContext(
+      const NGInlineNode& child);
 
   NOINLINE const NGLayoutResult* RelayoutIgnoringLineClamp();
 
@@ -223,7 +225,8 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   // clipped box gets overflowed past the fragmentation line). The return value
   // can be checked for this. Only if kContinue is returned, can a fragment be
   // created.
-  NGBreakStatus FinalizeForFragmentation();
+  NGBreakStatus FinalizeForFragmentation(
+      LayoutUnit block_end_border_padding_added);
 
   // Insert a fragmentainer break before the child if necessary.
   // See |::blink::BreakBeforeChildIfNeeded()| for more documentation.

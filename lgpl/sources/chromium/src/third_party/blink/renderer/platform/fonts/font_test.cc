@@ -43,10 +43,8 @@ class FontTest : public FontTestBase {
         test::PlatformTestDataPath("third_party/Roboto/roboto-regular.woff2"),
         100, &ligatures);
 
-    TextRun text_run(
-        text, /* xpos */ 0, /* expansion */ 0,
-        TextRun::kAllowTrailingExpansion | TextRun::kForbidLeadingExpansion,
-        ltr ? TextDirection::kLtr : TextDirection::kRtl, false);
+    TextRun text_run(text, ltr ? TextDirection::kLtr : TextDirection::kRtl,
+                     false);
 
     font.ExpandRangeToIncludePartialGlyphs(text_run, &from, &to);
     return Vector<int>({from, to});
@@ -208,6 +206,14 @@ TEST_F(FontTest, TabWidthZero) {
   TabSize tab_size(8);
   EXPECT_EQ(font.TabWidth(tab_size, .0f), .0f);
   EXPECT_EQ(font.TabWidth(tab_size, LayoutUnit()), LayoutUnit());
+}
+
+TEST_F(FontTest, NullifyPrimaryFontForTesting) {
+  Font font =
+      CreateTestFont("Ahem", test::PlatformTestDataPath("Ahem.woff"), 0);
+  EXPECT_TRUE(font.PrimaryFont());
+  font.NullifyPrimaryFontForTesting();
+  EXPECT_FALSE(font.PrimaryFont());
 }
 
 }  // namespace blink

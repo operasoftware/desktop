@@ -5,10 +5,10 @@
 #include "third_party/blink/renderer/core/layout/anchor_scroll_data.h"
 
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_anchor_query.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 
@@ -25,44 +25,19 @@ const LayoutObject* AnchorScrollObject(const LayoutObject* layout_object) {
   if (!value)
     return nullptr;
 
-  LayoutBox::NGPhysicalFragmentList containing_block_fragments =
-      layout_object->ContainingBlock()->PhysicalFragments();
-  if (containing_block_fragments.IsEmpty())
-    return nullptr;
-
-  // TODO(crbug.com/1309178): Fix it when the containing block is fragmented or
-  // an inline box.
-  const NGPhysicalAnchorQuery* anchor_query =
-      containing_block_fragments.front().AnchorQuery();
-  if (!anchor_query)
-    return nullptr;
-
-  bool is_in_top_layer = layout_object->IsInTopLayer();
-
-  const NGPhysicalFragment* fragment = nullptr;
+  const LayoutBox* box = To<LayoutBox>(layout_object);
+  const LayoutObject* anchor = nullptr;
   if (value->IsNamed()) {
-    fragment = anchor_query->Fragment(&value->GetName(), is_in_top_layer);
+    anchor = box->FindTargetAnchor(value->GetName());
   } else if (value->IsDefault() && style.AnchorDefault()) {
-    fragment = anchor_query->Fragment(style.AnchorDefault(), is_in_top_layer);
+    anchor = box->FindTargetAnchor(*style.AnchorDefault());
   } else {
     DCHECK(value->IsImplicit() ||
            (value->IsDefault() && !style.AnchorDefault()));
-    Element* element = DynamicTo<Element>(layout_object->GetNode());
-    Element* anchor = element ? element->ImplicitAnchorElement() : nullptr;
-    LayoutObject* anchor_layout_object =
-        anchor ? anchor->GetLayoutObject() : nullptr;
-    if (anchor_layout_object)
-      fragment = anchor_query->Fragment(anchor_layout_object, is_in_top_layer);
+    anchor = box->AcceptableImplicitAnchor();
   }
 
-  // |is_in_top_layer| allows NGPhysicalAnchorQuery to return elements that are
-  // rendered after, and hence, can't be used as anchors for |layout_object|.
-  if (is_in_top_layer && fragment &&
-      layout_object->IsBeforeInPreOrder(*fragment->GetLayoutObject())) {
-    return nullptr;
-  }
-
-  return fragment ? fragment->GetLayoutObject() : nullptr;
+  return anchor;
 }
 
 // Returns the PaintLayer of the scroll container of |anchor|.
@@ -92,6 +67,20 @@ const PaintLayer* ContainingScrollContainerLayerForAnchorPositionedBox(
   const PaintLayer* scroller_layer =
       box->Layer()->ContainingScrollContainerLayer(&is_fixed_to_view);
   return is_fixed_to_view ? nullptr : scroller_layer;
+}
+
+const Vector<PhysicalScrollRange>* GetNonOverflowingScrollRanges(
+    const LayoutObject* layout_object) {
+  if (!layout_object || !layout_object->IsOutOfFlowPositioned()) {
+    return nullptr;
+  }
+  DCHECK(layout_object->IsBox());
+  const auto& layout_results = To<LayoutBox>(layout_object)->GetLayoutResults();
+  if (layout_results.empty()) {
+    return nullptr;
+  }
+  // TODO(crbug.com/1309178): Make sure it works when the box is fragmented.
+  return layout_results.front()->PositionFallbackNonOverflowingRanges();
 }
 
 }  // namespace
@@ -157,16 +146,17 @@ AnchorScrollData::SnapshotDiff AnchorScrollData::TakeAndCompareSnapshot(
 }
 
 bool AnchorScrollData::IsFallbackPositionValid(
-    const gfx::Vector2dF& accumulated_scroll_offset) const {
-  if (!non_overflowing_rects_.size())
+    const gfx::Vector2dF& new_accumulated_scroll_offset) const {
+  const Vector<PhysicalScrollRange>* non_overflowing_scroll_ranges =
+      GetNonOverflowingScrollRanges(owner_->GetLayoutObject());
+  if (!non_overflowing_scroll_ranges ||
+      non_overflowing_scroll_ranges->empty()) {
     return true;
+  }
 
-  PhysicalOffset old_translation = TranslationAsPhysicalOffset();
-  PhysicalOffset new_translation =
-      -PhysicalOffset::FromVector2dFFloor(accumulated_scroll_offset);
-  for (const PhysicalRect& rect : non_overflowing_rects_) {
-    if (rect.ContainsInclusive(old_translation) !=
-        rect.ContainsInclusive(new_translation)) {
+  for (const PhysicalScrollRange& range : *non_overflowing_scroll_ranges) {
+    if (range.Contains(accumulated_scroll_offset_) !=
+        range.Contains(new_accumulated_scroll_offset)) {
       return false;
     }
   }
@@ -191,6 +181,11 @@ void AnchorScrollData::UpdateSnapshot() {
 }
 
 bool AnchorScrollData::ValidateSnapshot() {
+  if (is_snapshot_validated_) {
+    return true;
+  }
+  is_snapshot_validated_ = true;
+
   // If this AnchorScrollData is detached in the previous style recalc, we no
   // longer need to validate it.
   if (!IsActive())

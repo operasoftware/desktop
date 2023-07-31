@@ -16,8 +16,7 @@
 
 namespace blink {
 
-class PeerConnectionDependencyFactoryTest
-    : public ::testing::TestWithParam<bool> {
+class PeerConnectionDependencyFactoryTest : public ::testing::Test {
  public:
   void EnsureDependencyFactory(ExecutionContext& context) {
     dependency_factory_ = &PeerConnectionDependencyFactory::From(context);
@@ -42,17 +41,13 @@ class PeerConnectionDependencyFactoryTest
  protected:
   base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
       base::kFeaturePlatformAacDecoderInGpu, true};
-  base::ScopedTestFeatureOverride enable_external_openh264_{
-      base::kFeatureExternalOpenH264Encoder, GetParam()};
+  base::ScopedTestFeatureOverride enable_h264_decoder_in_gpu_{
+      base::kFeaturePlatformH264DecoderInGpu, true};
   Persistent<PeerConnectionDependencyFactory> dependency_factory_;
   MockRTCPeerConnectionHandlerClient mock_client_;
 };
 
-INSTANTIATE_TEST_SUITE_P(,
-                         PeerConnectionDependencyFactoryTest,
-                         testing::Bool());
-
-TEST_P(PeerConnectionDependencyFactoryTest, CreateRTCPeerConnectionHandler) {
+TEST_F(PeerConnectionDependencyFactoryTest, CreateRTCPeerConnectionHandler) {
   V8TestingScope scope;
   EnsureDependencyFactory(*scope.GetExecutionContext());
 

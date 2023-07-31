@@ -2,9 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {BrowserChannel, UpdateStatus} from 'chrome://os-settings/chromeos/os_settings.js';
+import {BrowserChannel, UpdateStatus} from 'chrome://os-settings/os_settings.js';
 import {webUIListenerCallback} from 'chrome://resources/ash/common/cr.m.js';
-
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
 /** @implements {AboutPageBrowserProxy} */
@@ -21,6 +20,7 @@ export class TestAboutPageBrowserProxyChromeOS extends TestBrowserProxy {
       'getRegulatoryInfo',
       'checkInternetConnection',
       'getEndOfLifeInfo',
+      'endOfLifeIncentiveButtonClicked',
       'launchReleaseNotes',
       'openOsHelpPage',
       'openDiagnostics',
@@ -67,6 +67,7 @@ export class TestAboutPageBrowserProxyChromeOS extends TestBrowserProxy {
     this.endOfLifeInfo_ = {
       hasEndOfLife: false,
       aboutPageEndOfLifeMessage: '',
+      shouldShowEndOfLifeIncentive: false,
     };
 
     /** @private {!boolean} */
@@ -201,6 +202,10 @@ export class TestAboutPageBrowserProxyChromeOS extends TestBrowserProxy {
   getEndOfLifeInfo() {
     this.methodCalled('getEndOfLifeInfo');
     return Promise.resolve(this.endOfLifeInfo_);
+  }
+
+  endOfLifeIncentiveButtonClicked() {
+    this.methodCalled('endOfLifeIncentiveButtonClicked');
   }
 
   /** @override */

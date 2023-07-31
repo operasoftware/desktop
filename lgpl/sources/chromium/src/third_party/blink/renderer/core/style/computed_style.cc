@@ -27,7 +27,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/cxx17_backports.h"
 #include "base/memory/values_equivalent.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/clamped_math.h"
@@ -51,17 +50,24 @@
 #include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/html/html_progress_element.h"
+#include "third_party/blink/renderer/core/layout/layout_block.h"
+#include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
+#include "third_party/blink/renderer/core/layout/map_coordinates_flags.h"
 #include "third_party/blink/renderer/core/layout/ng/custom/layout_worklet.h"
 #include "third_party/blink/renderer/core/layout/text_autosizer.h"
 #include "third_party/blink/renderer/core/paint/compositing/compositing_reason_finder.h"
 #include "third_party/blink/renderer/core/style/applied_text_decoration.h"
+#include "third_party/blink/renderer/core/style/basic_shapes.h"
 #include "third_party/blink/renderer/core/style/border_edge.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/computed_style_initial_values.h"
 #include "third_party/blink/renderer/core/style/content_data.h"
+#include "third_party/blink/renderer/core/style/coord_box_offset_path_operation.h"
 #include "third_party/blink/renderer/core/style/cursor_data.h"
+#include "third_party/blink/renderer/core/style/reference_offset_path_operation.h"
 #include "third_party/blink/renderer/core/style/shadow_list.h"
+#include "third_party/blink/renderer/core/style/shape_offset_path_operation.h"
 #include "third_party/blink/renderer/core/style/style_difference.h"
 #include "third_party/blink/renderer/core/style/style_fetched_image.h"
 #include "third_party/blink/renderer/core/style/style_generated_image.h"
@@ -70,6 +76,8 @@
 #include "third_party/blink/renderer/core/style/style_non_inherited_variables.h"
 #include "third_party/blink/renderer/core/style/style_ray.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
+#include "third_party/blink/renderer/core/svg/svg_geometry_element.h"
+#include "third_party/blink/renderer/core/svg/svg_length_context.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector.h"
 #include "third_party/blink/renderer/platform/geometry/length_functions.h"
@@ -87,6 +95,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/case_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/math_transform.h"
 #include "ui/base/ui_base_features.h"
+#include "ui/gfx/geometry/point_f.h"
 
 namespace blink {
 
@@ -205,10 +214,6 @@ PositionFallbackStyleCache& ComputedStyle::EnsurePositionFallbackStyleCache(
   return *cached_data_->position_fallback_styles_;
 }
 
-scoped_refptr<ComputedStyle> ComputedStyle::Clone(const ComputedStyle& other) {
-  return base::AdoptRef(new ComputedStyle(PassKey(), other));
-}
-
 ALWAYS_INLINE ComputedStyle::ComputedStyle()
     : ComputedStyleBase(), RefCounted<ComputedStyle>() {}
 
@@ -258,7 +263,8 @@ static bool DiffAffectsContainerQueries(const ComputedStyle& old_style,
       !new_style.IsContainerForSizeContainerQueries()) {
     return false;
   }
-  if ((old_style.ContainerName() != new_style.ContainerName()) ||
+  if (!base::ValuesEquivalent(old_style.ContainerName(),
+                              new_style.ContainerName()) ||
       (old_style.ContainerType() != new_style.ContainerType())) {
     return true;
   }
@@ -273,28 +279,23 @@ static bool DiffAffectsContainerQueries(const ComputedStyle& old_style,
 
 static bool DiffAffectsScrollAnimations(const ComputedStyle& old_style,
                                         const ComputedStyle& new_style) {
-  if ((old_style.ScrollTimelineName() != new_style.ScrollTimelineName()) ||
-      (old_style.ScrollTimelineAxis() != new_style.ScrollTimelineAxis())) {
+  if (!base::ValuesEquivalent(old_style.ScrollTimelineName(),
+                              new_style.ScrollTimelineName()) ||
+      (old_style.ScrollTimelineAxis() != new_style.ScrollTimelineAxis()) ||
+      (old_style.ScrollTimelineAttachment() !=
+       new_style.ScrollTimelineAttachment())) {
     return true;
   }
-  if ((old_style.ViewTimelineName() != new_style.ViewTimelineName()) ||
+  if (!base::ValuesEquivalent(old_style.ViewTimelineName(),
+                              new_style.ViewTimelineName()) ||
       (old_style.ViewTimelineAxis() != new_style.ViewTimelineAxis()) ||
-      (old_style.ViewTimelineInset() != new_style.ViewTimelineInset())) {
+      (old_style.ViewTimelineInset() != new_style.ViewTimelineInset()) ||
+      (old_style.ViewTimelineAttachment() !=
+       new_style.ViewTimelineAttachment())) {
     return true;
   }
-  return false;
-}
-
-// The transition to/from nullptr style can affect subsequent siblings
-// if they reference a named timeline which appeared/disappeared.
-static bool AffectsScrollAnimations(const ComputedStyle* old_style,
-                                    const ComputedStyle* new_style) {
-  if (old_style &&
-      (old_style->ScrollTimelineName() || old_style->ViewTimelineName())) {
-    return true;
-  }
-  if (new_style &&
-      (new_style->ScrollTimelineName() || new_style->ViewTimelineName())) {
+  if (!base::ValuesEquivalent(old_style.TimelineScope(),
+                              new_style.TimelineScope())) {
     return true;
   }
   return false;
@@ -367,7 +368,10 @@ bool ComputedStyle::NeedsReattachLayoutTree(const Element& element,
     return true;
   }
 
-  if (old_style->TopLayer() != new_style->TopLayer()) {
+  if (old_style->Overlay() != new_style->Overlay()) {
+    return true;
+  }
+  if (old_style->ListStylePosition() != new_style->ListStylePosition()) {
     return true;
   }
   return false;
@@ -380,9 +384,6 @@ ComputedStyle::Difference ComputedStyle::ComputeDifference(
     return Difference::kEqual;
   }
   if (!old_style || !new_style) {
-    if (AffectsScrollAnimations(old_style, new_style)) {
-      return Difference::kSiblingDescendantAffecting;
-    }
     return Difference::kInherited;
   }
 
@@ -413,7 +414,7 @@ ComputedStyle::ComputeDifferenceIgnoringInheritedFirstLineStyle(
     const ComputedStyle& new_style) {
   DCHECK_NE(&old_style, &new_style);
   if (DiffAffectsScrollAnimations(old_style, new_style)) {
-    return Difference::kSiblingDescendantAffecting;
+    return Difference::kDescendantAffecting;
   }
   if (old_style.Display() != new_style.Display() &&
       old_style.BlockifiesChildren() != new_style.BlockifiesChildren()) {
@@ -459,8 +460,7 @@ ComputedStyle::ComputeDifferenceIgnoringInheritedFirstLineStyle(
     return Difference::kPseudoElementStyle;
   }
   if (old_style.Display() != new_style.Display() &&
-      (new_style.Display() == EDisplay::kListItem ||
-       old_style.Display() == EDisplay::kListItem)) {
+      (new_style.IsDisplayListItem() || old_style.IsDisplayListItem())) {
     return Difference::kPseudoElementStyle;
   }
   return Difference::kNonInherited;
@@ -842,7 +842,7 @@ bool ComputedStyle::DiffNeedsFullLayoutAndPaintInvalidation(
           other.BorderRightStyle() == EBorderStyle::kHidden))) {
       return true;
     }
-  } else if (Display() == EDisplay::kListItem) {
+  } else if (IsDisplayListItem()) {
     if (ComputedStyleBase::
             DiffNeedsFullLayoutAndPaintInvalidationDisplayListItem(*this,
                                                                    other)) {
@@ -1347,19 +1347,21 @@ void ComputedStyle::LoadDeferredImages(Document& document) const {
 
 void ComputedStyle::ApplyTransform(
     gfx::Transform& result,
-    const LayoutSize& border_box_size,
+    const LayoutBox* box,
+    PhysicalSize border_box_size,
     ApplyTransformOperations apply_operations,
     ApplyTransformOrigin apply_origin,
     ApplyMotionPath apply_motion_path,
     ApplyIndependentTransformProperties apply_independent_transform_properties)
     const {
-  ApplyTransform(result, gfx::RectF(gfx::SizeF(border_box_size)),
+  ApplyTransform(result, box, gfx::RectF(gfx::SizeF(border_box_size)),
                  apply_operations, apply_origin, apply_motion_path,
                  apply_independent_transform_properties);
 }
 
 void ComputedStyle::ApplyTransform(
     gfx::Transform& result,
+    const LayoutBox* box,
     const gfx::RectF& bounding_box,
     ApplyTransformOperations apply_operations,
     ApplyTransformOrigin apply_origin,
@@ -1407,7 +1409,7 @@ void ComputedStyle::ApplyTransform(
   }
 
   if (apply_motion_path == kIncludeMotionPath) {
-    ApplyMotionPathTransform(origin_x, origin_y, bounding_box, result);
+    ApplyMotionPathTransform(origin_x, origin_y, box, bounding_box, result);
   }
 
   if (apply_operations == kIncludeTransformOperations) {
@@ -1425,62 +1427,152 @@ bool ComputedStyle::HasFilters() const {
   return FilterInternal().Get() && !FilterInternal()->operations_.IsEmpty();
 }
 
+namespace {
+
+gfx::SizeF GetReferenceBoxSize(const LayoutBox* box, CoordBox coord_box) {
+  if (box) {
+    if (const LayoutBlock* containing_block = box->ContainingBlock()) {
+      // In SVG contexts, all values behave as view-box.
+      if (box->IsSVG()) {
+        return SVGLengthContext(To<SVGElement>(box->GetNode()))
+            .ResolveViewport();
+      }
+      // https://drafts.csswg.org/css-box-4/#typedef-coord-box
+      switch (coord_box) {
+        case CoordBox::kFillBox:
+        case CoordBox::kContentBox:
+          return gfx::SizeF(containing_block->PhysicalContentBoxSize());
+        case CoordBox::kPaddingBox:
+          return gfx::SizeF(containing_block->PhysicalPaddingBoxRect().size);
+        case CoordBox::kViewBox:
+        case CoordBox::kStrokeBox:
+        case CoordBox::kBorderBox:
+          return gfx::SizeF(containing_block->BorderBoxRect().Size());
+      }
+    }
+  }
+  // As the motion path calculations can be called before all the layout
+  // has been correctly calculated, we can end up here.
+  return {0.0, 0.0};
+}
+
+gfx::PointF GetOffsetFromContainingBlock(const LayoutBox* box) {
+  if (box) {
+    if (const LayoutBlock* containing_block = box->ContainingBlock()) {
+      gfx::PointF offset = box->LocalToAncestorPoint(
+          gfx::PointF(), containing_block, kIgnoreTransforms);
+      return offset;
+    }
+  }
+  return {0, 0};
+}
+
+// https://drafts.fxtf.org/motion/#offset-position-property
+gfx::PointF GetStartingPointOfThePath(const LayoutBox* box,
+                                      const LengthPoint& offset_position,
+                                      const gfx::SizeF& reference_box_size) {
+  if (offset_position.X().IsAuto()) {
+    return GetOffsetFromContainingBlock(box);
+  }
+  return PointForLengthPoint(offset_position, reference_box_size);
+}
+
+}  // namespace
+
+PointAndTangent ComputedStyle::CalculatePointAndTangentOnBasicShape(
+    const BasicShape& shape,
+    const LayoutBox* box,
+    const gfx::PointF starting_point,
+    const gfx::SizeF reference_box_size) const {
+  Path path;
+  if (const auto* circle_or_ellipse =
+          DynamicTo<BasicShapeWithCenterAndRadii>(shape);
+      circle_or_ellipse && !circle_or_ellipse->HasExplicitCenter()) {
+    // If circle() or ellipse() is used, and an explicit center position is not
+    // given, they default to using the offset starting position, rather than
+    // their standard default.
+    circle_or_ellipse->GetPathFromCenter(
+        path, starting_point, gfx::RectF(reference_box_size), EffectiveZoom());
+  } else {
+    shape.GetPath(path, gfx::RectF(reference_box_size), EffectiveZoom());
+  }
+  float shape_length = path.length();
+  float path_length = FloatValueForLength(OffsetDistance(), shape_length);
+  // All the shapes are closed at this point.
+  if (shape_length > 0) {
+    path_length = fmod(path_length, shape_length);
+    if (path_length < 0) {
+      path_length += shape_length;
+    }
+  }
+  return path.PointAndNormalAtLength(path_length);
+}
+
+PointAndTangent ComputedStyle::CalculatePointAndTangentOnRay(
+    const StyleRay& ray,
+    const LayoutBox* box,
+    const gfx::PointF starting_point,
+    const gfx::SizeF reference_box_size) const {
+  float ray_length =
+      ray.CalculateRayPathLength(starting_point, reference_box_size);
+  if (ray.Contain() && box) {
+    // The length of the offset path is reduced so that the element stays
+    // within the containing block even at offset-distance: 100%.
+    // Specifically, the path’s length is reduced by half the width
+    // or half the height of the element’s border box,
+    // whichever is larger, and floored at zero.
+    const float largest_side =
+        std::max(box->BorderBoxRect().Width().ToFloat(),
+                 box->BorderBoxRect().Height().ToFloat());
+    ray_length -= largest_side / 2;
+    ray_length = std::max(ray_length, 0.f);
+  }
+  const float path_length = FloatValueForLength(OffsetDistance(), ray_length);
+  return ray.PointAndNormalAtLength(path_length);
+}
+
+PointAndTangent ComputedStyle::CalculatePointAndTangentOnPath(
+    const Path& path) const {
+  float zoom = EffectiveZoom();
+  float path_length = path.length();
+  float float_distance =
+      FloatValueForLength(OffsetDistance(), path_length * zoom) / zoom;
+  float computed_distance;
+  if (path.IsClosed() && path_length > 0) {
+    computed_distance = fmod(float_distance, path_length);
+    if (computed_distance < 0) {
+      computed_distance += path_length;
+    }
+  } else {
+    computed_distance = ClampTo<float>(float_distance, 0, path_length);
+  }
+  PointAndTangent path_position =
+      path.PointAndNormalAtLength(computed_distance);
+  path_position.point.Scale(zoom, zoom);
+  return path_position;
+}
+
 void ComputedStyle::ApplyMotionPathTransform(float origin_x,
                                              float origin_y,
+                                             const LayoutBox* box,
                                              const gfx::RectF& bounding_box,
                                              gfx::Transform& transform) const {
   // TODO(ericwilligers): crbug.com/638055 Apply offset-position.
-  if (!OffsetPath()) {
+  const OffsetPathOperation* offset_path = OffsetPath();
+  if (!offset_path) {
     return;
   }
-  const LengthPoint& position = OffsetPosition();
+
   const LengthPoint& anchor = OffsetAnchor();
-  const Length& distance = OffsetDistance();
-  const BasicShape* path = OffsetPath();
   const StyleOffsetRotation& rotate = OffsetRotate();
-
-  PointAndTangent path_position;
-  if (path->GetType() == BasicShape::kStyleRayType) {
-    // TODO(ericwilligers): crbug.com/641245 Support <size> for ray paths.
-    float float_distance = FloatValueForLength(distance, 0);
-
-    // Use ClampTo() to convert infinite values to min/max finite ones.
-    path_position.tangent_in_degrees =
-        ClampTo<float, float>(To<StyleRay>(*path).Angle() - 90);
-    float tangent_in_radians = Deg2rad(path_position.tangent_in_degrees);
-    path_position.point.set_x(float_distance * cos(tangent_in_radians));
-    path_position.point.set_y(float_distance * sin(tangent_in_radians));
-  } else {
-    float zoom = EffectiveZoom();
-    const StylePath& motion_path = To<StylePath>(*path);
-    float path_length = motion_path.length();
-    float float_distance =
-        FloatValueForLength(distance, path_length * zoom) / zoom;
-    float computed_distance;
-    if (motion_path.IsClosed() && path_length > 0) {
-      computed_distance = fmod(float_distance, path_length);
-      if (computed_distance < 0) {
-        computed_distance += path_length;
-      }
-    } else {
-      computed_distance = ClampTo<float>(float_distance, 0, path_length);
-    }
-
-    path_position =
-        motion_path.GetPath().PointAndNormalAtLength(computed_distance);
-    path_position.point.Scale(zoom, zoom);
-  }
-
-  if (rotate.type == OffsetRotationType::kFixed) {
-    path_position.tangent_in_degrees = 0;
-  }
+  CoordBox coord_box = offset_path->GetCoordBox();
 
   float origin_shift_x = 0;
   float origin_shift_y = 0;
   // If the offset-position and offset-anchor properties are not yet enabled,
   // they will have the default value, auto.
   gfx::PointF anchor_point(origin_x, origin_y);
-  if (!position.X().IsAuto() || !anchor.X().IsAuto()) {
+  if (!anchor.X().IsAuto()) {
     anchor_point = PointForLengthPoint(anchor, bounding_box.size());
     anchor_point += bounding_box.OffsetFromOrigin();
 
@@ -1489,12 +1581,83 @@ void ComputedStyle::ApplyMotionPathTransform(float origin_x,
     origin_shift_y = anchor_point.y() - origin_y;
   }
 
+  PointAndTangent path_position;
+  if (const auto* shape_operation =
+          DynamicTo<ShapeOffsetPathOperation>(offset_path)) {
+    const BasicShape& basic_shape = shape_operation->GetBasicShape();
+    const gfx::SizeF reference_box_size = GetReferenceBoxSize(box, coord_box);
+    const gfx::PointF starting_point =
+        GetStartingPointOfThePath(box, OffsetPosition(), reference_box_size);
+    switch (basic_shape.GetType()) {
+      case BasicShape::kStylePathType: {
+        const StylePath& path = To<StylePath>(basic_shape);
+        path_position = CalculatePointAndTangentOnPath(path.GetPath());
+        break;
+      }
+      case BasicShape::kStyleRayType: {
+        const StyleRay& ray = To<StyleRay>(basic_shape);
+        path_position = CalculatePointAndTangentOnRay(ray, box, starting_point,
+                                                      reference_box_size);
+        break;
+      }
+      case BasicShape::kBasicShapeCircleType:
+      case BasicShape::kBasicShapeEllipseType:
+      case BasicShape::kBasicShapeInsetType:
+      case BasicShape::kBasicShapeXYWHType:
+      case BasicShape::kBasicShapeRectType:
+      case BasicShape::kBasicShapePolygonType: {
+        path_position = CalculatePointAndTangentOnBasicShape(
+            basic_shape, box, starting_point, reference_box_size);
+        break;
+      }
+    }
+  } else if (const auto* coord_box_operation =
+                 DynamicTo<CoordBoxOffsetPathOperation>(offset_path)) {
+    if (box && box->ContainingBlock()) {
+      const gfx::SizeF reference_box_size = GetReferenceBoxSize(box, coord_box);
+      const gfx::PointF starting_point =
+          GetStartingPointOfThePath(box, OffsetPosition(), reference_box_size);
+      scoped_refptr<BasicShapeInset> inset = BasicShapeInset::Create();
+      inset->SetTop(Length::Fixed(0));
+      inset->SetBottom(Length::Fixed(0));
+      inset->SetLeft(Length::Fixed(0));
+      inset->SetRight(Length::Fixed(0));
+      const ComputedStyle& style = box->ContainingBlock()->StyleRef();
+      inset->SetTopLeftRadius(style.BorderTopLeftRadius());
+      inset->SetTopRightRadius(style.BorderTopRightRadius());
+      inset->SetBottomRightRadius(style.BorderBottomRightRadius());
+      inset->SetBottomLeftRadius(style.BorderBottomLeftRadius());
+      path_position = CalculatePointAndTangentOnBasicShape(
+          *inset, box, starting_point, reference_box_size);
+    }
+  } else {
+    const auto* url_operation =
+        DynamicTo<ReferenceOffsetPathOperation>(offset_path);
+    if (!url_operation->Resource()) {
+      return;
+    }
+    const auto* target =
+        DynamicTo<SVGGeometryElement>(url_operation->Resource()->Target());
+    Path path;
+    if (!target || !target->GetComputedStyle()) {
+      // Failure to find a shape should be equivalent to a "m0,0" path.
+      path.MoveTo({0, 0});
+    } else {
+      path = target->AsPath();
+    }
+    path_position = CalculatePointAndTangentOnPath(path);
+  }
+
+  if (rotate.type == OffsetRotationType::kFixed) {
+    path_position.tangent_in_degrees = 0;
+  }
+
   transform.Translate(
       path_position.point.x() - anchor_point.x() + origin_shift_x,
       path_position.point.y() - anchor_point.y() + origin_shift_y);
   transform.Rotate(path_position.tangent_in_degrees + rotate.angle);
 
-  if (!position.X().IsAuto() || !anchor.X().IsAuto()) {
+  if (!anchor.X().IsAuto()) {
     // Shift the origin back to transform-origin.
     transform.Translate(-origin_shift_x, -origin_shift_y);
   }
@@ -1652,13 +1815,12 @@ static String DisableNewGeorgianCapitalLetters(const String& text) {
 
 namespace {
 
-// TODO(https://crbug.com/1076420): this needs to handle all text-transform
-// values.
-static void ApplyMathTransform(String* text, ETextTransform math_variant) {
-  DCHECK(math_variant == ETextTransform::kMathAuto);
-  DCHECK_EQ(text->length(), 1u);
+static void ApplyMathAutoTransform(String* text) {
+  if (text->length() != 1) {
+    return;
+  }
   UChar character = (*text)[0];
-  UChar32 transformed_char = MathVariant((*text)[0]);
+  UChar32 transformed_char = ItalicMathVariant((*text)[0]);
   if (transformed_char == static_cast<UChar32>(character)) {
     return;
   }
@@ -1692,9 +1854,7 @@ void ComputedStyle::ApplyTextTransform(String* text,
       return;
     }
     case ETextTransform::kMathAuto:
-      if (text->length() == 1) {
-        ApplyMathTransform(text, ETextTransform::kMathAuto);
-      }
+      ApplyMathAutoTransform(text);
       return;
   }
   NOTREACHED();
@@ -2014,15 +2174,6 @@ const CSSValue* ComputedStyle::GetVariableValue(
   return blink::GetVariableValue(*this, name, is_inherited_property);
 }
 
-bool ComputedStyle::HasIdenticalAscentDescentAndLineGap(
-    const ComputedStyle& other) const {
-  const SimpleFontData* font_data = GetFont().PrimaryFont();
-  const SimpleFontData* other_font_data = other.GetFont().PrimaryFont();
-  return font_data && other_font_data &&
-         font_data->GetFontMetrics().HasIdenticalAscentDescentAndLineGap(
-             other_font_data->GetFontMetrics());
-}
-
 Length ComputedStyle::LineHeight() const {
   const Length& lh = LineHeightInternal();
   // Unlike getFontDescription().computedSize() and hence fontSize(), this is
@@ -2091,8 +2242,8 @@ StyleColor ComputedStyle::DecorationColorIncludingFallback(
     StyleColor text_stroke_style_color =
         visited_link ? InternalVisitedTextStrokeColor() : TextStrokeColor();
     if (!text_stroke_style_color.IsCurrentColor() &&
-        text_stroke_style_color.Resolve(blink::Color(), UsedColorScheme())
-            .Alpha()) {
+        !text_stroke_style_color.Resolve(blink::Color(), UsedColorScheme())
+             .IsFullyTransparent()) {
       return text_stroke_style_color;
     }
   }
@@ -2107,7 +2258,7 @@ bool ComputedStyle::HasBackground() const {
   blink::Color color = GetCSSPropertyBackgroundColor().ColorIncludingFallback(
       false, *this,
       /*is_current_color=*/nullptr);
-  if (color.Alpha()) {
+  if (!color.IsFullyTransparent()) {
     return true;
   }
   // When background color animation is running on the compositor thread, we
@@ -2160,8 +2311,7 @@ Color ComputedStyle::VisitedDependentColor(const Longhand& color_property,
   // TODO(dazabani@igalia.com) improve behaviour where unvisited is currentColor
   return Color::FromColorSpace(visited_color.GetColorSpace(),
                                visited_color.Param0(), visited_color.Param1(),
-                               visited_color.Param2(),
-                               unvisited_color.FloatAlpha());
+                               visited_color.Param2(), unvisited_color.Alpha());
 }
 
 blink::Color ComputedStyle::ResolvedColor(const StyleColor& color,
@@ -2198,17 +2348,16 @@ TextEmphasisMark ComputedStyle::GetTextEmphasisMark() const {
   return TextEmphasisMark::kSesame;
 }
 
-LayoutRectOutsets ComputedStyle::ImageOutsets(
+NGPhysicalBoxStrut ComputedStyle::ImageOutsets(
     const NinePieceImage& image) const {
-  return LayoutRectOutsets(
-      NinePieceImage::ComputeOutset(image.Outset().Top(),
-                                    BorderTopWidth().ToInt()),
-      NinePieceImage::ComputeOutset(image.Outset().Right(),
-                                    BorderRightWidth().ToInt()),
-      NinePieceImage::ComputeOutset(image.Outset().Bottom(),
-                                    BorderBottomWidth().ToInt()),
-      NinePieceImage::ComputeOutset(image.Outset().Left(),
-                                    BorderLeftWidth().ToInt()));
+  return {NinePieceImage::ComputeOutset(image.Outset().Top(),
+                                        BorderTopWidth().ToInt()),
+          NinePieceImage::ComputeOutset(image.Outset().Right(),
+                                        BorderRightWidth().ToInt()),
+          NinePieceImage::ComputeOutset(image.Outset().Bottom(),
+                                        BorderBottomWidth().ToInt()),
+          NinePieceImage::ComputeOutset(image.Outset().Left(),
+                                        BorderLeftWidth().ToInt())};
 }
 
 bool ComputedStyle::BorderObscuresBackground() const {
@@ -2236,13 +2385,13 @@ bool ComputedStyle::BorderObscuresBackground() const {
   return true;
 }
 
-LayoutRectOutsets ComputedStyle::BoxDecorationOutsets() const {
+NGPhysicalBoxStrut ComputedStyle::BoxDecorationOutsets() const {
   DCHECK(HasVisualOverflowingEffect());
-  LayoutRectOutsets outsets;
+  NGPhysicalBoxStrut outsets;
 
   if (const ShadowList* box_shadow = BoxShadow()) {
-    outsets =
-        EnclosingLayoutRectOutsets(box_shadow->RectOutsetsIncludingOriginal());
+    outsets = NGPhysicalBoxStrut::Enclosing(
+        box_shadow->RectOutsetsIncludingOriginal());
   }
 
   if (HasBorderImageOutsets()) {
@@ -2340,6 +2489,16 @@ const AtomicString& ComputedStyle::ListStyleStringValue() const {
   return ListStyleType()->GetStringValue();
 }
 
+bool ComputedStyle::MarkerShouldBeInside(const Node& parent_node) const {
+  // https://w3c.github.io/csswg-drafts/css-lists/#list-style-position-outside
+  // > If the list item is an inline box: this value is equivalent to inside.
+  if (Display() == EDisplay::kInlineListItem) {
+    return true;
+  }
+  return ListStylePosition() == EListStylePosition::kInside ||
+         (IsA<HTMLLIElement>(parent_node) && !IsInsideListElement());
+}
+
 absl::optional<blink::Color> ComputedStyle::AccentColorResolved() const {
   const StyleAutoColor& auto_color = AccentColor();
   if (auto_color.IsAutoColor()) {
@@ -2417,9 +2576,6 @@ bool ComputedStyle::ShouldApplyAnyContainment(const Element& element,
 
 bool ComputedStyle::CanMatchSizeContainerQueries(const Element& element) const {
   return IsContainerForSizeContainerQueries() &&
-         !element.ShouldForceLegacyLayout() &&
-         (RuntimeEnabledFeatures::LayoutNGPrintingEnabled() ||
-          !element.GetDocument().Printing()) &&
          (!element.IsSVGElement() ||
           To<SVGElement>(element).IsOutermostSVGSVGElement());
 }
@@ -2469,7 +2625,18 @@ bool ComputedStyle::CalculateIsStackingContextWithoutContainment() const {
 }
 
 bool ComputedStyle::IsInTopLayer(const Element& element) const {
-  return element.IsInTopLayer() && TopLayer() == ETopLayer::kBrowser;
+  return element.IsInTopLayer() && Overlay() == EOverlay::kAuto;
+}
+
+ComputedStyleBuilder::ComputedStyleBuilder(const ComputedStyle& style) {
+  style_ = base::AdoptRef(new ComputedStyle(style));
+  SetStyleBase(*style_);
+}
+
+scoped_refptr<const ComputedStyle> ComputedStyleBuilder::CloneStyle() const {
+  DCHECK(style_);
+  ResetAccess();
+  return base::AdoptRef(new ComputedStyle(*style_));
 }
 
 void ComputedStyleBuilder::PropagateIndependentInheritedProperties(
@@ -2508,7 +2675,7 @@ bool ComputedStyleBuilder::SetEffectiveZoom(float f) {
   // real cost to our understanding of the zooms in use.
   base::UmaHistogramSparse(
       "Blink.EffectiveZoom",
-      base::clamp<float>(clamped_effective_zoom * 100, 0, 400));
+      std::clamp<float>(clamped_effective_zoom * 100, 0, 400));
   return true;
 }
 

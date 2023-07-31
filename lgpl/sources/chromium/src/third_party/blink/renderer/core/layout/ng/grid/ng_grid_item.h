@@ -17,8 +17,8 @@ enum class AxisEdge { kStart, kCenter, kEnd, kFirstBaseline, kLastBaseline };
 enum class SizingConstraint { kLayout, kMinContent, kMaxContent };
 
 struct GridItemIndices {
-  wtf_size_t begin = kNotFound;
-  wtf_size_t end = kNotFound;
+  wtf_size_t begin{kNotFound};
+  wtf_size_t end{kNotFound};
 };
 
 struct OutOfFlowItemPlacement {
@@ -58,6 +58,12 @@ struct CORE_EXPORT GridItemData {
 
   bool IsBaselineAlignedForDirection(
       GridTrackSizingDirection track_direction) const {
+    // TODO(ethavar): Baseline alignment for subgrids is dependent on
+    // accumulating the baseline in `ComputeSubgridContributionSize`.
+    if (has_subgridded_columns || has_subgridded_rows ||
+        is_subgridded_to_parent_grid) {
+      return false;
+    }
     return (track_direction == kForColumns)
                ? (InlineAxisAlignment() == AxisEdge::kFirstBaseline ||
                   InlineAxisAlignment() == AxisEdge::kLastBaseline)
@@ -67,6 +73,12 @@ struct CORE_EXPORT GridItemData {
 
   bool IsBaselineSpecifiedForDirection(
       GridTrackSizingDirection track_direction) const {
+    // TODO(ethavar): Baseline alignment for subgrids is dependent on
+    // accumulating the baseline in `ComputeSubgridContributionSize`.
+    if (has_subgridded_columns || has_subgridded_rows ||
+        is_subgridded_to_parent_grid) {
+      return false;
+    }
     return (track_direction == kForColumns)
                ? (inline_axis_alignment == AxisEdge::kFirstBaseline ||
                   inline_axis_alignment == AxisEdge::kLastBaseline)
@@ -120,6 +132,11 @@ struct CORE_EXPORT GridItemData {
                                             : row_range_indices;
   }
 
+  void ResetPlacementIndices() {
+    column_range_indices = row_range_indices = GridItemIndices();
+    column_set_indices = row_set_indices = GridItemIndices();
+  }
+
   const GridSpan& Span(GridTrackSizingDirection track_direction) const {
     return resolved_position.Span(track_direction);
   }
@@ -140,6 +157,20 @@ struct CORE_EXPORT GridItemData {
   bool IsConsideredForSizing(GridTrackSizingDirection track_direction) const {
     return (track_direction == kForColumns) ? is_considered_for_column_sizing
                                             : is_considered_for_row_sizing;
+  }
+
+  bool IsOppositeDirectionInRootGrid(
+      GridTrackSizingDirection track_direction) const {
+    return (track_direction == kForColumns)
+               ? is_opposite_direction_in_root_grid_columns
+               : is_opposite_direction_in_root_grid_rows;
+  }
+
+  bool MustConsiderGridItemsForSizing(
+      GridTrackSizingDirection track_direction) const {
+    return (track_direction == kForColumns)
+               ? must_consider_grid_items_for_column_sizing
+               : must_consider_grid_items_for_row_sizing;
   }
 
   bool IsGridContainingBlock() const { return node.IsContainingBlockNGGrid(); }
@@ -198,6 +229,8 @@ struct CORE_EXPORT GridItemData {
   bool is_parallel_with_root_grid : 1;
   bool is_sizing_dependent_on_block_size : 1;
   bool is_subgridded_to_parent_grid : 1;
+  bool is_opposite_direction_in_root_grid_columns : 1;
+  bool is_opposite_direction_in_root_grid_rows : 1;
   bool must_consider_grid_items_for_column_sizing : 1;
   bool must_consider_grid_items_for_row_sizing : 1;
 
@@ -324,7 +357,5 @@ class CORE_EXPORT GridItems {
 };
 
 }  // namespace blink
-
-WTF_ALLOW_CLEAR_UNUSED_SLOTS_WITH_MEM_FUNCTIONS(blink::GridItemData)
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_GRID_NG_GRID_ITEM_H_

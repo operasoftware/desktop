@@ -103,7 +103,7 @@ static absl::optional<CSSSyntaxDefinition> ConvertSyntax(
   return CSSSyntaxStringParser(To<CSSStringValue>(value).Value()).Parse();
 }
 
-static bool ConvertInherts(const CSSValue& value) {
+static bool ConvertInherits(const CSSValue& value) {
   CSSValueID inherits_id = To<CSSIdentifierValue>(value).GetValueID();
   DCHECK(inherits_id == CSSValueID::kTrue || inherits_id == CSSValueID::kFalse);
   return inherits_id == CSSValueID::kTrue;
@@ -136,7 +136,7 @@ PropertyRegistration* PropertyRegistration::MaybeCreateForDeclaredProperty(
   if (!inherits_value) {
     return nullptr;
   }
-  bool inherits = ConvertInherts(*inherits_value);
+  bool inherits = ConvertInherits(*inherits_value);
 
   // https://drafts.css-houdini.org/css-properties-values-api-1/#initial-value-descriptor
   const CSSValue* initial_value = rule.GetInitialValue();
@@ -149,8 +149,12 @@ PropertyRegistration* PropertyRegistration::MaybeCreateForDeclaredProperty(
     const CSSParserContext* parser_context =
         document.ElementSheet().Contents()->ParserContext();
     const bool is_animation_tainted = false;
-    initial = syntax->Parse(initial_variable_data->TokenRange(),
-                            *parser_context, is_animation_tainted);
+    CSSTokenizer tokenizer(initial_variable_data->OriginalText());
+    Vector<CSSParserToken, 32> tokens = tokenizer.TokenizeToEOF();
+    CSSParserTokenRange range(tokens);
+    initial = syntax->Parse(
+        CSSTokenizedValue{range, initial_variable_data->OriginalText()},
+        *parser_context, is_animation_tainted);
     if (!initial) {
       return nullptr;
     }
@@ -212,8 +216,10 @@ void PropertyRegistration::registerProperty(
     CSSTokenizer tokenizer(property_definition->initialValue());
     const auto tokens = tokenizer.TokenizeToEOF();
     bool is_animation_tainted = false;
-    initial = syntax_definition->Parse(CSSParserTokenRange(tokens),
-                                       *parser_context, is_animation_tainted);
+    initial = syntax_definition->Parse(
+        CSSTokenizedValue{CSSParserTokenRange(tokens),
+                          property_definition->initialValue()},
+        *parser_context, is_animation_tainted);
     if (!initial) {
       exception_state.ThrowDOMException(
           DOMExceptionCode::kSyntaxError,

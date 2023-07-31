@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_AD_AUCTION_NAVIGATOR_AUCTION_H_
 
 #include <stdint.h>
+
 #include <memory>
 
 #include "base/memory/scoped_refptr.h"
@@ -25,11 +26,12 @@
 
 namespace blink {
 
+class AdAuctionDataConfig;
 class AdRequestConfig;
 class Ads;
 class AuctionAdInterestGroup;
+class AuctionAdInterestGroupKey;
 class AuctionAdConfig;
-class ScopedAbortState;
 class ScriptPromiseResolver;
 class V8UnionFencedFrameConfigOrUSVString;
 
@@ -46,21 +48,26 @@ class MODULES_EXPORT NavigatorAuction final
   // See platform/Supplementable.h
   static NavigatorAuction& From(ExecutionContext*, Navigator&);
 
+  // TODO(crbug.com/1441988): Make `const AuctionAdInterestGroup*` after rename.
   ScriptPromise joinAdInterestGroup(ScriptState*,
-                                    const AuctionAdInterestGroup*,
-                                    double,
+                                    AuctionAdInterestGroup*,
+                                    absl::optional<double>,
                                     ExceptionState&);
   static ScriptPromise joinAdInterestGroup(ScriptState*,
                                            Navigator&,
-                                           const AuctionAdInterestGroup*,
+                                           AuctionAdInterestGroup*,
                                            double,
                                            ExceptionState&);
+  static ScriptPromise joinAdInterestGroup(ScriptState*,
+                                           Navigator&,
+                                           AuctionAdInterestGroup*,
+                                           ExceptionState&);
   ScriptPromise leaveAdInterestGroup(ScriptState*,
-                                     const AuctionAdInterestGroup*,
+                                     const AuctionAdInterestGroupKey*,
                                      ExceptionState&);
   static ScriptPromise leaveAdInterestGroup(ScriptState*,
                                             Navigator&,
-                                            const AuctionAdInterestGroup*,
+                                            const AuctionAdInterestGroupKey*,
                                             ExceptionState&);
   // Implicit leaveAdInterestGroup - only supported when called from within
   // a fenced frame showing FLEDGE ads.
@@ -71,12 +78,11 @@ class MODULES_EXPORT NavigatorAuction final
 
   void updateAdInterestGroups();
   static void updateAdInterestGroups(ScriptState*, Navigator&, ExceptionState&);
-  ScriptPromise runAdAuction(ScriptState*,
-                             const AuctionAdConfig*,
-                             ExceptionState&);
+  // TODO(crbug.com/1441988): Make `const AuctionAdConfig*` after rename.
+  ScriptPromise runAdAuction(ScriptState*, AuctionAdConfig*, ExceptionState&);
   static ScriptPromise runAdAuction(ScriptState*,
                                     Navigator&,
-                                    const AuctionAdConfig*,
+                                    AuctionAdConfig*,
                                     ExceptionState&);
 
   // If called from a FencedFrame that was navigated to the URN resulting from
@@ -122,6 +128,15 @@ class MODULES_EXPORT NavigatorAuction final
       const Vector<std::pair<String, String>>& replacement,
       ExceptionState& exception_state);
 
+  ScriptPromise getInterestGroupAdAuctionData(ScriptState* script_state,
+                                              const AdAuctionDataConfig* config,
+                                              ExceptionState& exception_state);
+  static ScriptPromise getInterestGroupAdAuctionData(
+      ScriptState* script_state,
+      Navigator& navigator,
+      const AdAuctionDataConfig* config,
+      ExceptionState& exception_state);
+
   ScriptPromise createAdRequest(ScriptState*,
                                 const AdRequestConfig*,
                                 ExceptionState&);
@@ -138,6 +153,18 @@ class MODULES_EXPORT NavigatorAuction final
                                   const Ads*,
                                   const AuctionAdConfig*,
                                   ExceptionState&);
+
+  // Web-exposed API that returns whether an opaque-ads fenced frame would be
+  // allowed to be created in the current active document of this node after
+  // an ad auction is run.
+  // Checks the following criteria:
+  // - Not trying to load in a default mode fenced frame tree
+  // - All of the sandbox/allow flags required to load a fenced frame are set
+  //   in the embedder. See: blink::kFencedFrameMandatoryUnsandboxedFlags
+  // - No CSP headers are in place that will stop the fenced frame from loading
+  // - No CSPEE is applied to this or an ancestor frame
+  bool canLoadAdAuctionFencedFrame(ScriptState*);
+  static bool canLoadAdAuctionFencedFrame(ScriptState*, Navigator&);
 
   void Trace(Visitor* visitor) const override {
     visitor->Trace(ad_auction_service_);
@@ -183,18 +210,14 @@ class MODULES_EXPORT NavigatorAuction final
   // Completion callback for finalizeAd() Mojo call.
   void FinalizeAdComplete(ScriptPromiseResolver* resolver,
                           const absl::optional<KURL>& creative_url);
-  // Completion callback for Mojo call made by runAdAuction().
-  void AuctionComplete(
-      ScriptPromiseResolver*,
-      std::unique_ptr<ScopedAbortState>,
-      bool resolve_to_config,
-      bool manually_aborted,
-      const absl::optional<FencedFrame::RedactedFencedFrameConfig>&);
   // Completion callback for Mojo call made by deprecatedURNToURL().
   void GetURLFromURNComplete(ScriptPromiseResolver*,
                              const absl::optional<KURL>&);
   // Completion callback for Mojo call made by deprecatedReplaceInURNComplete().
   void ReplaceInURNComplete(ScriptPromiseResolver* resolver);
+
+  void GetInterestGroupAdAuctionDataComplete(ScriptPromiseResolver* resolver,
+                                             mojo_base::BigBuffer data);
 
   // Manage queues of cross-site join and leave operations that have yet to be
   // sent to the browser process.

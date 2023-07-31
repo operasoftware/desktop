@@ -91,7 +91,8 @@ class PLATFORM_EXPORT PaintChunker final {
   // The id will be used when we need to create a new current chunk.
   // Otherwise it's ignored. Returns true if a new chunk is added.
   void AddSelectionToCurrentChunk(absl::optional<PaintedSelectionBound> start,
-                                  absl::optional<PaintedSelectionBound> end);
+                                  absl::optional<PaintedSelectionBound> end,
+                                  String debug_info);
   void RecordAnySelectionWasPainted();
 
   // Returns true if a new chunk is created.
@@ -110,10 +111,7 @@ class PLATFORM_EXPORT PaintChunker final {
   // Returns true if a new chunk is created.
   bool EnsureCurrentChunk(const PaintChunk::Id&, const DisplayItemClient&);
 
-  void ProcessBackgroundColorCandidate(const PaintChunk::Id&,
-                                       const DisplayItemClient&,
-                                       Color color,
-                                       float area);
+  void ProcessBackgroundColorCandidate(const DisplayItem&);
 
   void FinalizeLastChunkProperties();
 
@@ -138,10 +136,6 @@ class PLATFORM_EXPORT PaintChunker final {
   bool will_force_new_chunk_ = true;
 
   bool current_effectively_invisible_ = false;
-
-  // TODO(https://crbug.com/1351544): This should be SkColor4f.
-  Color candidate_background_color_ = Color::kTransparent;
-  float candidate_background_area_ = 0;
 };
 
 }  // namespace blink

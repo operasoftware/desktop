@@ -105,6 +105,9 @@
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/size_conversions.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace blink {
 
@@ -149,26 +152,16 @@ bool ContainsEvenAtEdge(const gfx::Rect& rect, const gfx::Point& point) {
 gfx::Point DetermineHotSpot(const Image& image,
                             bool hot_spot_specified,
                             const gfx::Point& specified_hot_spot) {
-  if (image.IsNull())
-    return gfx::Point();
-
-  gfx::Rect image_rect = image.Rect();
-
-  // Hot spot must be inside cursor rectangle.
   if (hot_spot_specified) {
-    if (image_rect.Contains(specified_hot_spot))
-      return specified_hot_spot;
-
-    return gfx::Point(ClampTo<int>(specified_hot_spot.x(), image_rect.x(),
-                                   image_rect.right() - 1),
-                      ClampTo<int>(specified_hot_spot.y(), image_rect.y(),
-                                   image_rect.bottom() - 1));
+    return specified_hot_spot;
   }
 
   // If hot spot is not specified externally, it can be extracted from some
   // image formats (e.g. .cur).
   gfx::Point intrinsic_hot_spot;
-  bool image_has_intrinsic_hot_spot = image.GetHotSpot(intrinsic_hot_spot);
+  const bool image_has_intrinsic_hot_spot =
+      image.GetHotSpot(intrinsic_hot_spot);
+  const gfx::Rect image_rect = image.Rect();
   if (image_has_intrinsic_hot_spot && image_rect.Contains(intrinsic_hot_spot))
     return intrinsic_hot_spot;
 
@@ -182,17 +175,10 @@ gfx::Point DetermineHotSpot(const Image& image,
 // Set to 50Hz, no need to be faster than common screen refresh rate
 static constexpr base::TimeDelta kCursorUpdateInterval = base::Milliseconds(20);
 
-static const int kMaximumCursorSize = 128;
-
 // The maximum size a cursor can be without falling back to the default cursor
 // when intersecting browser native UI.
+// https://developer.mozilla.org/en-US/docs/Web/CSS/cursor#icon_size_limits.
 static const int kMaximumCursorSizeWithoutFallback = 32;
-
-// It's pretty unlikely that a scale of less than one would ever be used. But
-// all we really need to ensure here is that the scale isn't so small that
-// integer overflow can occur when dividing cursor sizes (limited above) by the
-// scale.
-static const double kMinimumCursorScale = 0.001;
 
 // The minimum amount of time an element stays active after a ShowPress
 // This is roughly 9 frames, which should be long enough to be noticeable.
@@ -584,25 +570,17 @@ absl::optional<ui::Cursor> EventHandler::SelectCursor(
                                  kRespectImageOrientation);
 
       Image* image = cached_image->GetImage();
-
-      // If the image is an SVG, then adjust the scale to reflect the device
-      // scale factor so that the SVG can be rasterized in the native
-      // resolution and scaled down to the correct size for the cursor.
-      float device_scale_factor = 1;
       if (image->IsSVGImage()) {
-        // Limit the size of cursors (in DIP) so that they cannot be
-        // used to cover UI elements in chrome. StyleImage::ImageSize does not
-        // take StyleImage::ImageScaleFactor() into account when computing the
-        // size for SVG images.
+        // `StyleImage::ImageSize` does not take `StyleImage::ImageScaleFactor`
+        // into account when computing the size for SVG images.
         size.Scale(1 / scale);
-        device_scale_factor =
-            page->GetChromeClient().GetScreenInfo(*frame_).device_scale_factor;
-        scale *= device_scale_factor;
       }
 
-      if (size.IsEmpty() || size.width() > kMaximumCursorSize ||
-          size.height() > kMaximumCursorSize)
+      if (size.IsEmpty() ||
+          !ui::Cursor::AreDimensionsValidForWeb(
+              gfx::ToCeiledSize(gfx::ScaleSize(size, scale)), scale)) {
         continue;
+      }
 
       // For large cursors below the max size, limit their ability to cover UI
       // elements by removing them when they are not fully contained by the
@@ -630,19 +608,17 @@ absl::optional<ui::Cursor> EventHandler::SelectCursor(
         }
       }
 
-      // Ensure no overflow possible in calculations above.
-      if (scale < kMinimumCursorScale)
-        continue;
-
-      // Convert from DIP to physical pixels.
-      hot_spot = gfx::ScaleToRoundedPoint(hot_spot, scale);
-
-      // Special case for SVG so that it can be rasterized in the appropriate
-      // resolution for high DPI displays.
+      // If the image is an SVG, then adjust the scale to reflect the device
+      // scale factor so that the SVG can be rasterized in the native
+      // resolution and scaled down to the correct size for the cursor.
       scoped_refptr<Image> svg_image_holder;
       if (auto* svg_image = DynamicTo<SVGImage>(image)) {
+        const float device_scale_factor =
+            page->GetChromeClient().GetScreenInfo(*frame_).device_scale_factor;
+        scale *= device_scale_factor;
         // Re-scale back from DIP to device pixels.
         size.Scale(scale);
+
         // TODO(fs): Should pass proper URL. Use StyleImage::GetImage.
         svg_image_holder = SVGImageForContainer::Create(
             svg_image, size, device_scale_factor, NullURL(),
@@ -651,6 +627,9 @@ absl::optional<ui::Cursor> EventHandler::SelectCursor(
                 .ResolveColorSchemeForEmbedding(style));
         image = svg_image_holder.get();
       }
+
+      // Convert from DIP to physical pixels.
+      hot_spot = gfx::ScaleToRoundedPoint(hot_spot, scale);
 
       return ui::Cursor::NewCustom(
           image->AsSkBitmapForCurrentFrame(kRespectImageOrientation),
@@ -891,9 +870,7 @@ WebInputEventResult EventHandler::HandleMousePressEvent(
                                                           source_capabilities);
   }
 
-  if ((!RuntimeEnabledFeatures::MouseSubframeNoImplicitCaptureEnabled() &&
-       event_result == WebInputEventResult::kNotHandled) ||
-      mev.GetScrollbar()) {
+  if (event_result == WebInputEventResult::kNotHandled || mev.GetScrollbar()) {
     mouse_event_manager_->SetCapturesDragging(true);
     // Outermost main frames don't implicitly capture mouse input on MouseDown,
     // all subframes do (regardless of whether local or remote or fenced).
@@ -1448,28 +1425,6 @@ void EventHandler::SetPointerCapture(PointerId pointer_id,
 
   if (captured && pointer_id == PointerEventFactory::kMouseId) {
     CaptureMouseEventsToWidget(true);
-
-    // TODO(crbug.com/919908) This is a temporary approach to make pointer
-    // capture work across in-process frames while mouse subframe capture
-    // disabled. It's to experiment removing the frame capture logic. This
-    // must be re-write before the flag enabled.
-    if (RuntimeEnabledFeatures::MouseSubframeNoImplicitCaptureEnabled()) {
-      LocalFrame* frame = frame_;
-      LocalFrame* parent = DynamicTo<LocalFrame>(frame_->Tree().Parent());
-      while (parent) {
-        Element* subframe_element = nullptr;
-        if (frame->OwnerLayoutObject() &&
-            frame->OwnerLayoutObject()->GetNode()) {
-          subframe_element =
-              DynamicTo<Element>(frame->OwnerLayoutObject()->GetNode());
-        }
-
-        parent->GetEventHandler().capturing_subframe_element_ =
-            subframe_element;
-        frame = parent;
-        parent = DynamicTo<LocalFrame>(parent->Tree().Parent());
-      }
-    }
   }
 }
 
@@ -1484,17 +1439,6 @@ void EventHandler::ReleasePointerCapture(PointerId pointer_id,
 
   if (released && pointer_id == PointerEventFactory::kMouseId) {
     CaptureMouseEventsToWidget(false);
-
-    // TODO(crbug/919908) same as SetPointerCapture, this is temporary
-    // approach for removing mouse subframe capture. It must be re-write
-    // before enable the flag.
-    if (RuntimeEnabledFeatures::MouseSubframeNoImplicitCaptureEnabled()) {
-      LocalFrame* parent = DynamicTo<LocalFrame>(frame_->Tree().Parent());
-      while (parent) {
-        parent->GetEventHandler().capturing_subframe_element_ = nullptr;
-        parent = DynamicTo<LocalFrame>(parent->Tree().Parent());
-      }
-    }
   }
 }
 

@@ -178,16 +178,6 @@ base::TimeTicks WebPerformanceMetricsForReporting::
       ->LargestContentfulPaintAsMonotonicTimeForMetrics();
 }
 
-double WebPerformanceMetricsForReporting::ExperimentalLargestImagePaint()
-    const {
-  return 0.0;
-}
-
-uint64_t WebPerformanceMetricsForReporting::ExperimentalLargestImagePaintSize()
-    const {
-  return 0u;
-}
-
 blink::LargestContentfulPaintType
 WebPerformanceMetricsForReporting::LargestContentfulPaintTypeForMetrics()
     const {
@@ -218,13 +208,16 @@ WebPerformanceMetricsForReporting::LargestContentfulPaintImageLoadEnd() const {
   return private_->timingForReporting()->LargestContentfulPaintImageLoadEnd();
 }
 
-double WebPerformanceMetricsForReporting::ExperimentalLargestTextPaint() const {
-  return 0.0;
+bool WebPerformanceMetricsForReporting::
+    LargestContentfulPaintImageIsLoadedFromMemoryCache() const {
+  return private_->timingForReporting()
+      ->LargestContentfulPaintImageIsLoadedFromMemoryCache();
 }
 
-uint64_t WebPerformanceMetricsForReporting::ExperimentalLargestTextPaintSize()
-    const {
-  return 0u;
+bool WebPerformanceMetricsForReporting::
+    LargestContentfulPaintImageIsPreloadedWithEarlyHints() const {
+  return private_->timingForReporting()
+      ->LargestContentfulPaintImageIsPreloadedWithEarlyHints();
 }
 
 double WebPerformanceMetricsForReporting::FirstEligibleToPaint() const {

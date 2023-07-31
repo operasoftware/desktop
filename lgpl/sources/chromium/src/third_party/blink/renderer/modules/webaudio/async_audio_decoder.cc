@@ -127,10 +127,10 @@ void AsyncAudioDecoder::CreateAudioDecoder(
   } else {
 #if BUILDFLAG(IS_MAC)
     external_decoder = std::make_unique<media::ATAudioDecoder>(
-        external_decoder_task_runner, *media_log);
+        external_decoder_task_runner, std::move(media_log));
 #elif BUILDFLAG(IS_WIN)
     external_decoder = std::make_unique<media::WMFAudioDecoder>(
-        external_decoder_task_runner, *media_log);
+        external_decoder_task_runner, std::move(media_log));
 #endif
   }
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)

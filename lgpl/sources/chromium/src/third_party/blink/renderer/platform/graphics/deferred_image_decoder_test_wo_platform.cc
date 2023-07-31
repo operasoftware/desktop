@@ -19,9 +19,10 @@ namespace blink {
 namespace {
 
 sk_sp<SkImage> CreateFrameAtIndex(DeferredImageDecoder* decoder, size_t index) {
-  return SkImage::MakeFromGenerator(std::make_unique<SkiaPaintImageGenerator>(
-      decoder->CreateGenerator(), index,
-      cc::PaintImage::kDefaultGeneratorClientId));
+  return SkImages::DeferredFromGenerator(
+      std::make_unique<SkiaPaintImageGenerator>(
+          decoder->CreateGenerator(), index,
+          cc::PaintImage::kDefaultGeneratorClientId));
 }
 
 }  // namespace
@@ -65,7 +66,7 @@ static void MixImages(const char* file_name,
 
   // we now want to ensure we don't crash if we access these in this order
   SkImageInfo info = SkImageInfo::MakeN32Premul(10, 10);
-  sk_sp<SkSurface> surf = SkSurface::MakeRaster(info);
+  sk_sp<SkSurface> surf = SkSurfaces::Raster(info);
   surf->getCanvas()->drawImage(image_with_more_data, 0, 0);
   surf->getCanvas()->drawImage(partial_image, 0, 0);
 }

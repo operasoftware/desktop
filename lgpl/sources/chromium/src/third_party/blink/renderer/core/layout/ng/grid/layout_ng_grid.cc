@@ -11,7 +11,7 @@ namespace blink {
 LayoutNGGrid::LayoutNGGrid(Element* element)
     : LayoutNGMixin<LayoutBlock>(element) {}
 
-void LayoutNGGrid::UpdateBlockLayout(bool relayout_children) {
+void LayoutNGGrid::UpdateBlockLayout() {
   if (IsOutOfFlowPositioned()) {
     UpdateOutOfFlowBlockLayout();
     return;
@@ -105,11 +105,6 @@ void LayoutNGGrid::StyleDidChange(StyleDifference diff,
         new_grid_rows_track_list.AutoRepeatTrackCount()))) {
     SetGridPlacementDirty(true);
   }
-}
-
-const LayoutNGGridInterface* LayoutNGGrid::ToLayoutNGGridInterface() const {
-  NOT_DESTROYED();
-  return this;
 }
 
 bool LayoutNGGrid::HasCachedPlacementData() const {

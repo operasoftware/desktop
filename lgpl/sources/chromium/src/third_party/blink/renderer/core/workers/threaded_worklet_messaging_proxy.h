@@ -8,11 +8,11 @@
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/workers/threaded_messaging_proxy_base.h"
+#include "third_party/blink/renderer/core/workers/threaded_worklet_object_proxy.h"
 #include "third_party/blink/renderer/core/workers/worklet_global_scope_proxy.h"
 
 namespace blink {
 
-class ThreadedWorkletObjectProxy;
 class WorkerClients;
 class WorkletModuleResponsesMap;
 
@@ -39,7 +39,10 @@ class CORE_EXPORT ThreadedWorkletMessagingProxy
   void Trace(Visitor*) const override;
 
  protected:
-  explicit ThreadedWorkletMessagingProxy(ExecutionContext*);
+  explicit ThreadedWorkletMessagingProxy(
+      ExecutionContext*,
+      scoped_refptr<base::SingleThreadTaskRunner>
+          parent_agent_group_task_runner = nullptr);
 
   ThreadedWorkletObjectProxy& WorkletObjectProxy();
 
@@ -48,7 +51,9 @@ class CORE_EXPORT ThreadedWorkletMessagingProxy
 
   virtual std::unique_ptr<ThreadedWorkletObjectProxy> CreateObjectProxy(
       ThreadedWorkletMessagingProxy*,
-      ParentExecutionContextTaskRunners*);
+      ParentExecutionContextTaskRunners*,
+      scoped_refptr<base::SingleThreadTaskRunner>
+          parent_agent_group_task_runner);
 
   std::unique_ptr<ThreadedWorkletObjectProxy> worklet_object_proxy_;
 };

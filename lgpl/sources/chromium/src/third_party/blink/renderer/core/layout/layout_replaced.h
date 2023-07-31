@@ -60,13 +60,6 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
   LayoutReplaced(Element*, const LayoutSize& intrinsic_size);
   ~LayoutReplaced() override;
 
-  LayoutUnit ComputeReplacedLogicalWidth(
-      ShouldComputePreferred = kComputeActual) const override;
-  LayoutUnit ComputeReplacedLogicalHeight(
-      LayoutUnit estimated_used_width = LayoutUnit()) const override;
-
-  bool HasReplacedLogicalHeight() const;
-
   // This function returns the local rect of the replaced content. The rectangle
   // is in the coordinate space of the element's physical border-box and assumes
   // no clipping.
@@ -80,8 +73,6 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
   // elements have a high cost to resize. The drawback is that we may overflow
   // or underflow the final content box by 1px.
   static PhysicalRect PreSnappedRectForPersistentSizing(const PhysicalRect&);
-
-  bool NeedsPreferredWidthsRecalculation() const override;
 
   void RecalcVisualOverflow() override;
 
@@ -166,11 +157,6 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
                       height_override.value_or(intrinsic_size_.Height()));
   }
 
-  void ComputePositionedLogicalWidth(
-      LogicalExtentComputedValues&) const override;
-  void ComputePositionedLogicalHeight(
-      LogicalExtentComputedValues&) const override;
-
   MinMaxSizes ComputeIntrinsicLogicalWidths() const final;
 
   // This function calculates the placement of the replaced contents. It takes
@@ -180,11 +166,6 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
       const LayoutSize size,
       const NGPhysicalBoxStrut& border_padding,
       const LayoutSize* overridden_intrinsic_size = nullptr) const;
-
-  LayoutUnit IntrinsicContentLogicalHeight() const override {
-    NOT_DESTROYED();
-    return IntrinsicLogicalHeight();
-  }
 
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
@@ -221,6 +202,12 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
       const LayoutSize size,
       const NGPhysicalBoxStrut& border_padding) const;
 
+  // ReplacedPainter doesn't support CompositeBackgroundAttachmentFixed yet.
+  bool ComputeCanCompositeBackgroundAttachmentFixed() const override {
+    NOT_DESTROYED();
+    return false;
+  }
+
  private:
   // Computes a rect, relative to the element's content's natural size, that
   // should be used as the content source when rendering this element. This
@@ -232,13 +219,6 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
       const LayoutSize size,
       const NGPhysicalBoxStrut& border_padding,
       const LayoutSize* overridden_intrinsic_size) const;
-
-  MinMaxSizes PreferredLogicalWidths() const final;
-
-  void ComputeIntrinsicSizingInfoForReplacedContent(IntrinsicSizingInfo&) const;
-  gfx::SizeF ConstrainIntrinsicSizeToMinMax(const IntrinsicSizingInfo&) const;
-
-  LayoutUnit ComputeConstrainedLogicalWidth(ShouldComputePreferred) const;
 
   absl::optional<LayoutUnit> IntrinsicWidthOverride() const {
     NOT_DESTROYED();

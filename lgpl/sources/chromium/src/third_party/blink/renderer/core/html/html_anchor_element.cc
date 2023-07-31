@@ -26,17 +26,16 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
-#include "services/network/public/cpp/features.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/conversions/attribution_reporting.mojom-blink.h"
+#include "third_party/blink/public/common/navigation/impression.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_prescient_networking.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
+#include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/core/frame/ad_tracker.h"
 #include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
@@ -45,6 +44,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/anchor_element_metrics_sender.h"
+#include "third_party/blink/renderer/core/html/anchor_element_observer_for_service_worker.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -62,6 +62,7 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "ui/gfx/geometry/point_conversions.h"
@@ -201,6 +202,27 @@ static void AppendServerMapMousePosition(StringBuilder& url, Event* event) {
 
 void HTMLAnchorElement::DefaultEventHandler(Event& event) {
   if (IsLink()) {
+    if (base::FeatureList::IsEnabled(
+            blink::features::kSpeculativeServiceWorkerWarmUp) &&
+        Url().IsValid()) {
+      Document& top_document = GetDocument().TopDocument();
+      if (auto* observer =
+              AnchorElementObserverForServiceWorker::From(top_document)) {
+        if (blink::features::kSpeculativeServiceWorkerWarmUpOnPointerover
+                .Get() &&
+            (event.type() == event_type_names::kMouseover ||
+             event.type() == event_type_names::kPointerover)) {
+          observer->MaybeSendNavigationTargetUrls(Vector<KURL>({Url()}));
+        } else if (blink::features::kSpeculativeServiceWorkerWarmUpOnPointerdown
+                       .Get() &&
+                   (event.type() == event_type_names::kMousedown ||
+                    event.type() == event_type_names::kPointerdown ||
+                    event.type() == event_type_names::kTouchstart)) {
+          observer->MaybeSendNavigationTargetUrls(Vector<KURL>({Url()}));
+        }
+      }
+    }
+
     if (IsFocused() && IsEnterKeyKeydownEvent(event) && IsLiveLink()) {
       event.SetDefaultHandled();
       DispatchSimulatedClick(&event);
@@ -250,28 +272,6 @@ void HTMLAnchorElement::ParseAttribute(
       PseudoStateChanged(CSSSelector::kPseudoWebkitAnyLink);
       PseudoStateChanged(CSSSelector::kPseudoAnyLink);
     }
-    if (IsLink()) {
-      String parsed_url = StripLeadingAndTrailingHTMLSpaces(params.new_value);
-      // GetDocument().GetFrame() could be null if this method is called from
-      // DOMParser::parseFromString(), which internally creates a document
-      // and eventually calls this.
-      static bool enable =
-          !base::FeatureList::IsEnabled(
-              network::features::kPrefetchDNSWithURL) ||
-          network::features::kPrefetchDNSWithURLAllAnchorElements.Get();
-      if (GetDocument().IsDNSPrefetchEnabled() && GetDocument().GetFrame() &&
-          enable) {
-        if (ProtocolIs(parsed_url, "http") || ProtocolIs(parsed_url, "https") ||
-            parsed_url.StartsWith("//")) {
-          WebPrescientNetworking* web_prescient_networking =
-              GetDocument().GetFrame()->PrescientNetworking();
-          if (web_prescient_networking) {
-            web_prescient_networking->PrefetchDNS(
-                GetDocument().CompleteURL(parsed_url));
-          }
-        }
-      }
-    }
     if (isConnected()) {
       if (auto* document_rules =
               DocumentSpeculationRules::FromIfExists(GetDocument())) {
@@ -298,6 +298,13 @@ void HTMLAnchorElement::ParseAttribute(
       if (auto* document_rules =
               DocumentSpeculationRules::FromIfExists(GetDocument())) {
         document_rules->ReferrerPolicyAttributeChanged(this);
+      }
+    }
+  } else if (params.name == html_names::kTargetAttr) {
+    if (isConnected() && IsLink()) {
+      if (auto* document_rules =
+              DocumentSpeculationRules::FromIfExists(GetDocument())) {
+        document_rules->TargetAttributeChanged(this);
       }
     }
   } else {
@@ -544,10 +551,11 @@ void HTMLAnchorElement::HandleClick(Event& event) {
 
   frame->MaybeLogAdClickNavigation();
 
-  if (request.HasUserGesture() &&
-      FastHasAttribute(html_names::kAttributionsrcAttr)) {
+  if (const AtomicString& attribution_src =
+          FastGetAttribute(html_names::kAttributionsrcAttr);
+      request.HasUserGesture() && !attribution_src.IsNull()) {
     // An impression must be attached prior to the
-    // FindOrCreateFrameForNavigation() call, as that call may result in
+    // `FindOrCreateFrameForNavigation()` call, as that call may result in
     // performing a navigation if the call results in creating a new window with
     // noopener set.
     // At this time we don't know if the navigation will navigate a main frame
@@ -556,24 +564,10 @@ void HTMLAnchorElement::HandleClick(Event& event) {
     // Attach the impression regardless, the embedder will be able to drop
     // impressions for subframe navigations.
 
-    const AtomicString& attribution_src_value =
-        FastGetAttribute(html_names::kAttributionsrcAttr);
-    if (!attribution_src_value.empty()) {
-      frame_request.SetImpression(
-          frame->GetAttributionSrcLoader()->RegisterNavigation(
-              GetDocument().CompleteURL(attribution_src_value),
-              mojom::blink::AttributionNavigationType::kAnchor, this));
-    }
-
-    // If the impression could not be set, or if the value was null, mark that
-    // the frame request is eligible for attribution by adding an impression.
-    if (!frame_request.Impression() &&
-        frame->GetAttributionSrcLoader()->CanRegister(
-            completed_url, this,
-            /*request_id=*/absl::nullopt)) {
-      frame_request.SetImpression(blink::Impression{
-          .nav_type = mojom::blink::AttributionNavigationType::kAnchor});
-    }
+    frame_request.SetImpression(
+        frame->GetAttributionSrcLoader()->RegisterNavigation(
+            /*navigation_url=*/completed_url, attribution_src,
+            /*element=*/this));
   }
 
   Frame* target_frame =
@@ -630,6 +624,15 @@ Node::InsertionNotificationRequest HTMLAnchorElement::InsertedInto(
   Document& top_document = GetDocument().TopDocument();
   if (AnchorElementMetricsSender::HasAnchorElementMetricsSender(top_document)) {
     AnchorElementMetricsSender::From(top_document)->AddAnchorElement(*this);
+  }
+
+  if (base::FeatureList::IsEnabled(
+          blink::features::kSpeculativeServiceWorkerWarmUp) &&
+      blink::features::kSpeculativeServiceWorkerWarmUpOnVisible.Get()) {
+    if (auto* observer =
+            AnchorElementObserverForServiceWorker::From(top_document)) {
+      observer->ObserveAnchorElementVisibility(*this);
+    }
   }
 
   if (isConnected() && IsLink()) {

@@ -1,4 +1,5 @@
 include_rules = [
+    "+base/apple/bridging.h",
     "+base/atomic_sequence_num.h",
     "+base/barrier_closure.h",
     "+base/cancelable_callback.h",
@@ -7,7 +8,7 @@ include_rules = [
     "+base/files/file_path.h",
     "+base/guid.h",
     "+base/mac/foundation_util.h",
-    "+base/memory/scoped_policy.h",
+    "+base/mac/scoped_cftyperef.h",
     "+base/memory/scoped_refptr.h",
     "+base/profiler/sample_metadata.h",
     "+base/strings/stringprintf.h",
@@ -21,6 +22,7 @@ include_rules = [
     "+base/tracing",
     "+base/unguessable_token.h",
     "+base/values.h",
+    "+base/uuid.h",
     "+cc/animation/animation_host.h",
     "+cc/animation/animation_id_provider.h",
     "+cc/animation/animation_timeline.h",
@@ -76,6 +78,7 @@ include_rules = [
     "+services/network/public/cpp/request_destination.h",
     "+services/network/public/cpp/request_mode.h",
     "+services/network/public/cpp/resource_request.h",
+    "+services/network/public/cpp/url_loader_completion_status.h",
     "+services/network/public/cpp/web_sandbox_flags.h",
     "+services/service_manager/public",
     "+skia/public/mojom",
@@ -110,8 +113,10 @@ include_rules = [
     "+ui/gfx/animation/keyframe/animation_curve.h",
     "+ui/gfx/animation/keyframe/keyframed_animation_curve.h",
     "+ui/gfx/animation/keyframe/timing_function.h",
+    "+ui/gfx/codec/png_codec.h",
     "+ui/gfx/geometry",
     "+ui/gfx/range/range.h",
+    "+ui/gfx/selection_bound.h",
     "-web",
     # We do not want any new dependencies into core/exported until we resolve
     # controller layer.
@@ -189,5 +194,8 @@ specific_include_rules = {
     ],
     "media_values.h": [
         "+ui/base/pointer/pointer_device.h",
+    ],
+    "xml_http_request.cc": [
+        "+net/base/mime_util.h",
     ],
 }

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/loader/base_fetch_context.h"
 
+#include "base/command_line.h"
 #include "net/http/structured_headers.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "services/network/public/cpp/request_mode.h"
@@ -12,6 +13,7 @@
 #include "third_party/blink/public/common/device_memory/approximated_device_memory.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
+#include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
@@ -274,9 +276,9 @@ void BaseFetchContext::AddClientHintsIfNecessary(
                              network::mojom::blink::WebClientHintsType::
                                  kResourceWidth_DEPRECATED,
                              hints_preferences)) {
-      if (image_info->resource_width.is_set) {
+      if (image_info->resource_width) {
         float physical_width =
-            image_info->resource_width.width * image_info->dpr;
+            image_info->resource_width.value() * image_info->dpr;
         request.SetHttpHeaderField(
             network::GetClientHintToNameMap()
                 .at(network::mojom::blink::WebClientHintsType::
@@ -290,9 +292,9 @@ void BaseFetchContext::AddClientHintsIfNecessary(
             policy, resource_origin, is_1p_origin,
             network::mojom::blink::WebClientHintsType::kResourceWidth,
             hints_preferences)) {
-      if (image_info->resource_width.is_set) {
+      if (image_info->resource_width) {
         float physical_width =
-            image_info->resource_width.width * image_info->dpr;
+            image_info->resource_width.value() * image_info->dpr;
         request.SetHttpHeaderField(
             network::GetClientHintToNameMap()
                 .at(network::mojom::blink::WebClientHintsType::kResourceWidth)
@@ -673,7 +675,9 @@ BaseFetchContext::CanRequestInternal(
   // data: URL is deprecated in SVGUseElement.
   if (RuntimeEnabledFeatures::RemoveDataUrlInSvgUseEnabled() &&
       options.initiator_info.name == fetch_initiator_type_names::kUse &&
-      url.ProtocolIsData()) {
+      url.ProtocolIsData() &&
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          blink::switches::kDataUrlInSvgUseEnabled)) {
     PrintAccessDeniedMessage(url);
     return ResourceRequestBlockedReason::kOrigin;
   }

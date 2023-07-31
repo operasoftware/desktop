@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
 #include "third_party/blink/renderer/core/css/cssom/css_style_value.h"
 #include "third_party/blink/renderer/core/css/cssom/style_property_map_read_only.h"
+#include "third_party/blink/renderer/core/css/style_sheet_list.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
@@ -548,7 +549,7 @@ TEST_F(PictureInPictureControllerTestWithWidget,
 
   // Verify rejected with DOMExceptionCode::kInvalidStateError.
   EXPECT_EQ(v8::Promise::kRejected, promise.V8Promise()->State());
-  DOMException* dom_exception = V8DOMException::ToImplWithTypeCheck(
+  DOMException* dom_exception = V8DOMException::ToWrappable(
       promise.GetIsolate(), promise.V8Promise()->Result());
   ASSERT_NE(dom_exception, nullptr);
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kInvalidStateError),
@@ -582,7 +583,7 @@ TEST_F(PictureInPictureControllerTestWithWidget,
   // Create one image with a size of 10x10px
   SkImageInfo raster_image_info =
       SkImageInfo::MakeN32Premul(10, 10, SkColorSpace::MakeSRGB());
-  sk_sp<SkSurface> surface(SkSurface::MakeRaster(raster_image_info));
+  sk_sp<SkSurface> surface(SkSurfaces::Raster(raster_image_info));
   ImageResourceContent* image_content = ImageResourceContent::CreateLoaded(
       UnacceleratedStaticBitmapImage::Create(surface->makeImageSnapshot())
           .get());
@@ -814,6 +815,12 @@ TEST_F(PictureInPictureControllerTestWithChromeClient,
   Document* pictureInPictureDocument = pictureInPictureWindow->document();
 
   // CSS for a blue background should have been copied from the opener.
+  EXPECT_EQ(GetBodyBackgroundColor(v8_scope, pictureInPictureDocument),
+            "rgb(0, 0, 255)");
+
+  // Changing the opener's sheets should not result in a change to PiP.
+  CSSStyleSheet* sheet = DynamicTo<CSSStyleSheet>(FindStyleSheetInOpener());
+  sheet->deleteRule(0, v8_scope.GetExceptionState());
   EXPECT_EQ(GetBodyBackgroundColor(v8_scope, pictureInPictureDocument),
             "rgb(0, 0, 255)");
 }

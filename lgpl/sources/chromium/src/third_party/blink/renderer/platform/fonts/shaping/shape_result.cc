@@ -654,18 +654,6 @@ float ShapeResult::CaretPositionForOffset(
   return PositionForOffset(offset, adjust_mid_cluster);
 }
 
-void ShapeResult::FallbackFonts(
-    HashSet<const SimpleFontData*>* fallback) const {
-  DCHECK(fallback);
-  DCHECK(primary_font_);
-  for (unsigned i = 0; i < runs_.size(); ++i) {
-    if (runs_[i] && runs_[i]->font_data_ &&
-        runs_[i]->font_data_ != primary_font_) {
-      fallback->insert(runs_[i]->font_data_.get());
-    }
-  }
-}
-
 void ShapeResult::GetRunFontData(Vector<RunFontData>* font_data) const {
   for (const auto& run : runs_) {
     font_data->push_back(
@@ -1465,16 +1453,6 @@ void ShapeResult::CheckConsistency() const {
 
 scoped_refptr<ShapeResult> ShapeResult::CreateForTabulationCharacters(
     const Font* font,
-    const TextRun& text_run,
-    float position_offset,
-    unsigned length) {
-  return CreateForTabulationCharacters(
-      font, text_run.Direction(), text_run.GetTabSize(),
-      text_run.XPos() + position_offset, 0, length);
-}
-
-scoped_refptr<ShapeResult> ShapeResult::CreateForTabulationCharacters(
-    const Font* font,
     TextDirection direction,
     const TabSize& tab_size,
     float position,
@@ -1902,7 +1880,7 @@ unsigned ShapeResult::CharacterPositionData::PreviousSafeToBreakOffset(
     unsigned offset) const {
   DCHECK_LE(start_offset_, offset);
   unsigned adjusted_offset = offset - start_offset_;
-  DCHECK_LT(adjusted_offset, data_.size());
+  DCHECK_LE(adjusted_offset, data_.size());
 
   // Assume it is always safe to break at the end of the run.
   if (adjusted_offset >= data_.size())

@@ -307,10 +307,10 @@ FilterEffect* FilterEffectBuilder::BuildFilterEffect(
             To<DropShadowFilterOperation>(*filter_operation).Shadow();
         gfx::PointF offset =
             gfx::ScalePoint(shadow.Location(), shorthand_scale_);
-        float radius = shadow.Blur() * shorthand_scale_;
+        gfx::PointF blur = gfx::ScalePoint(shadow.BlurXY(), shorthand_scale_);
         effect = MakeGarbageCollected<FEDropShadow>(
-            parent_filter, radius, radius, offset.x(), offset.y(),
-            shadow.GetColor().GetColor(), 1);
+            parent_filter, blur.x(), blur.y(), offset.x(), offset.y(),
+            shadow.GetColor().GetColor(), shadow.Opacity());
         break;
       }
       case FilterOperation::OperationType::kBoxReflect: {
@@ -515,7 +515,7 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
               SkSize::Make(reference_box_.size().width(),
                            reference_box_.size().height()),
               shader_operation.AnimationFrame(), SkPoint::Make(0, 0),
-              backdrop_color_);
+              backdrop_color_, 0);
         }
 
         break;

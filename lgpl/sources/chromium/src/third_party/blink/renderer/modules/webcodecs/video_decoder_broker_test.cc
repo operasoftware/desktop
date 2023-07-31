@@ -38,6 +38,16 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_decoder_broker.h"
+
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#include "base/features/feature_utils.h"
+#if BUILDFLAG(IS_MAC)
+#include "media/filters/vt_video_decoder.h"
+#elif BUILDFLAG(IS_WIN)
+#include "media/filters/wmf_video_decoder.h"
+#endif
+#endif // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::Return;
@@ -94,6 +104,18 @@ class FakeMojoMediaClient : public media::MojoMediaClient {
       const gfx::ColorSpace& target_color_space,
       mojo::PendingRemote<media::stable::mojom::StableVideoDecoder>
           oop_video_decoder) override {
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+    if (base::IsFeatureEnabled(base::kFeaturePlatformH264DecoderInGpu) &&
+        !command_buffer_id) {
+      // HW-acceleration is not available => use the platform decoder in SW
+      // mode.
+#if BUILDFLAG(IS_MAC)
+      return std::make_unique<media::VTVideoDecoder>(std::move(task_runner));
+#elif BUILDFLAG(IS_WIN)
+      return std::make_unique<media::WMFVideoDecoder>(std::move(task_runner));
+#endif
+    }
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
     return std::make_unique<FakeGpuVideoDecoder>();
   }
 };
@@ -265,7 +287,10 @@ class VideoDecoderBrokerTest : public testing::Test {
         .WillRepeatedly(
             Invoke([](base::OnceCallback<void(const base::UnguessableToken&)>
                           callback) {
-              std::move(callback).Run(base::UnguessableToken());
+              // Use a non-empty token to satisfy code paths expecting it for
+              // HW decoding (which is only simulated in this test via
+              // FakeGpuVideoDecoder anyway).
+              std::move(callback).Run(base::UnguessableToken::Create());
             }));
   }
 
@@ -337,6 +362,8 @@ class VideoDecoderBrokerTest : public testing::Test {
  protected:
   base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
       base::kFeaturePlatformAacDecoderInGpu, true};
+  base::ScopedTestFeatureOverride enable_h264_decoder_in_gpu_{
+      base::kFeaturePlatformH264DecoderInGpu, true};
 
   media::NullMediaLog null_media_log_;
   std::unique_ptr<VideoDecoderBroker> decoder_broker_;

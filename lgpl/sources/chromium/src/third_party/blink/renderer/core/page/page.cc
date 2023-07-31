@@ -147,17 +147,19 @@ HeapVector<Member<Page>> Page::RelatedPages() {
 
 Page* Page::CreateNonOrdinary(ChromeClient& chrome_client,
                               AgentGroupScheduler& agent_group_scheduler) {
-  return MakeGarbageCollected<Page>(base::PassKey<Page>(), chrome_client,
-                                    agent_group_scheduler,
-                                    /*is_ordinary=*/false);
+  return MakeGarbageCollected<Page>(
+      base::PassKey<Page>(), chrome_client, agent_group_scheduler,
+      BrowsingContextGroupInfo::CreateUnique(), /*is_ordinary=*/false);
 }
 
-Page* Page::CreateOrdinary(ChromeClient& chrome_client,
-                           Page* opener,
-                           AgentGroupScheduler& agent_group_scheduler) {
-  Page* page = MakeGarbageCollected<Page>(base::PassKey<Page>(), chrome_client,
-                                          agent_group_scheduler,
-                                          /*is_ordinary=*/true);
+Page* Page::CreateOrdinary(
+    ChromeClient& chrome_client,
+    Page* opener,
+    AgentGroupScheduler& agent_group_scheduler,
+    const BrowsingContextGroupInfo& browsing_context_group_info) {
+  Page* page = MakeGarbageCollected<Page>(
+      base::PassKey<Page>(), chrome_client, agent_group_scheduler,
+      browsing_context_group_info, /*is_ordinary=*/true);
 
   if (opener) {
     // Before: ... -> opener -> next -> ...
@@ -178,6 +180,7 @@ Page* Page::CreateOrdinary(ChromeClient& chrome_client,
 Page::Page(base::PassKey<Page>,
            ChromeClient& chrome_client,
            AgentGroupScheduler& agent_group_scheduler,
+           const BrowsingContextGroupInfo& browsing_context_group_info,
            bool is_ordinary)
     : SettingsDelegate(std::make_unique<Settings>()),
       main_frame_(nullptr),
@@ -217,7 +220,10 @@ Page::Page(base::PassKey<Page>,
       next_related_page_(this),
       prev_related_page_(this),
       autoplay_flags_(0),
-      web_text_autosizer_page_info_({0, 0, 1.f}) {
+      web_text_autosizer_page_info_({0, 0, 1.f}),
+      v8_compile_hints_(
+          MakeGarbageCollected<V8CrowdsourcedCompileHintsProducer>(this)),
+      browsing_context_group_info_(browsing_context_group_info) {
   DCHECK(!AllPages().Contains(this));
   AllPages().insert(this);
 
@@ -539,10 +545,9 @@ void Page::SetVisibilityState(
   if (is_initial_state)
     return;
 
-  page_visibility_observer_set_.ForEachObserver(
-      [](PageVisibilityObserver* observer) {
-        observer->PageVisibilityChanged();
-      });
+  for (auto observer : page_visibility_observer_set_) {
+    observer->PageVisibilityChanged();
+  }
 
   if (main_frame_) {
     if (lifecycle_state_->visibility ==
@@ -713,12 +718,10 @@ void Page::SettingsChanged(ChangeType change_type) {
       }
       break;
     case ChangeType::kAccessibilityState:
-      if (!MainFrame() || !MainFrame()->IsLocalFrame())
+      if (!MainFrame() || !MainFrame()->IsLocalFrame()) {
         break;
-      DeprecatedLocalMainFrame()
-          ->GetDocument()
-          ->AXObjectCacheOwner()
-          .ClearAXObjectCache();
+      }
+      DeprecatedLocalMainFrame()->GetDocument()->RefreshAccessibilityTree();
       break;
     case ChangeType::kViewportStyle: {
       auto* main_local_frame = DynamicTo<LocalFrame>(MainFrame());
@@ -889,7 +892,6 @@ void Page::DidCommitLoad(LocalFrame* frame) {
     // TODO(loonybear): Most of this doesn't appear to take into account that
     // each SVGImage gets it's own Page instance.
     GetDeprecation().ClearSuppression();
-    GetVisualViewport().SendUMAMetrics();
     // Need to reset visual viewport position here since before commit load we
     // would update the previous history item, Page::didCommitLoad is called
     // after a new history item is created in FrameLoader.
@@ -960,6 +962,7 @@ void Page::Trace(Visitor* visitor) const {
   visitor->Trace(next_related_page_);
   visitor->Trace(prev_related_page_);
   visitor->Trace(agent_group_scheduler_);
+  visitor->Trace(v8_compile_hints_);
   Supplementable<Page>::Trace(visitor);
 }
 
@@ -1012,11 +1015,10 @@ void Page::WillBeDestroyed() {
     validation_message_client_->WillBeDestroyed();
   main_frame_ = nullptr;
 
-  page_visibility_observer_set_.ForEachObserver(
-      [](PageVisibilityObserver* observer) {
-        observer->ObserverSetWillBeCleared();
-      });
-  page_visibility_observer_set_.Clear();
+  for (auto observer : page_visibility_observer_set_) {
+    observer->ObserverSetWillBeCleared();
+  }
+  page_visibility_observer_set_.clear();
 
   page_scheduler_ = nullptr;
 }
@@ -1064,13 +1066,6 @@ bool Page::RequestBeginMainFrameNotExpected(bool new_state) {
   chrome_client_->RequestBeginMainFrameNotExpected(*DeprecatedLocalMainFrame(),
                                                    new_state);
   return true;
-}
-
-bool Page::LocalMainFrameNetworkIsAlmostIdle() const {
-  LocalFrame* frame = DynamicTo<LocalFrame>(MainFrame());
-  if (!frame)
-    return true;
-  return frame->GetIdlenessDetector()->NetworkIsAlmostIdle();
 }
 
 void Page::AddAutoplayFlags(int32_t value) {
@@ -1155,6 +1150,14 @@ void Page::UpdateLifecycle(LocalFrame& root,
   } else {
     Animator().UpdateAllLifecyclePhases(root, reason);
   }
+}
+
+const base::UnguessableToken& Page::BrowsingContextGroupToken() {
+  return browsing_context_group_info_.browsing_context_group_token;
+}
+
+const base::UnguessableToken& Page::CoopRelatedGroupToken() {
+  return browsing_context_group_info_.coop_related_group_token;
 }
 
 template class CORE_TEMPLATE_EXPORT Supplement<Page>;

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/smart_card/smart_card_resource_manager.h"
 
+#include "services/device/public/mojom/smart_card.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-shared.h"
 #include "third_party/blink/public/mojom/smart_card/smart_card.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/navigator_base.h"
@@ -17,11 +18,13 @@
 namespace blink {
 
 namespace {
-const char kWatchForReadersNotSupported[] =
+constexpr char kWatchForReadersNotSupported[] =
     "Watching for reader addition/removal is not supported in this platform.";
-const char kContextGone[] = "Script context has shut down.";
-const char kFeaturePolicyBlocked[] =
+constexpr char kContextGone[] = "Script context has shut down.";
+constexpr char kFeaturePolicyBlocked[] =
     "Access to the feature \"smart-card\" is disallowed by permissions policy.";
+constexpr char kServiceDisconnected[] =
+    "Disconnected from the smart card service.";
 
 bool ShouldBlockSmartCardServiceCall(ExecutionContext* context,
                                      ExceptionState& exception_state) {
@@ -56,7 +59,8 @@ SmartCardResourceManager* SmartCardResourceManager::smartCard(
 SmartCardResourceManager::SmartCardResourceManager(NavigatorBase& navigator)
     : Supplement<NavigatorBase>(navigator),
       ExecutionContextLifecycleObserver(navigator.GetExecutionContext()),
-      service_(navigator.GetExecutionContext()) {}
+      service_(navigator.GetExecutionContext()),
+      receiver_(this, navigator.GetExecutionContext()) {}
 
 void SmartCardResourceManager::ContextDestroyed() {
   CloseServiceConnection();
@@ -100,8 +104,27 @@ void SmartCardResourceManager::ReaderChanged(
   ReaderAdded(std::move(reader_info));
 }
 
+void SmartCardResourceManager::Error(
+    device::mojom::blink::SmartCardError error) {
+  tracking_started_ = false;
+  // TODO(crbug.com/1386175):
+  // * Put existing SmartCardReader instances into an invalid state.
+  // * Forward error to existing SmartCardPresenceObservers.
+}
+
+void SmartCardResourceManager::Connect(
+    const String& reader_name,
+    device::mojom::blink::SmartCardShareMode share_mode,
+    device::mojom::blink::SmartCardProtocolsPtr preferred_protocols,
+    mojom::blink::SmartCardService::ConnectCallback callback) {
+  EnsureServiceConnection();
+  service_->Connect(reader_name, share_mode, std::move(preferred_protocols),
+                    std::move(callback));
+}
+
 void SmartCardResourceManager::Trace(Visitor* visitor) const {
   visitor->Trace(service_);
+  visitor->Trace(receiver_);
   visitor->Trace(get_readers_promises_);
   visitor->Trace(watch_for_readers_promises_);
   visitor->Trace(reader_cache_);
@@ -124,7 +147,8 @@ ScriptPromise SmartCardResourceManager::getReaders(
 
   EnsureServiceConnection();
 
-  service_->GetReaders(
+  tracking_started_ = true;
+  service_->GetReadersAndStartTracking(
       WTF::BindOnce(&SmartCardResourceManager::FinishGetReaders,
                     WrapPersistent(this), WrapPersistent(resolver)));
   return resolver->Promise();
@@ -161,9 +185,8 @@ void SmartCardResourceManager::FinishGetReaders(
   DCHECK(get_readers_promises_.Contains(resolver));
   get_readers_promises_.erase(resolver);
 
-  if (result->is_response_code()) {
-    auto* error =
-        MakeGarbageCollected<SmartCardError>(result->get_response_code());
+  if (result->is_error()) {
+    auto* error = SmartCardError::Create(result->get_error());
     resolver->Reject(error);
     return;
   }
@@ -176,6 +199,17 @@ void SmartCardResourceManager::FinishGetReaders(
   resolver->Resolve(readers);
 }
 
+void SmartCardResourceManager::UpdateReadersCache(
+    mojom::blink::SmartCardGetReadersResultPtr result) {
+  if (result->is_error()) {
+    return;
+  }
+
+  for (auto& reader_info : result->get_readers()) {
+    GetOrCreateReader(std::move(reader_info));
+  }
+}
+
 SmartCardReader* SmartCardResourceManager::GetOrCreateReader(
     mojom::blink::SmartCardReaderInfoPtr info) {
   auto it = reader_cache_.find(info->name);
@@ -185,7 +219,8 @@ SmartCardReader* SmartCardResourceManager::GetOrCreateReader(
 
   const String name = info->name;
   SmartCardReader* reader = MakeGarbageCollected<SmartCardReader>(
-      std::move(info), GetExecutionContext());
+      this, std::move(info), GetExecutionContext());
+
   reader_cache_.insert(name, reader);
   return reader;
 }
@@ -206,7 +241,7 @@ void SmartCardResourceManager::EnsureServiceConnection() {
                     WrapWeakPersistent(this)));
   DCHECK(!receiver_.is_bound());
   service_->RegisterClient(
-      receiver_.BindNewEndpointAndPassRemote(),
+      receiver_.BindNewEndpointAndPassRemote(task_runner),
       WTF::BindOnce(&SmartCardResourceManager::OnServiceClientRegistered,
                     WrapWeakPersistent(this)));
 }
@@ -250,18 +285,46 @@ void SmartCardResourceManager::ResolveWatchForReadersPromise(
     ScriptPromiseResolver* resolver) {
   DCHECK(supports_reader_presence_observer_.has_value());
 
-  if (supports_reader_presence_observer_.value()) {
-    resolver->Resolve(GetOrCreatePresenceObserver());
-  } else {
+  if (!supports_reader_presence_observer_.value()) {
     resolver->RejectWithDOMException(DOMExceptionCode::kNotSupportedError,
                                      kWatchForReadersNotSupported);
+    return;
   }
+
+  if (!tracking_started_) {
+    tracking_started_ = true;
+    service_->GetReadersAndStartTracking(WTF::BindOnce(
+        &SmartCardResourceManager::UpdateReadersCache, WrapPersistent(this)));
+  }
+
+  // TODO(crbug.com/1386175): possibly always create a new observer.
+  resolver->Resolve(GetOrCreatePresenceObserver());
 }
 
 void SmartCardResourceManager::CloseServiceConnection() {
   service_.reset();
-  // TODO(crbug.com/1386175): Deal with promises in
-  // get_readers_promises_ and watch_for_readers_promises_
+
+  // This loop is resolving promises with a value and so it is possible for
+  // script to be executed in the process of determining if the value is a
+  // thenable. Move the set to a local variable to prevent such execution from
+  // invalidating the iterator used by the loop.
+  HeapHashSet<Member<ScriptPromiseResolver>> get_readers_promises;
+  get_readers_promises.swap(get_readers_promises_);
+  for (auto& resolver : get_readers_promises) {
+    resolver->Resolve(HeapVector<Member<SmartCardReader>>());
+  }
+
+  // Similar protection is unnecessary when rejecting a promise.
+  for (auto& resolver : watch_for_readers_promises_) {
+    ScriptState* script_state = resolver->GetScriptState();
+    if (!IsInParallelAlgorithmRunnable(resolver->GetExecutionContext(),
+                                       script_state)) {
+      continue;
+    }
+    ScriptState::Scope script_state_scope(script_state);
+    resolver->RejectWithDOMException(DOMExceptionCode::kInvalidStateError,
+                                     kServiceDisconnected);
+  }
 }
 
 }  // namespace blink

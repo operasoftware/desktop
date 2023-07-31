@@ -113,10 +113,11 @@ suite('NewTabPageModulesDriveModuleTest', () => {
     // Assert.
     const event: DismissModuleEvent = await whenFired;
     assertEquals('Files hidden', event.detail.message);
+    assertTrue(!!event.detail.restoreCallback);
     assertEquals(1, handler.getCallCount('dismissModule'));
 
     // Act.
-    event.detail.restoreCallback();
+    event.detail.restoreCallback!();
 
     // Assert.
     assertEquals(1, handler.getCallCount('restoreModule'));
@@ -136,7 +137,7 @@ suite('NewTabPageModulesDriveModuleTest', () => {
       ],
     };
     handler.setResultFor('getFiles', Promise.resolve(data));
-    const module = await driveDescriptor.initialize(0);
+    const module = await driveDescriptor.initialize(0) as DriveModuleElement;
     assertTrue(!!module);
     document.body.append(module);
 

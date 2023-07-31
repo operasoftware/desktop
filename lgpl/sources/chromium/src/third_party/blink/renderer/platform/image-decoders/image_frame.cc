@@ -141,7 +141,7 @@ bool ImageFrame::AllocatePixelData(int new_width,
 sk_sp<SkImage> ImageFrame::FinalizePixelsAndGetImage() {
   DCHECK_EQ(kFrameComplete, status_);
   bitmap_.setImmutable();
-  return SkImage::MakeFromBitmap(bitmap_);
+  return SkImages::RasterFromBitmap(bitmap_);
 }
 
 void ImageFrame::SetHasAlpha(bool alpha) {
@@ -183,12 +183,12 @@ static void BlendRGBAF16Buffer(ImageFrame::PixelDataF16* dst,
                                        kRGBA_F16_SkColorType, dst_alpha_type,
                                        SkColorSpace::MakeSRGBLinear());
   sk_sp<SkSurface> surface =
-      SkSurface::MakeRasterDirect(info, dst, info.minRowBytes());
+      SkSurfaces::WrapPixels(info, dst, info.minRowBytes());
 
   SkPixmap src_pixmap(info.makeAlphaType(kUnpremul_SkAlphaType), src,
                       info.minRowBytes());
   sk_sp<SkImage> src_image =
-      SkImage::MakeFromRaster(src_pixmap, nullptr, nullptr);
+      SkImages::RasterFromPixmap(src_pixmap, nullptr, nullptr);
 
   surface->getCanvas()->drawImage(src_image, 0, 0);
   surface->flushAndSubmit();

@@ -23,6 +23,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RULE_SET_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RULE_SET_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/substring_set_matcher/substring_set_matcher.h"
 #include "base/types/pass_key.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -48,8 +49,8 @@ using AddRuleFlags = unsigned;
 
 enum AddRuleFlag {
   kRuleHasNoSpecialState = 0,
-  kRuleHasDocumentSecurityOrigin = 1 << 0,
-  kRuleIsVisitedDependent = 1 << 1,
+  kRuleIsVisitedDependent = 1 << 0,
+  kRuleIsStartingStyle = 1 << 1,
 };
 
 // Some CSS properties do not apply to certain pseudo-elements, and need to be
@@ -126,15 +127,13 @@ class CORE_EXPORT RuleData {
   void ComputeEntirelyCoveredByBucketing();
   void ResetEntirelyCoveredByBucketing();
   bool SelectorIsEasy() const { return is_easy_; }
+  bool IsStartingStyle() const { return is_starting_style_; }
 
   bool ContainsUncommonAttributeSelector() const {
     return contains_uncommon_attribute_selector_;
   }
   unsigned Specificity() const { return specificity_; }
   unsigned LinkMatchType() const { return link_match_type_; }
-  bool HasDocumentSecurityOrigin() const {
-    return has_document_security_origin_;
-  }
   ValidPropertyFilter GetValidPropertyFilter(
       bool is_matching_ua_rules = false) const {
     return is_matching_ua_rules
@@ -171,6 +170,13 @@ class CORE_EXPORT RuleData {
 
   void Trace(Visitor*) const;
 
+  // Used during merging.
+  void AdjustPosition(int offset) { position_ += offset; }
+  void AdjustBucketPosition(int new_bucket_number, int offset) {
+    bucket_number_ = new_bucket_number;
+    order_in_bucket_ += offset;
+  }
+
   // This number is picked fairly arbitrary. If lowered, be aware that there
   // might be sites and extensions using style rules with selector lists
   // exceeding the number of simple selectors to fit in this bitfield.
@@ -189,10 +195,10 @@ class CORE_EXPORT RuleData {
   // 32 bits above
   unsigned specificity_ : 24;
   unsigned link_match_type_ : 2;
-  unsigned has_document_security_origin_ : 1;
   unsigned valid_property_filter_ : 3;
   unsigned is_entirely_covered_by_bucketing_ : 1;
-  unsigned is_easy_ : 1;  // See EasySelectorChecker.
+  unsigned is_easy_ : 1;            // See EasySelectorChecker.
+  unsigned is_starting_style_ : 1;  // Inside @starting-style {}.
   // 32 bits above
   union {
     // Used by RuleMap before compaction, to hold what bucket this RuleData
@@ -225,7 +231,8 @@ struct SameSizeAsRuleData {
   Member<void*> a;
   unsigned b;
   unsigned c;
-  unsigned d[4];
+  unsigned d;
+  unsigned e[3];
 };
 
 ASSERT_SIZE(RuleData, SameSizeAsRuleData);
@@ -272,6 +279,7 @@ class RuleMap {
 
  public:
   void Add(const AtomicString& key, const RuleData& rule_data);
+  void Merge(const RuleMap& other, int offset);
   base::span<const RuleData> Find(const AtomicString& key) const {
     DCHECK(buckets.empty() || compacted);
     auto it = buckets.find(key);
@@ -362,7 +370,6 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
 
   void AddRulesFromSheet(StyleSheetContents*,
                          const MediaQueryEvaluator&,
-                         AddRuleFlags = kRuleHasNoSpecialState,
                          CascadeLayer* = nullptr);
   void AddStyleRule(StyleRule* style_rule,
                     const MediaQueryEvaluator& medium,
@@ -370,6 +377,7 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
                     const ContainerQuery* container_query = nullptr,
                     CascadeLayer* cascade_layer = nullptr,
                     const StyleScope* style_scope = nullptr);
+  void Merge(const RuleSet& other, LayerMap& layer_mapping);
 
   const RuleFeatureSet& Features() const { return features_; }
 
@@ -417,9 +425,6 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   }
   base::span<const RuleData> PartPseudoRules() const {
     return part_pseudo_rules_;
-  }
-  base::span<const RuleData> VisitedDependentRules() const {
-    return visited_dependent_rules_;
   }
   base::span<const RuleData> SelectorFragmentAnchorRules() const {
     return selector_fragment_anchor_rules_;
@@ -517,10 +522,10 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
     return scope_intervals_;
   }
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   void Show() const;
   const HeapVector<RuleData>& AllRulesForTest() const { return all_rules_; }
-#endif
+#endif  // DCHECK_IS_ON()
 
   void Trace(Visitor*) const;
 
@@ -551,7 +556,17 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
                      const ContainerQuery*,
                      CascadeLayer*,
                      const StyleScope*);
+
+  // Determines whether or not CSSSelector::is_covered_by_bucketing_ should
+  // be computed during calls to FindBestRuleSetAndAdd.
+  enum class BucketCoverage {
+    kIgnore,
+    kCompute,
+  };
+
+  template <BucketCoverage bucket_coverage>
   void FindBestRuleSetAndAdd(CSSSelector&, const RuleData&);
+
   void AddRule(StyleRule*,
                unsigned selector_index,
                AddRuleFlags,
@@ -580,6 +595,9 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   CascadeLayer* GetOrAddSubLayer(CascadeLayer*,
                                  const StyleRuleBase::LayerName&);
   void AddRuleToLayerIntervals(const CascadeLayer*, unsigned position);
+  void MergeCascadeLayers(const RuleSet& other,
+                          int offset,
+                          LayerMap& layer_mapping);
 
   // May return nullptr for the implicit outer layer.
   const CascadeLayer* GetLayerForTest(const RuleData&) const;
@@ -620,7 +638,6 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   HeapVector<RuleData> shadow_host_rules_;
   HeapVector<RuleData> part_pseudo_rules_;
   HeapVector<RuleData> slotted_pseudo_element_rules_;
-  HeapVector<RuleData> visited_dependent_rules_;
   HeapVector<RuleData> selector_fragment_anchor_rules_;
   HeapVector<RuleData> root_element_rules_;
   RuleFeatureSet features_;
@@ -652,9 +669,9 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   // Empty vector if the stylesheet doesn't use any @scopes.
   HeapVector<Interval<StyleScope>> scope_intervals_;
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   HeapVector<RuleData> all_rules_;
-#endif
+#endif  // DCHECK_IS_ON()
 };
 
 }  // namespace blink

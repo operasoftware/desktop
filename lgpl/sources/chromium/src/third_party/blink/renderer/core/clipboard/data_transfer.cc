@@ -128,7 +128,8 @@ class DraggedNodeImageBuilder {
     cull_rect.Offset(
         gfx::Vector2dF(layer->GetLayoutObject().FirstFragment().PaintOffset()));
     OverriddenCullRectScope cull_rect_scope(
-        *layer, CullRect(gfx::ToEnclosingRect(cull_rect)));
+        *layer, CullRect(gfx::ToEnclosingRect(cull_rect)),
+        /*disable_expansion*/ true);
     auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
 
     dragged_layout_object->GetDocument().Lifecycle().AdvanceTo(
@@ -413,8 +414,9 @@ std::unique_ptr<DragImage> DataTransfer::CreateDragImageForFrame(
   // Rasterize upfront, since DragImage::create() is going to do it anyway
   // (SkImage::asLegacyBitmap).
   SkSurfaceProps surface_props(0, kUnknown_SkPixelGeometry);
-  sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(
-      device_size.width(), device_size.height(), &surface_props);
+  sk_sp<SkSurface> surface = SkSurfaces::Raster(
+      SkImageInfo::MakeN32Premul(device_size.width(), device_size.height()),
+      &surface_props);
   if (!surface)
     return nullptr;
 

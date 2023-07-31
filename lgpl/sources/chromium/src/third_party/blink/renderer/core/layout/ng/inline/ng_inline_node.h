@@ -79,7 +79,7 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   // |new_text| is new text of |layout_text|.
   // This is optimized version of |PrepareLayout()|.
   static bool SetTextWithOffset(LayoutText* layout_text,
-                                scoped_refptr<StringImpl> new_text,
+                                String new_text,
                                 unsigned offset,
                                 unsigned length);
 
@@ -101,6 +101,17 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   bool HasRuby() const { return Data().has_ruby_; }
 
   bool IsBlockLevel() { return EnsureData().is_block_level_; }
+
+  // True if this node can't use the bisection in `NGParagraphLineBreaker`.
+  bool IsBisectLineBreakDisabled() const {
+    return Data().IsBisectLineBreakDisabled();
+  }
+  // True if this node can't use the `NGScorehLineBreaker`, that can be
+  // determined by `CollectInlines`. Conditions that can change without
+  // `CollectInlines` are in `NGLineBreaker::ShouldDisableScoreLineBreak()`.
+  bool IsScoreLineBreakDisabled() const {
+    return Data().IsScoreLineBreakDisabled();
+  }
 
   // @return if this node can contain the "first formatted line".
   // https://www.w3.org/TR/CSS22/selector.html#first-formatted-line

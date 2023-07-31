@@ -12,15 +12,25 @@
 
 namespace blink {
 
-class CSSScrollTimeline;
-class CSSViewTimeline;
+class DeferredTimeline;
+class ScrollSnapshotTimeline;
+class ScrollTimeline;
+class ViewTimeline;
+class ScrollTimelineAttachment;
 
 template <typename TimelineType>
 using CSSTimelineMap =
     HeapHashMap<Member<const ScopedCSSName>, Member<TimelineType>>;
 
-using CSSViewTimelineMap = CSSTimelineMap<CSSViewTimeline>;
-using CSSScrollTimelineMap = CSSTimelineMap<CSSScrollTimeline>;
+using CSSViewTimelineMap = CSSTimelineMap<ViewTimeline>;
+using CSSScrollTimelineMap = CSSTimelineMap<ScrollTimeline>;
+using CSSDeferredTimelineMap = CSSTimelineMap<DeferredTimeline>;
+using TimelineAttachmentMap =
+    HeapHashMap<Member<ScrollSnapshotTimeline>, Member<DeferredTimeline>>;
+
+// TODO(crbug.com/1446702): Remove scroll/view-timeline-attachment.
+using AttachingTimelineMap =
+    HeapHashMap<Member<ScrollTimelineAttachment>, Member<ScrollTimeline>>;
 
 }  // namespace blink
 

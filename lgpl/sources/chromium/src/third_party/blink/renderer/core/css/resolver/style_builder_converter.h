@@ -45,7 +45,6 @@
 #include "third_party/blink/renderer/core/style/basic_shapes.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/grid_area.h"
-#include "third_party/blink/renderer/core/style/grid_positions_resolver.h"
 #include "third_party/blink/renderer/core/style/named_grid_lines_map.h"
 #include "third_party/blink/renderer/core/style/ordered_named_grid_lines.h"
 #include "third_party/blink/renderer/core/style/shadow_list.h"
@@ -69,6 +68,7 @@ class ClipPathOperation;
 class CSSToLengthConversionData;
 class Font;
 class FontBuilder;
+class OffsetPathOperation;
 class RotateTransformOperation;
 class ScaleTransformOperation;
 class ScopedCSSName;
@@ -100,6 +100,7 @@ class StyleBuilderConverterBase {
       const CSSToLengthConversionData&,
       FontDescription::Size parent_size,
       const Document*);
+  static FontSizeAdjust ConvertFontSizeAdjust(const CSSValue&);
 };
 
 // Note that we assume the parser only allows valid CSSValue types.
@@ -140,7 +141,8 @@ class StyleBuilderConverter {
       const CSSValue& value);
   static FontDescription::Size ConvertFontSize(StyleResolverState&,
                                                const CSSValue&);
-  static float ConvertFontSizeAdjust(StyleResolverState&, const CSSValue&);
+  static FontSizeAdjust ConvertFontSizeAdjust(StyleResolverState&,
+                                              const CSSValue&);
 
   static FontSelectionValue ConvertFontStretch(StyleResolverState&,
                                                const CSSValue&);
@@ -203,10 +205,14 @@ class StyleBuilderConverter {
   static TabSize ConvertLengthOrTabSpaces(StyleResolverState&, const CSSValue&);
   static Length ConvertLineHeight(StyleResolverState&, const CSSValue&);
   static float ConvertNumberOrPercentage(StyleResolverState&, const CSSValue&);
+  static ScrollStartData ConvertScrollStart(const StyleResolverState&,
+                                            const CSSValue&);
   static float ConvertAlpha(StyleResolverState&,
                             const CSSValue&);  // clamps to [0,1]
   static ScopedCSSName* ConvertNoneOrCustomIdent(StyleResolverState&,
                                                  const CSSValue&);
+  static ScopedCSSName* ConvertCustomIdent(StyleResolverState&,
+                                           const CSSValue&);
   static ScopedCSSName* ConvertAnchorDefault(StyleResolverState&,
                                              const CSSValue&);
   static AnchorSpecifierValue* ConvertAnchorScroll(StyleResolverState&,
@@ -291,8 +297,9 @@ class StyleBuilderConverter {
                                                     const CSSValue&);
   static scoped_refptr<BasicShape> ConvertObjectViewBox(StyleResolverState&,
                                                         const CSSValue&);
-  static scoped_refptr<BasicShape> ConvertOffsetPath(StyleResolverState&,
-                                                     const CSSValue&);
+  static scoped_refptr<OffsetPathOperation> ConvertOffsetPath(
+      StyleResolverState&,
+      const CSSValue&);
   static StyleOffsetRotation ConvertOffsetRotate(const CSSValue&);
   template <CSSValueID cssValueFor0, CSSValueID cssValueFor100>
   static Length ConvertPositionLength(StyleResolverState&, const CSSValue&);
@@ -312,6 +319,8 @@ class StyleBuilderConverter {
   static StyleAspectRatio ConvertAspectRatio(const StyleResolverState&,
                                              const CSSValue&);
 
+  static bool ConvertInternalAlignContentBlock(StyleResolverState& state,
+                                               const CSSValue& value);
   static bool ConvertInternalAlignSelfBlock(StyleResolverState& state,
                                             const CSSValue& value);
   static bool ConvertInternalEmptyLineHeight(StyleResolverState& state,
@@ -365,10 +374,15 @@ class StyleBuilderConverter {
 
   static Vector<TimelineAxis> ConvertViewTimelineAxis(StyleResolverState&,
                                                       const CSSValue&);
+  static Vector<TimelineAttachment> ConvertViewTimelineAttachment(
+      StyleResolverState&,
+      const CSSValue&);
   static Vector<TimelineInset> ConvertViewTimelineInset(StyleResolverState&,
                                                         const CSSValue&);
   static ScopedCSSNameList* ConvertViewTimelineName(StyleResolverState&,
                                                     const CSSValue&);
+  static ScopedCSSNameList* ConvertTimelineScope(StyleResolverState&,
+                                                 const CSSValue&);
 };
 
 template <typename T>

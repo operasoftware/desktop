@@ -64,6 +64,7 @@ void LayoutSVGImage::Trace(Visitor* visitor) const {
 void LayoutSVGImage::StyleDidChange(StyleDifference diff,
                                     const ComputedStyle* old_style) {
   NOT_DESTROYED();
+  TransformHelper::UpdateOffsetPath(*GetElement(), old_style);
   transform_uses_reference_box_ =
       TransformHelper::DependsOnReferenceBox(StyleRef());
   LayoutSVGModelObject::StyleDidChange(diff, old_style);
@@ -99,10 +100,10 @@ gfx::SizeF LayoutSVGImage::CalculateObjectSize() const {
 
   gfx::Vector2dF style_size =
       SVGLengthContext(GetElement())
-          .ResolveLengthPair(StyleRef().Width(), StyleRef().Height(),
+          .ResolveLengthPair(StyleRef().UsedWidth(), StyleRef().UsedHeight(),
                              StyleRef());
-  bool width_is_auto = style_size.x() < 0 || StyleRef().Width().IsAuto();
-  bool height_is_auto = style_size.y() < 0 || StyleRef().Height().IsAuto();
+  bool width_is_auto = style_size.x() < 0 || StyleRef().UsedWidth().IsAuto();
+  bool height_is_auto = style_size.y() < 0 || StyleRef().UsedHeight().IsAuto();
   if (!width_is_auto && !height_is_auto)
     return gfx::SizeF(style_size.x(), style_size.y());
 

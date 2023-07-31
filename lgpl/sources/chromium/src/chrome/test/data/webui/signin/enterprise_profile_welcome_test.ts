@@ -23,7 +23,6 @@ suite('EnterpriseProfileWelcomeTest', function() {
   const AVATAR_URL_2: string = 'chrome://theme/IDR_PROFILE_AVATAR_2';
 
   const testEnterpriseInfo: EnterpriseProfileInfo = {
-    backgroundColor: 'rgb(255, 0, 0)',
     pictureUrl: AVATAR_URL_1,
     showEnterpriseBadge: false,
     title: 'title',
@@ -124,7 +123,6 @@ suite('EnterpriseProfileWelcomeTest', function() {
 
     // Update the values so that the lkink data checkbox is checked by default.
     webUIListenerCallback('on-profile-info-changed', {
-      backgroundColor: 'rgb(255, 0, 0)',
       pictureUrl: AVATAR_URL_1,
       showEnterpriseBadge: false,
       title: 'title',
@@ -155,13 +153,13 @@ suite('EnterpriseProfileWelcomeTest', function() {
     function checkTextValues(
         expectedTitle: string, expectedSubtitle: string,
         expectedEnterpriseInfo: string, expectedProceedLabel: string) {
-      assertTrue(isChildVisible(app, '#title'));
+      assertTrue(isChildVisible(app, '.title'));
       const titleElement =
-          app.shadowRoot!.querySelector<HTMLElement>('#title')!;
+          app.shadowRoot!.querySelector<HTMLElement>('.title')!;
       assertEquals(expectedTitle, titleElement.textContent!.trim());
-      assertTrue(isChildVisible(app, '#subtitle'));
+      assertTrue(isChildVisible(app, '.subtitle'));
       const subtitleElement =
-          app.shadowRoot!.querySelector<HTMLElement>('#subtitle')!;
+          app.shadowRoot!.querySelector<HTMLElement>('.subtitle')!;
       assertEquals(expectedSubtitle, subtitleElement.textContent!.trim());
       assertTrue(isChildVisible(app, '#enterpriseInfo'));
       const enterpriseInfoElement =
@@ -180,7 +178,6 @@ suite('EnterpriseProfileWelcomeTest', function() {
 
     // Update the values.
     webUIListenerCallback('on-profile-info-changed', {
-      backgroundColor: 'rgb(0, 255, 0)',
       pictureUrl: AVATAR_URL_2,
       showEnterpriseBadge: true,
       title: 'new_title',
