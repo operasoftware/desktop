@@ -351,8 +351,6 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
 
   String UserAgentOverride(const KURL&) override { return ""; }
   String UserAgent(const KURL&) override { return ""; }
-  String FullUserAgent(const KURL&) override { return ""; }
-  String ReducedUserAgent(const KURL&) override { return ""; }
   absl::optional<blink::UserAgentMetadata> UserAgentMetadata(
       const KURL&) override {
     return blink::UserAgentMetadata();
@@ -362,9 +360,11 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
 
   void TransitionToCommittedForNewPage() override {}
 
-  void NavigateBackForward(
+  bool NavigateBackForward(
       int offset,
-      absl::optional<scheduler::TaskAttributionId>) const override {}
+      absl::optional<scheduler::TaskAttributionId>) const override {
+    return false;
+  }
   void DidDispatchPingLoader(const KURL&) override {}
   void SelectorMatchChanged(const Vector<String>&,
                             const Vector<String>&) override {}

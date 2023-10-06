@@ -147,8 +147,9 @@ void LayoutInline::UpdateFromStyle() {
   NOT_DESTROYED();
   LayoutBoxModelObject::UpdateFromStyle();
 
-  // FIXME: Is this still needed. Was needed for run-ins, since run-in is
-  // considered a block display type.
+  // This is needed (at a minimum) for LayoutSVGInline, which (including
+  // subclasses) is constructed for svg:a, svg:textPath, and svg:tspan,
+  // regardless of CSS 'display'.
   SetInline(true);
 
   // FIXME: Support transforms and reflections on inline flows someday.
@@ -403,7 +404,12 @@ template <typename PhysicalRectCollector>
 void LayoutInline::CollectLineBoxRects(
     const PhysicalRectCollector& yield) const {
   NOT_DESTROYED();
-  DCHECK(IsInLayoutNGInlineFormattingContext());
+  if (!IsInLayoutNGInlineFormattingContext()) {
+    // NGInlineCursor::MoveToIncludingCulledInline() below would fail DCHECKs in
+    // this situation, so just bail. This is most likely not a good situation to
+    // be in, though. See crbug.com/1448357
+    return;
+  }
   NGInlineCursor cursor;
   cursor.MoveToIncludingCulledInline(*this);
   for (; cursor; cursor.MoveToNextForSameLayoutObject()) {
@@ -862,9 +868,7 @@ void LayoutInline::UpdateHitTestResult(HitTestResult& result,
   }
 }
 
-void LayoutInline::DirtyLinesFromChangedChild(
-    LayoutObject* child,
-    MarkingBehavior marking_behavior) {
+void LayoutInline::DirtyLinesFromChangedChild(LayoutObject* child) {
   NOT_DESTROYED();
   if (IsInLayoutNGInlineFormattingContext()) {
     if (const LayoutBlockFlow* container = FragmentItemsContainer())

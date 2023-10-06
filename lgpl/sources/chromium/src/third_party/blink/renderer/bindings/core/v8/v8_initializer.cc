@@ -595,6 +595,16 @@ bool WasmGCEnabledCallback(v8::Local<v8::Context> context) {
   return RuntimeEnabledFeatures::WebAssemblyGCEnabled(execution_context);
 }
 
+bool JavaScriptCompileHintsMagicEnabledCallback(
+    v8::Local<v8::Context> context) {
+  ExecutionContext* execution_context = ToExecutionContext(context);
+  if (!execution_context) {
+    return false;
+  }
+  return RuntimeEnabledFeatures::JavaScriptCompileHintsMagicRuntimeEnabled(
+      execution_context);
+}
+
 v8::MaybeLocal<v8::Promise> HostImportModuleDynamically(
     v8::Local<v8::Context> context,
     v8::Local<v8::Data> v8_host_defined_options,
@@ -705,6 +715,8 @@ void InitializeV8Common(v8::Isolate* isolate) {
   isolate->SetWasmGCEnabledCallback(WasmGCEnabledCallback);
   isolate->SetSharedArrayBufferConstructorEnabledCallback(
       SharedArrayBufferConstructorEnabledCallback);
+  isolate->SetJavaScriptCompileHintsMagicEnabledCallback(
+      JavaScriptCompileHintsMagicEnabledCallback);
   isolate->SetHostImportModuleDynamicallyCallback(HostImportModuleDynamically);
   isolate->SetHostInitializeImportMetaObjectCallback(
       HostGetImportMetaProperties);
@@ -856,8 +868,8 @@ void V8Initializer::InitializeMainThread(
     add_histogram_sample_callback = AddHistogramSample;
   }
   v8::Isolate* isolate = V8PerIsolateData::Initialize(
-      scheduler->V8TaskRunner(), snapshot_mode, create_histogram_callback,
-      add_histogram_sample_callback);
+      scheduler->V8TaskRunner(), scheduler->V8LowPriorityTaskRunner(),
+      snapshot_mode, create_histogram_callback, add_histogram_sample_callback);
   scheduler->SetV8Isolate(isolate);
 
   // ThreadState::isolate_ needs to be set before setting the EmbedderHeapTracer

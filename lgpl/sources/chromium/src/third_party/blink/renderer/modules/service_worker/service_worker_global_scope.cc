@@ -86,6 +86,7 @@
 #include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script_url.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
+#include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
 #include "third_party/blink/renderer/core/workers/worker_classic_script_loader.h"
 #include "third_party/blink/renderer/core/workers/worker_clients.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
@@ -1526,6 +1527,14 @@ void ServiceWorkerGlobalScope::StartFetchEvent(
 
   NoteNewFetchEvent(fetch_request);
 
+  if (params->race_network_request_loader_factory &&
+      params->request->service_worker_race_network_request_token) {
+    race_network_request_loader_factories_.insert(
+        String(params->request->service_worker_race_network_request_token
+                   ->ToString()),
+        std::move(params->race_network_request_loader_factory));
+  }
+
   Request* request = Request::Create(
       ScriptController()->GetScriptState(), std::move(params->request),
       Request::ForServiceWorkerFetchEvent::kTrue);
@@ -1552,8 +1561,9 @@ void ServiceWorkerGlobalScope::StartFetchEvent(
 void ServiceWorkerGlobalScope::SetFetchHandlerExistence(
     FetchHandlerExistence fetch_handler_existence) {
   DCHECK(IsContextThread());
-  if (fetch_handler_existence == FetchHandlerExistence::EXISTS)
-    GetThread()->GetIsolate()->IsolateInForegroundNotification();
+  if (fetch_handler_existence == FetchHandlerExistence::EXISTS) {
+    GetThread()->GetWorkerBackingThread().SetForegrounded();
+  }
 }
 
 void ServiceWorkerGlobalScope::DispatchFetchEventForSubresource(
@@ -1576,7 +1586,7 @@ void ServiceWorkerGlobalScope::DispatchFetchEventForSubresource(
               GetThread()->GetTaskRunner(TaskType::kNetworking));
   fetch_response_callbacks_.Set(event_id, WrapDisallowNew(std::move(remote)));
 
-  if (params->did_start_race_network_request) {
+  if (params->race_network_request_loader_factory) {
     UseCounter::Count(
         this,
         // If the runtime flag is enabled, that means the feature is enabled via
@@ -2638,6 +2648,21 @@ bool ServiceWorkerGlobalScope::IsInFencedFrame() const {
          mojom::blink::AncestorFrameType::kFencedFrame;
 }
 
+void ServiceWorkerGlobalScope::NotifyWebSocketActivity() {
+  CHECK(IsContextThread());
+  CHECK(event_queue_);
+
+  bool notify = To<ServiceWorkerGlobalScopeProxy>(ReportingProxy())
+                    .ShouldNotifyServiceWorkerOnWebSocketActivity(
+                        GetThread()->GetIsolate()->GetCurrentContext());
+
+  if (notify) {
+    // TODO(crbug/1399324): refactor with RAII pattern.
+    event_queue_->ResetIdleTimeout();
+    event_queue_->CheckEventQueue();
+  }
+}
+
 mojom::blink::ServiceWorkerFetchHandlerType
 ServiceWorkerGlobalScope::FetchHandlerType() {
   EventListenerVector* elv = GetEventListeners(event_type_names::kFetch);
@@ -2651,10 +2676,10 @@ ServiceWorkerGlobalScope::FetchHandlerType() {
 
   // TODO(crbug.com/1349613): revisit the way to implement this.
   // The following code returns kEmptyFetchHandler if all handlers are nop.
-  for (RegisteredEventListener& e : *elv) {
+  for (RegisteredEventListener* e : *elv) {
     EventTarget* et = EventTarget::Create(script_state);
     v8::Local<v8::Value> v =
-        To<JSBasedEventListener>(e.Callback())->GetListenerObject(*et);
+        To<JSBasedEventListener>(e->Callback())->GetListenerObject(*et);
     if (v.IsEmpty() || !v->IsFunction() ||
         !v.As<v8::Function>()->Experimental_IsNopFunction()) {
       return mojom::blink::ServiceWorkerFetchHandlerType::kNotSkippable;
@@ -2684,6 +2709,17 @@ bool ServiceWorkerGlobalScope::SetAttributeEventListener(
         WebFeature::kServiceWorkerEventHandlerModifiedAfterInitialization);
   }
   return WorkerGlobalScope::SetAttributeEventListener(event_type, listener);
+}
+
+absl::optional<mojo::PendingRemote<network::mojom::blink::URLLoaderFactory>>
+ServiceWorkerGlobalScope::FindRaceNetworkRequestURLLoaderFactory(
+    const base::UnguessableToken& token) {
+  mojo::PendingRemote<network::mojom::blink::URLLoaderFactory> result =
+      race_network_request_loader_factories_.Take(String(token.ToString()));
+  if (result) {
+    return result;
+  }
+  return absl::nullopt;
 }
 
 }  // namespace blink

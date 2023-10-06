@@ -48,7 +48,6 @@
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input/keyboard_event_manager.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
@@ -228,7 +227,8 @@ void WebAXObject::MarkAXObjectDirtyWithDetails(
 void WebAXObject::OnLoadInlineTextBoxes() const {
   if (IsDetached())
     return;
-  private_->AXObjectCache().OnLoadInlineTextBoxes(*private_);
+
+  private_->LoadInlineTextBoxes();
 }
 
 BLINK_EXPORT void WebAXObject::SetImageAsDataNodeId(
@@ -417,14 +417,15 @@ WebAXObject WebAXObject::HitTest(const gfx::Point& point) const {
     return WebAXObject(hit);
 
   if (private_->GetBoundsInFrameCoordinates().Contains(
-          LayoutPoint(contents_point)))
+          PhysicalOffset(contents_point))) {
     return *this;
+  }
 
   return WebAXObject();
 }
 
 gfx::Rect WebAXObject::GetBoundsInFrameCoordinates() const {
-  LayoutRect rect = private_->GetBoundsInFrameCoordinates();
+  PhysicalRect rect = private_->GetBoundsInFrameCoordinates();
   return ToEnclosingRect(rect);
 }
 
@@ -537,15 +538,6 @@ void WebAXObject::Selection(bool& is_selection_backward,
   } else {
     focus_offset = extent.ChildIndex();
   }
-}
-
-bool WebAXObject::SetSelected(bool selected) const {
-  if (IsDetached())
-    return false;
-
-  ScopedActionAnnotator annotater(private_.Get(),
-                                  ax::mojom::blink::Action::kSetSelection);
-  return private_->RequestSetSelectedAction(selected);
 }
 
 bool WebAXObject::SetSelection(const WebAXObject& anchor_object,
@@ -935,7 +927,9 @@ bool WebAXObject::ScrollToMakeVisible() const {
 
   ScopedActionAnnotator annotater(
       private_.Get(), ax::mojom::blink::Action::kScrollToMakeVisible);
-  return private_->RequestScrollToMakeVisibleAction();
+  ui::AXActionData action_data;
+  action_data.action = ax::mojom::blink::Action::kScrollToMakeVisible;
+  return private_->PerformAction(action_data);
 }
 
 bool WebAXObject::ScrollToMakeVisibleWithSubFocus(
@@ -966,6 +960,7 @@ bool WebAXObject::ScrollToMakeVisibleWithSubFocus(
       visible_horizontal_behavior, horizontal_behavior, horizontal_behavior};
   blink::mojom::blink::ScrollAlignment blink_vertical_scroll_alignment = {
       visible_vertical_behavior, vertical_behavior, vertical_behavior};
+
   return private_->RequestScrollToMakeVisibleWithSubFocusAction(
       subfocus, blink_horizontal_scroll_alignment,
       blink_vertical_scroll_alignment);

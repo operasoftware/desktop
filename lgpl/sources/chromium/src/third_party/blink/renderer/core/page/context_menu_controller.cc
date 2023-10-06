@@ -39,11 +39,11 @@
 #include "third_party/blink/public/common/input/web_menu_source_type.h"
 #include "third_party/blink/public/common/navigation/impression.h"
 #include "third_party/blink/public/mojom/context_menu/context_menu.mojom-blink.h"
-#include "third_party/blink/public/mojom/conversions/attribution_reporting.mojom-blink.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_plugin.h"
 #include "third_party/blink/public/web/web_searchable_form_data.h"
 #include "third_party/blink/public/web/web_text_check_client.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_regexp.h"
 #include "third_party/blink/renderer/core/annotation/annotation_agent_container_impl.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -78,6 +78,7 @@
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
+#include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/input/context_menu_allowed_scope.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
@@ -128,6 +129,61 @@ static HTMLFormElement* ScanForForm(const Node* start) {
 
 namespace {
 
+constexpr char kPasswordRe[] =
+    // Synonyms and abbreviations of password.
+    "pass(?:word|code)|pas(?:word|code)|pswrd|psw|pswd|pwd|parole|watchword|"
+
+    // Translations.
+    "pasahitza|parol|lozinka|sifr|contrasenya|heslo|adgangskode|losen|"
+    "wachtwoord|paswoord|salasana|passe|contrasinal|passwort|jelszo|"
+    "sandi|signum|slaptazodis|kata|passord|haslo|senha|geslo|contrasena|"
+    "khau";
+
+static mojom::blink::ContextMenuDataInputFieldType ComputeInputFieldType(
+    Element* element) {
+  if (auto* input = DynamicTo<HTMLInputElement>(element)) {
+    if (input->type() == input_type_names::kPassword) {
+      return mojom::blink::ContextMenuDataInputFieldType::kPassword;
+    }
+    if (input->type() == input_type_names::kNumber) {
+      return mojom::blink::ContextMenuDataInputFieldType::kNumber;
+    }
+    if (input->type() == input_type_names::kTel) {
+      return mojom::blink::ContextMenuDataInputFieldType::kTelephone;
+    }
+    if (input->IsTextField()) {
+      return mojom::blink::ContextMenuDataInputFieldType::kPlainText;
+    }
+    return mojom::blink::ContextMenuDataInputFieldType::kOther;
+  } else if (IsA<HTMLTextAreaElement>(element)) {
+    return mojom::blink::ContextMenuDataInputFieldType::kPlainText;
+  }
+  return mojom::blink::ContextMenuDataInputFieldType::kNone;
+}
+
+void SetInputFieldsData(Element* element, ContextMenuData& data) {
+  data.input_field_type = ComputeInputFieldType(element);
+
+  // Uses heuristics (finding 'password' and its short versions and translations
+  // in field name and id etc.) to recognize a field intended for password input
+  // of plain text HTML field type, and it is used to set the field
+  // is_password_type_by_heuristics.
+  if (auto* input = DynamicTo<HTMLInputElement>(element)) {
+    const AtomicString& id = input->GetIdAttribute();
+    const AtomicString& name = input->GetNameAttribute();
+
+    DEFINE_STATIC_LOCAL(Persistent<ScriptRegexp>, passwordRegexp,
+                        (MakeGarbageCollected<ScriptRegexp>(
+                            kPasswordRe, kTextCaseUnicodeInsensitive)));
+
+    data.is_password_type_by_heuristics =
+        (data.input_field_type ==
+         mojom::blink::ContextMenuDataInputFieldType::kPlainText) &&
+        (passwordRegexp->Match(id.GetString()) >= 0 ||
+         passwordRegexp->Match(name.GetString()) >= 0);
+  }
+}
+
 // Returns true if node or any of its ancestors have a context menu event
 // listener. Uses already_visited_nodes to track nodes which have already
 // been checked across multiple calls to this function, which could cause
@@ -175,7 +231,6 @@ absl::optional<uint64_t> GetFieldRendererId(HitTestResult& result) {
   }
   return absl::nullopt;
 }
-
 }  // namespace
 
 ContextMenuController::ContextMenuController(Page* page) : page_(page) {}
@@ -384,24 +439,6 @@ static int ComputeEditFlags(Document& selected_document, Editor& editor) {
   return edit_flags;
 }
 
-static mojom::blink::ContextMenuDataInputFieldType ComputeInputFieldType(
-    HitTestResult& result) {
-  if (auto* input = DynamicTo<HTMLInputElement>(result.InnerNode())) {
-    if (input->type() == input_type_names::kPassword)
-      return mojom::blink::ContextMenuDataInputFieldType::kPassword;
-    if (input->type() == input_type_names::kNumber)
-      return mojom::blink::ContextMenuDataInputFieldType::kNumber;
-    if (input->type() == input_type_names::kTel)
-      return mojom::blink::ContextMenuDataInputFieldType::kTelephone;
-    if (input->IsTextField())
-      return mojom::blink::ContextMenuDataInputFieldType::kPlainText;
-    return mojom::blink::ContextMenuDataInputFieldType::kOther;
-  } else if (IsA<HTMLTextAreaElement>(result.InnerNode())) {
-    return mojom::blink::ContextMenuDataInputFieldType::kPlainText;
-  }
-  return mojom::blink::ContextMenuDataInputFieldType::kNone;
-}
-
 static gfx::Rect ComputeSelectionRect(LocalFrame* selected_frame) {
   gfx::Rect anchor;
   gfx::Rect focus;
@@ -560,15 +597,22 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
     if (IsA<HTMLVideoElement>(*media_element)) {
       // A video element should be presented as an audio element when it has an
       // audio track but no video track.
-      if (media_element->HasAudio() && !media_element->HasVideo())
+      if (media_element->HasAudio() && !media_element->HasVideo()) {
         data.media_type = mojom::blink::ContextMenuDataMediaType::kAudio;
-      else
+      } else {
         data.media_type = mojom::blink::ContextMenuDataMediaType::kVideo;
+      }
+
       if (media_element->SupportsPictureInPicture()) {
         data.media_flags |= ContextMenuData::kMediaCanPictureInPicture;
         if (PictureInPictureController::IsElementInPictureInPicture(
                 media_element))
           data.media_flags |= ContextMenuData::kMediaPictureInPicture;
+      }
+
+      auto* video_element = To<HTMLVideoElement>(media_element);
+      if (video_element->HasReadableVideoFrame()) {
+        data.media_flags |= ContextMenuData::kMediaHasReadableVideoFrame;
       }
     } else if (IsA<HTMLAudioElement>(*media_element)) {
       data.media_type = mojom::blink::ContextMenuDataMediaType::kAudio;
@@ -589,6 +633,13 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
       data.media_flags |= ContextMenuData::kMediaCanSave;
     if (media_element->HasAudio())
       data.media_flags |= ContextMenuData::kMediaHasAudio;
+    if (media_element->HasVideo()) {
+      data.media_flags |= ContextMenuData::kMediaHasVideo;
+    }
+    if (media_element->IsEncrypted()) {
+      data.media_flags |= ContextMenuData::kMediaEncrypted;
+    }
+
     // Media controls can be toggled only for video player. If we toggle
     // controls for audio then the player disappears, and there is no way to
     // return it back. Don't set this bit for fullscreen video, since
@@ -714,7 +765,8 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
     if (!result.IsContentEditable()) {
       TextFragmentHandler::OpenedContextMenuOverSelection(selected_frame);
       AnnotationAgentContainerImpl* annotation_container =
-          AnnotationAgentContainerImpl::From(*selected_frame->GetDocument());
+          AnnotationAgentContainerImpl::CreateIfNeeded(
+              *selected_frame->GetDocument());
       annotation_container->OpenedContextMenuOverSelection();
     }
   }
@@ -837,7 +889,6 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
                                                 /*element=*/anchor,
                                                 /*request_id=*/absl::nullopt)) {
           data.impression = blink::Impression{
-              .nav_type = mojom::blink::AttributionNavigationType::kContextMenu,
               .runtime_features = attribution_src_loader->GetRuntimeFeatures(),
           };
         }
@@ -845,7 +896,7 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
     }
   }
 
-  data.input_field_type = ComputeInputFieldType(result);
+  SetInputFieldsData(result.InnerElement(), data);
   data.selection_rect = ComputeSelectionRect(selected_frame);
   data.source_type = source_type;
   data.form_renderer_id = GetFormRendererId(result);

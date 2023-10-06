@@ -98,7 +98,7 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
   auto info_callback = base::BindPostTaskToCurrentDefault(
       base::BindRepeating(&RTCVideoEncoderAdapter::OnEncoderInfoUpdated,
                           weak_ptr_factory_.GetWeakPtr()));
-auto output_callback = base::BindPostTaskToCurrentDefault(
+  auto output_callback = base::BindPostTaskToCurrentDefault(
       base::BindRepeating(&RTCVideoEncoderAdapter::OnEncodedFrameReady,
                           weak_ptr_factory_.GetWeakPtr()));
 
@@ -134,8 +134,9 @@ int32_t RTCVideoEncoderAdapter::Release() {
   DVLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!encoder_initialized_)
+  if (!encoder_ || !encoder_initialized_) {
     return WEBRTC_VIDEO_CODEC_OK;
+  }
 
   const media::EncoderStatus result = RunOnEncoderTaskRunnerSync(base::BindOnce(
       &media::VideoEncoder::Flush, base::Unretained(encoder_.get())));
@@ -150,6 +151,10 @@ int32_t RTCVideoEncoderAdapter::Encode(
   DVLOG(3) << __func__
            << " webrtc_frame.timestamp()=" << webrtc_frame.timestamp();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!encoder_ || !encoder_initialized_) {
+    return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
+  }
 
   input_frames_.push_back(webrtc_frame);
 
@@ -184,7 +189,7 @@ void RTCVideoEncoderAdapter::SetRates(const RateControlParameters& parameters) {
   DVLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!encoder_initialized_) {
+  if (!encoder_ || !encoder_initialized_) {
     DVLOG(1) << "Encoder not initialized";
     return;
   }
@@ -209,9 +214,11 @@ void RTCVideoEncoderAdapter::SetRates(const RateControlParameters& parameters) {
         encoder_options_, base::NullCallback()));
   }
 
-  DVLOG_IF(1, !result.is_ok())
-      << "Failed to set encoder rates: " << static_cast<int>(result.code())
-      << " " << result.message();
+  if (!result.is_ok()) {
+    DVLOG(1) << "Failed to set encoder rates: "
+             << static_cast<int>(result.code()) << " " << result.message();
+    encoder_task_runner_->DeleteSoon(FROM_HERE, std::move(encoder_));
+  }
 }
 
 RTCVideoEncoderAdapter::EncoderInfo RTCVideoEncoderAdapter::GetEncoderInfo()
@@ -269,6 +276,8 @@ media::EncoderStatus RTCVideoEncoderAdapter::RunOnEncoderTaskRunnerSync(
                                           [](base::WaitableEvent* waiter,
                                              media::EncoderStatus* result,
                                              media::EncoderStatus status) {
+                                            DVLOG_IF(1, !status.is_ok())
+                                                << status.message();
                                             *result = status;
                                             waiter->Signal();
                                           },

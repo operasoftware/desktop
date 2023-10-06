@@ -29,9 +29,10 @@ namespace blink {
 
 class AudioContextOptions;
 class AudioTimestamp;
-class Document;
+class ExecutionContext;
 class ExceptionState;
 class HTMLMediaElement;
+class LocalDOMWindow;
 class MediaElementAudioSourceNode;
 class MediaStream;
 class MediaStreamAudioDestinationNode;
@@ -47,11 +48,11 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static AudioContext* Create(Document&,
+  static AudioContext* Create(ExecutionContext*,
                               const AudioContextOptions*,
                               ExceptionState&);
 
-  AudioContext(Document&,
+  AudioContext(LocalDOMWindow&,
                const WebAudioLatencyHint&,
                absl::optional<float> sample_rate,
                WebAudioSinkDescriptor sink_descriptor);
@@ -114,6 +115,7 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext,
                           const V8UnionAudioSinkOptionsOrString*,
                           ExceptionState&);
 
+  void NotifySetSinkIdBegins();
   void NotifySetSinkIdIsDone(WebAudioSinkDescriptor);
 
   HeapDeque<Member<SetSinkIdResolver>>& GetSetSinkIdResolver() {
@@ -226,6 +228,10 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext,
   // updated.
   void UpdateV8SinkId();
 
+  // Called on prerendering activation time if this AudioContext is blocked by
+  // prerendering.
+  void ResumeOnPrerenderActivation();
+
   unsigned context_id_;
   Member<ScriptPromiseResolver> close_resolver_;
 
@@ -234,6 +240,10 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext,
 
   // Whether a user gesture is required to start this AudioContext.
   bool user_gesture_required_ = false;
+
+  // Whether this AudioContext is blocked to start because the page is still in
+  // prerendering state.
+  bool blocked_by_prerendering_ = false;
 
   // Autoplay status associated with this AudioContext, if any.
   // Will only be set if there is an autoplay policy in place.
@@ -299,6 +309,10 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext,
 
   // Stores a list of identifiers for output device.
   HashSet<String> output_device_ids_;
+
+  // `wasRunning` flag for `setSinkId()` state transition. See the
+  // implementation of `NotifySetSinkIdBegins()` for details.
+  bool sink_transition_flag_was_running_ = false;
 };
 
 }  // namespace blink

@@ -216,9 +216,10 @@ ControlPart LayoutTheme::AdjustAppearanceWithElementType(
                                                            : auto_appearance;
 
     case kTextFieldPart:
-      if (IsA<HTMLInputElement>(*element) &&
-          To<HTMLInputElement>(*element).type() == input_type_names::kSearch)
+      if (const auto* input_element = DynamicTo<HTMLInputElement>(*element);
+          input_element && input_element->type() == input_type_names::kSearch) {
         return part;
+      }
       return auto_appearance;
   }
 
@@ -282,18 +283,6 @@ void LayoutTheme::AdjustStyle(const Element* element,
 }
 
 String LayoutTheme::ExtraDefaultStyleSheet() {
-  if (RuntimeEnabledFeatures::LayoutMediaChildPaintContainmentEnabled()) {
-    return R"CSS(
-audio::-webkit-media-controls,
-video::-webkit-media-controls {
-    contain: paint !important;
-}
-video::-webkit-media-text-track-container {
-    contain: paint !important;
-    position: relative !important;
-}
-)CSS";
-  }
   return g_empty_string;
 }
 
@@ -680,11 +669,9 @@ Color LayoutTheme::DefaultSystemColor(
     case CSSValueID::kInactivecaptiontext:
       return Color::FromRGBA32(0xFF808080);
     case CSSValueID::kHighlight:
-      return Color::FromRGBA32(0xFFB5D5FF);
+      return ActiveSelectionBackgroundColor(color_scheme);
     case CSSValueID::kHighlighttext:
-      return color_scheme == mojom::blink::ColorScheme::kDark
-                 ? Color::FromRGBA32(0xFFFFFFFF)
-                 : Color::FromRGBA32(0xFF000000);
+      return ActiveSelectionForegroundColor(color_scheme);
     case CSSValueID::kLinktext:
       return Color::FromRGBA32(0xFF0000EE);
     case CSSValueID::kMark:

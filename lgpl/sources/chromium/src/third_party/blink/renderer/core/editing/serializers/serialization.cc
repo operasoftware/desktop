@@ -45,7 +45,6 @@
 #include "third_party/blink/renderer/core/dom/cdata_section.h"
 #include "third_party/blink/renderer/core/dom/child_list_mutation_scope.h"
 #include "third_party/blink/renderer/core/dom/comment.h"
-#include "third_party/blink/renderer/core/dom/context_features.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -98,7 +97,7 @@ class AttributeChange {
   DISALLOW_NEW();
 
  public:
-  AttributeChange() : name_(g_null_atom, g_null_atom, g_null_atom) {}
+  AttributeChange() : name_(QualifiedName::Null()) {}
 
   AttributeChange(Element* element,
                   const QualifiedName& name,
@@ -468,7 +467,6 @@ DocumentFragment* CreateFragmentFromMarkupWithContext(
       DocumentInit::Create()
           .WithExecutionContext(document.GetExecutionContext())
           .WithAgent(document.GetAgent()));
-  tagged_document->SetContextFeatures(document.GetContextFeatures());
 
   auto* root =
       MakeGarbageCollected<Element>(QualifiedName::Null(), tagged_document);
@@ -611,7 +609,8 @@ DocumentFragment* CreateFragmentFromText(const EphemeralRange& context,
     fragment->AppendChild(document.createTextNode(string));
     if (string.EndsWith('\n')) {
       auto* element = MakeGarbageCollected<HTMLBRElement>(document);
-      element->setAttribute(html_names::kClassAttr, AppleInterchangeNewline);
+      element->setAttribute(html_names::kClassAttr,
+                            AtomicString(AppleInterchangeNewline));
       fragment->AppendChild(element);
     }
     return fragment;
@@ -641,7 +640,8 @@ DocumentFragment* CreateFragmentFromText(const EphemeralRange& context,
     if (s.empty() && i + 1 == num_lines) {
       // For last line, use the "magic BR" rather than a P.
       element = MakeGarbageCollected<HTMLBRElement>(document);
-      element->setAttribute(html_names::kClassAttr, AppleInterchangeNewline);
+      element->setAttribute(html_names::kClassAttr,
+                            AtomicString(AppleInterchangeNewline));
     } else {
       if (use_clones_of_enclosing_block)
         element = &block->CloneWithoutChildren();
@@ -920,9 +920,8 @@ static bool ContainsStyleElements(const DocumentFragment& fragment) {
 
 // Returns true if any svg <use> element is removed.
 static bool StripSVGUseDataURLs(Node& node) {
-  if (IsA<SVGUseElement>(node)) {
-    SVGUseElement& use = To<SVGUseElement>(node);
-    SVGURLReferenceResolver resolver(use.HrefString(), use.GetDocument());
+  if (auto* use = DynamicTo<SVGUseElement>(node)) {
+    SVGURLReferenceResolver resolver(use->HrefString(), use->GetDocument());
     if (resolver.AbsoluteUrl().ProtocolIsData())
       node.remove();
     return true;

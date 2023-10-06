@@ -101,8 +101,8 @@ RTCPlatformSWVideoDecoderFactory::CreateVideoDecoder(
         /*request_overlay_info_cb=*/base::DoNothing(), render_color_space_);
   } else {
 #if BUILDFLAG(IS_MAC)
-    platform_decoder =
-        std::make_unique<media::VTVideoDecoder>(media_task_runner_);
+    platform_decoder = std::make_unique<media::VTVideoDecoder>(
+        media_task_runner_, media_log_.Clone());
 #elif BUILDFLAG(IS_WIN)
     platform_decoder =
         std::make_unique<media::WMFVideoDecoder>(media_task_runner_);

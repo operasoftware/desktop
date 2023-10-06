@@ -263,9 +263,9 @@ void AutoscrollController::HandleMouseMoveForMiddleClickAutoscroll(
       vertical_autoscroll_layout_box_ &&
       vertical_autoscroll_layout_box_->GetNode();
   if (horizontal_autoscroll_possible &&
-      !horizontal_autoscroll_layout_box_->CanBeScrolledAndHasScrollableArea() &&
+      !horizontal_autoscroll_layout_box_->IsUserScrollable() &&
       vertical_autoscroll_possible &&
-      !vertical_autoscroll_layout_box_->CanBeScrolledAndHasScrollableArea()) {
+      !vertical_autoscroll_layout_box_->IsUserScrollable()) {
     StopMiddleClickAutoscroll(frame);
     return;
   }
@@ -471,7 +471,9 @@ void AutoscrollController::Animate() {
       }
 
       if (auto* client = autoscroll_layout_object_->GetFrame()->Client()) {
-        widget = client->GetWebFrame()->FrameWidget();
+        if (WebLocalFrame* web_frame = client->GetWebFrame()) {
+          widget = web_frame->FrameWidget();
+        }
       }
 
       // If the selection changes as a result to UpdateSelectionForMouseDrag(),

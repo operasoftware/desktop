@@ -102,14 +102,16 @@ class HarfBuzzShaperTest : public FontTestBase {
   void SelectDevanagariFont() {
     FontFamily devanagari_family;
     // Windows 10
-    devanagari_family.SetFamily("Nirmala UI", FontFamily::Type::kFamilyName);
+    devanagari_family.SetFamily(AtomicString("Nirmala UI"),
+                                FontFamily::Type::kFamilyName);
     // Windows 7
-    devanagari_family.AppendFamily("Mangal", FontFamily::Type::kFamilyName);
+    devanagari_family.AppendFamily(AtomicString("Mangal"),
+                                   FontFamily::Type::kFamilyName);
     // Linux
-    devanagari_family.AppendFamily("Lohit Devanagari",
+    devanagari_family.AppendFamily(AtomicString("Lohit Devanagari"),
                                    FontFamily::Type::kFamilyName);
     // Mac
-    devanagari_family.AppendFamily("ITF Devanagari",
+    devanagari_family.AppendFamily(AtomicString("ITF Devanagari"),
                                    FontFamily::Type::kFamilyName);
 
     font_description_.SetFamily(devanagari_family);
@@ -119,14 +121,14 @@ class HarfBuzzShaperTest : public FontTestBase {
   Font CreateAhem(float size) {
     FontDescription::VariantLigatures ligatures;
     return blink::test::CreateTestFont(
-        "Ahem", blink::test::PlatformTestDataPath("Ahem.woff"), size,
-        &ligatures);
+        AtomicString("Ahem"), blink::test::PlatformTestDataPath("Ahem.woff"),
+        size, &ligatures);
   }
 
 #if !defined(OPERA_DESKTOP)
   Font CreateNotoColorEmoji() {
     return blink::test::CreateTestFont(
-        "NotoColorEmoji",
+        AtomicString("NotoColorEmoji"),
         blink::test::BlinkRootDir() +
             "/web_tests/third_party/NotoColorEmoji/NotoColorEmoji.ttf",
         12);
@@ -1380,7 +1382,7 @@ TEST_F(HarfBuzzShaperTest, SafeToBreakLatinCommonLigatures) {
 
   // MEgalopolis Extra has a lot of ligatures which this test relies on.
   Font testFont = blink::test::CreateTestFont(
-      "MEgalopolis",
+      AtomicString("MEgalopolis"),
       blink::test::PlatformTestDataPath(
           "third_party/MEgalopolis/MEgalopolisExtra.woff"),
       16, &ligatures);
@@ -1420,7 +1422,7 @@ TEST_F(HarfBuzzShaperTest, SafeToBreakPreviousLatinCommonLigatures) {
 
   // MEgalopolis Extra has a lot of ligatures which this test relies on.
   Font testFont = blink::test::CreateTestFont(
-      "MEgalopolis",
+      AtomicString("MEgalopolis"),
       blink::test::PlatformTestDataPath(
           "third_party/MEgalopolis/MEgalopolisExtra.woff"),
       16, &ligatures);
@@ -1461,7 +1463,7 @@ TEST_F(HarfBuzzShaperTest, SafeToBreakLatinDiscretionaryLigatures) {
 
   // MEgalopolis Extra has a lot of ligatures which this test relies on.
   Font testFont = blink::test::CreateTestFont(
-      "MEgalopolis",
+      AtomicString("MEgalopolis"),
       blink::test::PlatformTestDataPath(
           "third_party/MEgalopolis/MEgalopolisExtra.woff"),
       16, &ligatures);
@@ -2006,7 +2008,7 @@ TEST_F(HarfBuzzShaperTest, UnorderedClusterIndex) {
   // fallback, but it helps keeping the whole string in a run (i.e., shapes
   // surrounding characters with the same font.)
   FontFamily family;
-  family.SetFamily("Geneva", FontFamily::Type::kFamilyName);
+  family.SetFamily(AtomicString("Geneva"), FontFamily::Type::kFamilyName);
   font_description_.SetFamily(family);
   font_ = Font(font_description_);
 

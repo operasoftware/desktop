@@ -110,7 +110,8 @@ class FakeMojoMediaClient : public media::MojoMediaClient {
       // HW-acceleration is not available => use the platform decoder in SW
       // mode.
 #if BUILDFLAG(IS_MAC)
-      return std::make_unique<media::VTVideoDecoder>(std::move(task_runner));
+      return std::make_unique<media::VTVideoDecoder>(std::move(task_runner),
+                                                     media_log->Clone());
 #elif BUILDFLAG(IS_WIN)
       return std::make_unique<media::WMFVideoDecoder>(std::move(task_runner));
 #endif

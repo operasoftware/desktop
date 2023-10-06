@@ -378,7 +378,7 @@ inline ScrollbarGutter& operator|=(ScrollbarGutter& a, ScrollbarGutter b) {
 
 enum class EBaselineShiftType : unsigned { kLength, kSub, kSuper };
 
-enum EPaintOrderType {
+enum EPaintOrderType : uint8_t {
   PT_NONE = 0,
   PT_FILL = 1,
   PT_STROKE = 2,
@@ -404,17 +404,6 @@ enum class ViewportUnitFlag {
 };
 
 enum class TimelineAxis { kBlock, kInline, kX, kY };
-enum class TimelineAttachment {
-  // The timeline is not attached to another timeline, and other timelines
-  // can not be attached to this timeline.
-  kLocal,
-  // The timeline can be attached to by descendant timelines with attachment
-  // type kAncestor.
-  kDefer,
-  // The timeline is attached to an exclusive flat-tree ancestor with
-  // attachment type kDefer.
-  kAncestor
-};
 enum class TimelineScroller { kNearest, kRoot, kSelf };
 
 enum class CoordBox {

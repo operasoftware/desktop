@@ -39,7 +39,7 @@ class FontTest : public FontTestBase {
     FontDescription::VariantLigatures ligatures(
         FontDescription::kEnabledLigaturesState);
     Font font = CreateTestFont(
-        "roboto",
+        AtomicString("roboto"),
         test::PlatformTestDataPath("third_party/Roboto/roboto-regular.woff2"),
         100, &ligatures);
 
@@ -60,8 +60,8 @@ class FontTest : public FontTestBase {
 
 TEST_F(FontTest, FonteMetricsCapHeight) {
   const auto cap_height_of = [](const char* font_path, float size) {
-    Font font =
-        CreateTestFont("test", test::PlatformTestDataPath(font_path), size);
+    Font font = CreateTestFont(AtomicString("test"),
+                               test::PlatformTestDataPath(font_path), size);
     const SimpleFontData* const font_data = font.PrimaryFont();
     return font_data->GetFontMetrics().CapHeight();
   };
@@ -84,8 +84,8 @@ TEST_F(FontTest, FonteMetricsCapHeight) {
 }
 
 TEST_F(FontTest, IdeographicFullWidthAhem) {
-  Font font =
-      CreateTestFont("Ahem", test::PlatformTestDataPath("Ahem.woff"), 16);
+  Font font = CreateTestFont(AtomicString("Ahem"),
+                             test::PlatformTestDataPath("Ahem.woff"), 16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
   EXPECT_FALSE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
@@ -95,7 +95,7 @@ TEST_F(FontTest, IdeographicFullWidthAhem) {
 #if !defined(OPERA_DESKTOP)
 TEST_F(FontTest, IdeographicFullWidthCjkFull) {
   Font font = CreateTestFont(
-      "M PLUS 1p",
+      AtomicString("M PLUS 1p"),
       blink::test::BlinkWebTestsFontsTestDataPath("mplus-1p-regular.woff"), 16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
@@ -104,7 +104,7 @@ TEST_F(FontTest, IdeographicFullWidthCjkFull) {
 }
 
 TEST_F(FontTest, IdeographicFullWidthCjkNarrow) {
-  Font font = CreateTestFont("CSSHWOrientationTest",
+  Font font = CreateTestFont(AtomicString("CSSHWOrientationTest"),
                              blink::test::BlinkWebTestsFontsTestDataPath(
                                  "adobe-fonts/CSSHWOrientationTest.otf"),
                              16);
@@ -116,8 +116,8 @@ TEST_F(FontTest, IdeographicFullWidthCjkNarrow) {
 
 // A font that does not have the CJK "water" glyph.
 TEST_F(FontTest, IdeographicFullWidthUprightAhem) {
-  Font font =
-      CreateTestFont("Ahem", test::PlatformTestDataPath("Ahem.woff"), 16);
+  Font font = CreateTestFont(AtomicString("Ahem"),
+                             test::PlatformTestDataPath("Ahem.woff"), 16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
   EXPECT_FALSE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
@@ -126,7 +126,7 @@ TEST_F(FontTest, IdeographicFullWidthUprightAhem) {
 // A Japanese font, with the "water" glyph, but the `vmtx` table is missing.
 TEST_F(FontTest, IdeographicFullWidthUprightCjkNoVmtx) {
   Font font = CreateVerticalUprightTestFont(
-      "M PLUS 1p",
+      AtomicString("M PLUS 1p"),
       blink::test::BlinkWebTestsFontsTestDataPath("mplus-1p-regular.woff"), 16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
@@ -139,7 +139,7 @@ TEST_F(FontTest, IdeographicFullWidthUprightCjkNoVmtx) {
 // A Japanese font, with the "water" glyph, with the `vmtx` table.
 TEST_F(FontTest, IdeographicFullWidthUprightCjkVmtx) {
   Font font =
-      CreateVerticalUprightTestFont("CSSHWOrientationTest",
+      CreateVerticalUprightTestFont(AtomicString("CSSHWOrientationTest"),
                                     blink::test::BlinkWebTestsFontsTestDataPath(
                                         "adobe-fonts/CSSHWOrientationTest.otf"),
                                     16);
@@ -151,8 +151,8 @@ TEST_F(FontTest, IdeographicFullWidthUprightCjkVmtx) {
 #endif  // !defined(OPERA_DESKTOP)
 
 TEST_F(FontTest, TextIntercepts) {
-  Font font =
-      CreateTestFont("Ahem", test::PlatformTestDataPath("Ahem.woff"), 16);
+  Font font = CreateTestFont(AtomicString("Ahem"),
+                             test::PlatformTestDataPath("Ahem.woff"), 16);
   // A sequence of LATIN CAPITAL LETTER E WITH ACUTE and LATIN SMALL LETTER P
   // characters. E ACUTES are squares above the baseline in Ahem, while p's
   // are rectangles below the baseline.
@@ -201,16 +201,16 @@ TEST_F(FontTest, ExpandRange) {
 }
 
 TEST_F(FontTest, TabWidthZero) {
-  Font font =
-      CreateTestFont("Ahem", test::PlatformTestDataPath("Ahem.woff"), 0);
+  Font font = CreateTestFont(AtomicString("Ahem"),
+                             test::PlatformTestDataPath("Ahem.woff"), 0);
   TabSize tab_size(8);
   EXPECT_EQ(font.TabWidth(tab_size, .0f), .0f);
   EXPECT_EQ(font.TabWidth(tab_size, LayoutUnit()), LayoutUnit());
 }
 
 TEST_F(FontTest, NullifyPrimaryFontForTesting) {
-  Font font =
-      CreateTestFont("Ahem", test::PlatformTestDataPath("Ahem.woff"), 0);
+  Font font = CreateTestFont(AtomicString("Ahem"),
+                             test::PlatformTestDataPath("Ahem.woff"), 0);
   EXPECT_TRUE(font.PrimaryFont());
   font.NullifyPrimaryFontForTesting();
   EXPECT_FALSE(font.PrimaryFont());

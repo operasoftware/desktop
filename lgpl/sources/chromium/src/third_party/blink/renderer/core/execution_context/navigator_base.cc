@@ -50,8 +50,6 @@ String NavigatorBase::userAgent() const {
   if (!execution_context)
     return String();
 
-  execution_context->ReportNavigatorUserAgentAccess();
-
   auto* dom_window = DomWindow();
   return execution_context->UserAgent(
       dom_window ? dom_window->GetFrame()->GetDocument()->Url()
@@ -60,23 +58,6 @@ String NavigatorBase::userAgent() const {
 
 String NavigatorBase::platform() const {
   ExecutionContext* execution_context = GetExecutionContext();
-  // Report as user agent access
-  if (execution_context)
-    execution_context->ReportNavigatorUserAgentAccess();
-
-  // If the User-Agent string is opted into the SendFullUserAgentAfterReduction,
-  // platform should be a full value.
-  if (RuntimeEnabledFeatures::SendFullUserAgentAfterReductionEnabled(
-          execution_context)) {
-    return NavigatorID::platform();
-  }
-
-  // If the User-Agent string is frozen, platform should be a value
-  // matching the frozen string per https://github.com/WICG/ua-client-hints.
-  // See content::frozen_user_agent_strings.
-  if (RuntimeEnabledFeatures::UserAgentReductionEnabled(execution_context)) {
-    return GetReducedNavigatorPlatform();
-  }
 
 #if BUILDFLAG(IS_ANDROID)
   // For user-agent reduction phase 6, Android platform should be frozen

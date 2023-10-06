@@ -39,6 +39,7 @@ class LayoutNGSVGText final : public LayoutNGBlockFlowMixin<LayoutSVGBlock> {
 
  private:
   // LayoutObject override:
+  void UpdateLayout() override;
   const char* GetName() const override;
   bool IsOfType(LayoutObjectType type) const override;
   bool IsChildAllowed(LayoutObject* child, const ComputedStyle&) const override;
@@ -48,6 +49,7 @@ class LayoutNGSVGText final : public LayoutNGBlockFlowMixin<LayoutSVGBlock> {
   void WillBeRemovedFromTree() override;
   gfx::RectF ObjectBoundingBox() const override;
   gfx::RectF StrokeBoundingBox() const override;
+  gfx::RectF DecoratedBoundingBox() const override;
   gfx::RectF VisualRectInLocalSVGCoordinates() const override;
   void AbsoluteQuads(Vector<gfx::QuadF>& quads,
                      MapCoordinatesFlags mode) const override;
@@ -67,7 +69,6 @@ class LayoutNGSVGText final : public LayoutNGBlockFlowMixin<LayoutSVGBlock> {
 
   // LayoutBlock override:
   void Paint(const PaintInfo&) const override;
-  void UpdateBlockLayout() override;
 
   void UpdateFont();
   void UpdateTransformAffectsVectorEffect();

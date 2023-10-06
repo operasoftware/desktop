@@ -516,8 +516,10 @@ absl::optional<PaintRecord> SVGImage::PaintRecordForCurrentFrame(
   // re-laying out the image.
   ImageObserverDisabler disable_image_observer(this);
 
-  if (LayoutSVGRoot* layout_root = LayoutRoot())
-    layout_root->SetContainerSize(RoundedLayoutSize(draw_info.ContainerSize()));
+  if (LayoutSVGRoot* layout_root = LayoutRoot()) {
+    layout_root->SetContainerSize(
+        PhysicalSize::FromSizeFFloor(draw_info.ContainerSize()));
+  }
   LocalFrameView* view = GetFrame()->View();
   const gfx::Size rounded_container_size = draw_info.RoundedContainerSize();
   view->Resize(rounded_container_size);
@@ -848,7 +850,7 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
 
   TRACE_EVENT0("blink", "SVGImage::dataChanged::load");
 
-  frame->ForceSynchronousDocumentInstall("image/svg+xml", Data());
+  frame->ForceSynchronousDocumentInstall(AtomicString("image/svg+xml"), Data());
 
   // Set up our Page reference after installing our document. This avoids
   // tripping on a non-existing (null) Document if a GC is triggered during the
@@ -876,7 +878,7 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
     return kSizeUnavailable;
 
   // Set the concrete object size before a container size is available.
-  intrinsic_size_ = RoundedLayoutSize(ConcreteObjectSize(gfx::SizeF(
+  intrinsic_size_ = PhysicalSize::FromSizeFFloor(ConcreteObjectSize(gfx::SizeF(
       LayoutReplaced::kDefaultWidth, LayoutReplaced::kDefaultHeight)));
 
   if (load_state_ == kWaitingForAsyncLoadCompletion)

@@ -535,7 +535,7 @@ bool OriginTrialContext::CanEnableTrialFromName(const StringView& trial_name) {
 
   if (trial_name == "CompressionDictionaryTransport") {
     return base::FeatureList::IsEnabled(
-        features::kCompressionDictionaryTransport);
+        network::features::kCompressionDictionaryTransportBackend);
   }
 
   if (trial_name == "AttributionReportingCrossAppWeb") {
@@ -546,6 +546,10 @@ bool OriginTrialContext::CanEnableTrialFromName(const StringView& trial_name) {
 
   if (trial_name == "ComputePressure_v2") {
     return base::FeatureList::IsEnabled(features::kComputePressure);
+  }
+
+  if (trial_name == "WebEnvironmentIntegrity") {
+    return base::FeatureList::IsEnabled(features::kWebEnvironmentIntegrity);
   }
 
   return true;
@@ -562,6 +566,10 @@ Vector<OriginTrialFeature> OriginTrialContext::RestrictedFeaturesForTrial(
     if (!base::FeatureList::IsEnabled(features::kBrowsingTopics) ||
         !base::FeatureList::IsEnabled(features::kBrowsingTopicsXHR)) {
       restricted.push_back(OriginTrialFeature::kTopicsXHR);
+    }
+    if (!base::FeatureList::IsEnabled(features::kBrowsingTopics) ||
+        !base::FeatureList::IsEnabled(features::kBrowsingTopicsDocumentAPI)) {
+      restricted.push_back(OriginTrialFeature::kTopicsDocumentAPI);
     }
     if (!base::FeatureList::IsEnabled(features::kConversionMeasurement))
       restricted.push_back(OriginTrialFeature::kAttributionReporting);

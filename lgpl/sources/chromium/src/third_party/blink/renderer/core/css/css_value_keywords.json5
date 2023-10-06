@@ -161,6 +161,7 @@
     "cap-height",
     "ch-width",
     "ic-width",
+    // from-font
 
     //
     // font-family (<generic-family> in CSS 2.1)
@@ -189,6 +190,11 @@
     // https://drafts.csswg.org/css-conditional-5/#typedef-supports-font-tech-fn
     "font-tech",
     "font-format",
+
+    //
+    // font-palette animation
+    //
+    "palette-mix",
 
     //
     // *-color
@@ -752,6 +758,12 @@
     "fit-content",
 
     //
+    // text-autospace
+    //
+    // normal
+    "no-autospace",
+
+    //
     // text-overflow
     //
     "clip",
@@ -787,6 +799,7 @@
     //
     "break-all",
     "keep-all",
+    "auto-phrase",
 
     //
     // word-wrap
@@ -819,8 +832,6 @@
     // CSSParserFastPaths::IsValidKeywordPropertyAndValue.
     "checkbox",
     "radio",
-    "push-button",
-    "square-button",
     "button",
     "listbox",
     "-internal-media-control",
@@ -828,7 +839,6 @@
     "menulist-button",
     "meter",
     "progress-bar",
-    "slider-horizontal",
     "slider-vertical",
     "searchfield",
     "textfield",
@@ -839,6 +849,9 @@
     "media-sliderthumb",
     "media-volume-slider",
     "media-volume-sliderthumb",
+    "push-button",
+    "square-button",
+    "slider-horizontal",
     "sliderthumb-horizontal",
     "sliderthumb-vertical",
     "searchfield-cancel-button",
@@ -1268,6 +1281,7 @@
     "-webkit-repeating-radial-gradient",
     "-webkit-image-set",
     "image-set",
+    "type",
 
     // deprecated gradients
     "from",
@@ -1458,11 +1472,6 @@
     // normal
     // always
 
-    // scroll-timeline-attachment
-    // view-timeline-attachment
-    "defer",
-    "ancestor",
-
     // containment
     // paint
     "style",
@@ -1472,8 +1481,17 @@
     "inline-size",
 
     // @container
-    "name",
-    "type",
+    // size
+    // style
+    "state",
+    // top
+    // left
+    // right
+    // bottom
+    "inset-block-start",
+    "inset-block-end",
+    "inset-inline-start",
+    "inset-inline-end",
 
     // grid auto-repeat
     "auto-fill",
@@ -1530,6 +1548,7 @@
 
     // (prefers-reduced-motion:) media feature
     // (prefers-reduced-data:) media feature
+    // (prefers-reduced-transparency:) media feature
     "reduce",
 
     // (forced-colors:) media feature
@@ -1636,6 +1655,8 @@
 
     // anchor positioning
     "anchor",
+    // auto,
+    "auto-same",
     // top,
     // left,
     // right,
@@ -1653,9 +1674,12 @@
     "self-block",
     "self-inline",
 
-    // anchor-scroll
+    // anchor-default
     "implicit",
     // none,
+
+    // position-fallback-bounds
+    // normal,
 
     // animation-[end-]delay
     // contain
@@ -1668,5 +1692,12 @@
     // scroll()
     "root",
     "nearest",
+
+    // transition-behavior
+    "allow-discrete",
+
+    // (inverted-colors:) media feature
+    "inverted"
+    // none
   ],
 }

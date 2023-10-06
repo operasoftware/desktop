@@ -51,6 +51,7 @@
 #include "third_party/blink/renderer/core/html/forms/popup_menu.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/input_device_capabilities.h"
+#include "third_party/blink/renderer/core/keywords.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/page/autoscroll_controller.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -301,7 +302,7 @@ bool MenuListSelectType::HandlePopupOpenKeyboardEvent() {
 void MenuListSelectType::CreateShadowSubtree(ShadowRoot& root) {
   Document& doc = select_->GetDocument();
   Element* inner_element = MakeGarbageCollected<MenuListInnerElement>(doc);
-  inner_element->setAttribute(html_names::kAriaHiddenAttr, "true");
+  inner_element->setAttribute(html_names::kAriaHiddenAttr, keywords::kTrue);
   // Make sure InnerElement() always has a Text node.
   inner_element->appendChild(Text::Create(doc, g_empty_string));
   root.insertBefore(inner_element, root.firstChild());
@@ -829,21 +830,31 @@ bool ListBoxSelectType::DefaultEventHandler(const Event& event) {
 
     bool handled = false;
     HTMLOptionElement* end_option = nullptr;
+    char const* key_next = "ArrowDown";
+    char const* key_previous = "ArrowUp";
+    const ComputedStyle* style = select_->GetComputedStyle();
+    if (style->GetWritingMode() == WritingMode::kVerticalLr) {
+      key_next = "ArrowRight";
+      key_previous = "ArrowLeft";
+    } else if (style->GetWritingMode() == WritingMode::kVerticalRl) {
+      key_next = "ArrowLeft";
+      key_previous = "ArrowRight";
+    }
     if (!active_selection_end_) {
       // Initialize the end index
-      if (key == "ArrowDown" || key == "PageDown") {
+      if (key == key_next || key == "PageDown") {
         HTMLOptionElement* start_option = select_->LastSelectedOption();
         handled = true;
-        if (key == "ArrowDown") {
+        if (key == key_next) {
           end_option = NextSelectableOption(start_option);
         } else {
           end_option =
               NextSelectableOptionPageAway(start_option, kSkipForwards);
         }
-      } else if (key == "ArrowUp" || key == "PageUp") {
+      } else if (key == key_previous || key == "PageUp") {
         HTMLOptionElement* start_option = select_->SelectedOption();
         handled = true;
-        if (key == "ArrowUp") {
+        if (key == key_previous) {
           end_option = PreviousSelectableOption(start_option);
         } else {
           end_option =
@@ -852,10 +863,10 @@ bool ListBoxSelectType::DefaultEventHandler(const Event& event) {
       }
     } else {
       // Set the end index based on the current end index.
-      if (key == "ArrowDown") {
+      if (key == key_next) {
         end_option = NextSelectableOption(active_selection_end_);
         handled = true;
-      } else if (key == "ArrowUp") {
+      } else if (key == key_previous) {
         end_option = PreviousSelectableOption(active_selection_end_);
         handled = true;
       } else if (key == "PageDown") {

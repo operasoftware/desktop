@@ -8,7 +8,7 @@ import("//build/config/ui.gni")
 
 declare_args() {
   # If true adds tracker reporting scripts using web3 object
-  opera_blink_feature_script_tracker = product == "crypto"
+  opera_blink_feature_script_tracker = product == "" || product == "crypto"
 
   # Gpu shader css image filters
   opera_feature_blink_gpu_shader_css_filter = false

@@ -42,7 +42,6 @@
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache_base.h"
 #include "third_party/blink/renderer/core/css/media_feature_overrides.h"
-#include "third_party/blink/renderer/core/dom/context_features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
@@ -147,7 +146,7 @@ Page* CreatePage(ChromeClient& chrome_client, WebViewImpl& opener_web_view) {
   if (media_feature_overrides &&
       media_feature_overrides->GetPreferredColorScheme().has_value()) {
     page->SetMediaFeatureOverride(
-        "prefers-color-scheme",
+        AtomicString("prefers-color-scheme"),
         media_feature_overrides->GetPreferredColorScheme().value() ==
                 mojom::blink::PreferredColorScheme::kDark
             ? "dark"
@@ -311,18 +310,6 @@ class PagePopupChromeClient final : public EmptyChromeClient {
   WebPagePopupImpl* popup_;
 };
 
-class PagePopupFeaturesClient : public ContextFeaturesClient {
-  bool IsEnabled(Document*, ContextFeatures::FeatureType, bool) override;
-};
-
-bool PagePopupFeaturesClient::IsEnabled(Document*,
-                                        ContextFeatures::FeatureType type,
-                                        bool default_value) {
-  if (type == ContextFeatures::kPagePopup)
-    return true;
-  return default_value;
-}
-
 // WebPagePopupImpl ----------------------------------------------------------
 
 WebPagePopupImpl::WebPagePopupImpl(
@@ -368,8 +355,6 @@ WebPagePopupImpl::WebPagePopupImpl(
 
   popup_client_->AdjustSettings(page_->GetSettings());
   popup_client_->CreatePagePopupController(*page_, *this);
-
-  ProvideContextFeaturesTo(*page_, std::make_unique<PagePopupFeaturesClient>());
 
   // Creating new WindowAgentFactory because page popup content is owned by the
   // user agent and should be isolated from the main frame. However, if we are a
@@ -421,7 +406,8 @@ WebPagePopupImpl::WebPagePopupImpl(
   scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
   popup_client_->WriteDocument(data.get());
   frame->SetPageZoomFactor(popup_client_->ZoomFactor());
-  frame->ForceSynchronousDocumentInstall("text/html", std::move(data));
+  frame->ForceSynchronousDocumentInstall(AtomicString("text/html"),
+                                         std::move(data));
 
   popup_owner_client_rect_ =
       popup_client_->OwnerElement().getBoundingClientRect();

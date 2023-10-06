@@ -56,17 +56,18 @@ enum class TestURLScheme {
 AtomicString SrcSchemeToURL(TestURLScheme scheme) {
   switch (scheme) {
     case TestURLScheme::kHttp:
-      return "http://example.com/foo.mp4";
+      return AtomicString("http://example.com/foo.mp4");
     case TestURLScheme::kHttps:
-      return "https://example.com/foo.mp4";
+      return AtomicString("https://example.com/foo.mp4");
     case TestURLScheme::kFtp:
-      return "ftp://example.com/foo.mp4";
+      return AtomicString("ftp://example.com/foo.mp4");
     case TestURLScheme::kFile:
-      return "file:///foo/bar.mp4";
+      return AtomicString("file:///foo/bar.mp4");
     case TestURLScheme::kData:
-      return "data:video/mp4;base64,XXXXXXX";
+      return AtomicString("data:video/mp4;base64,XXXXXXX");
     case TestURLScheme::kBlob:
-      return "blob:http://example.com/00000000-0000-0000-0000-000000000000";
+      return AtomicString(
+          "blob:http://example.com/00000000-0000-0000-0000-000000000000");
     default:
       NOTREACHED();
   }
@@ -582,6 +583,9 @@ TEST_P(HTMLMediaElementTest, effectiveMediaVolume) {
 }
 
 TEST_P(HTMLMediaElementTest, preloadType) {
+  AtomicString auto_string("auto");
+  AtomicString none_string("none");
+  AtomicString metadata_string("metadata");
   struct TestData {
     bool data_saver_enabled;
     bool is_cellular;
@@ -589,23 +593,25 @@ TEST_P(HTMLMediaElementTest, preloadType) {
     AtomicString preload_to_set;
     AtomicString preload_expected;
   } test_data[] = {
-      // Tests for conditions in which preload type should be overriden to
-      // "none".
-      {false, false, TestURLScheme::kHttp, "auto", "auto"},
-      {true, false, TestURLScheme::kHttps, "auto", "auto"},
-      {true, false, TestURLScheme::kFtp, "metadata", "metadata"},
-      {false, false, TestURLScheme::kHttps, "auto", "auto"},
-      {false, false, TestURLScheme::kFile, "auto", "auto"},
-      {false, false, TestURLScheme::kData, "metadata", "metadata"},
-      {false, false, TestURLScheme::kBlob, "auto", "auto"},
-      {false, false, TestURLScheme::kFile, "none", "none"},
-      // Tests for conditions in which preload type should be overriden to
-      // "metadata".
-      {false, true, TestURLScheme::kHttp, "auto", "metadata"},
-      {false, true, TestURLScheme::kHttp, "scheme", "metadata"},
-      {false, true, TestURLScheme::kHttp, "none", "none"},
-      // Tests that the preload is overriden to "metadata".
-      {false, false, TestURLScheme::kHttp, "foo", "metadata"},
+      // Tests for conditions in which preload type should be overridden to
+      // none_string.
+      {false, false, TestURLScheme::kHttp, auto_string, auto_string},
+      {true, false, TestURLScheme::kHttps, auto_string, auto_string},
+      {true, false, TestURLScheme::kFtp, metadata_string, metadata_string},
+      {false, false, TestURLScheme::kHttps, auto_string, auto_string},
+      {false, false, TestURLScheme::kFile, auto_string, auto_string},
+      {false, false, TestURLScheme::kData, metadata_string, metadata_string},
+      {false, false, TestURLScheme::kBlob, auto_string, auto_string},
+      {false, false, TestURLScheme::kFile, none_string, none_string},
+      // Tests for conditions in which preload type should be overridden to
+      // metadata_string.
+      {false, true, TestURLScheme::kHttp, auto_string, metadata_string},
+      {false, true, TestURLScheme::kHttp, AtomicString("scheme"),
+       metadata_string},
+      {false, true, TestURLScheme::kHttp, none_string, none_string},
+      // Tests that the preload is overridden to metadata_string.
+      {false, false, TestURLScheme::kHttp, AtomicString("foo"),
+       metadata_string},
   };
 
   int index = 0;
@@ -977,7 +983,7 @@ TEST_P(HTMLMediaElementTest, EmptyRedirectedSrcUsesOriginal) {
   EXPECT_EQ(Media()->downloadURL(), Media()->currentSrc());
 }
 
-TEST_P(HTMLMediaElementTest, NoPendingActivityEvenIfBeforeMetadata) {
+TEST_P(HTMLMediaElementTest, NoPendingActivityAfterCurrentData) {
   Media()->SetSrc(SrcSchemeToURL(TestURLScheme::kHttp));
   test::RunPendingTasks();
 
@@ -988,9 +994,12 @@ TEST_P(HTMLMediaElementTest, NoPendingActivityEvenIfBeforeMetadata) {
 
   EXPECT_TRUE(MediaShouldBeOpaque());
   EXPECT_TRUE(Media()->HasPendingActivity());
-  SetNetworkState(WebMediaPlayer::kNetworkStateIdle);
+  EXPECT_CALL(*MockMediaPlayer(), GetSrcAfterRedirects)
+      .WillRepeatedly(Return(GURL()));
+  EXPECT_CALL(*MockMediaPlayer(), OnTimeUpdate());
+  SetReadyState(HTMLMediaElement::kHaveCurrentData);
+  test::RunPendingTasks();
   EXPECT_FALSE(Media()->HasPendingActivity());
-  EXPECT_TRUE(MediaShouldBeOpaque());
 }
 
 TEST_P(HTMLMediaElementTest, OnTimeUpdate_DurationChange) {
@@ -1309,7 +1318,8 @@ TEST_P(HTMLMediaElementTest,
 
   // Setting the controlsList attribute to a valid value should not show the
   // controls.
-  Media()->setAttribute(blink::html_names::kControlslistAttr, "nofullscreen");
+  Media()->setAttribute(blink::html_names::kControlslistAttr,
+                        AtomicString("nofullscreen"));
   EXPECT_FALSE(MediaShouldShowAllControls());
 
   // Removing the controlsList attribute should show the controls.
@@ -1318,12 +1328,14 @@ TEST_P(HTMLMediaElementTest,
 
   // Setting the controlsList attribute to an invalid value should still show
   // the controls.
-  Media()->setAttribute(blink::html_names::kControlslistAttr, "foo");
+  Media()->setAttribute(blink::html_names::kControlslistAttr,
+                        AtomicString("foo"));
   EXPECT_TRUE(MediaShouldShowAllControls());
 
   // Setting the controlsList attribute to another valid value should not show
   // the controls.
-  Media()->setAttribute(blink::html_names::kControlslistAttr, "noplaybackrate");
+  Media()->setAttribute(blink::html_names::kControlslistAttr,
+                        AtomicString("noplaybackrate"));
   EXPECT_FALSE(MediaShouldShowAllControls());
 
   // If the user explicitly shows them, that should override the controlsList

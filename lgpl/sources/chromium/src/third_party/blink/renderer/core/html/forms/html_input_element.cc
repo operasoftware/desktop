@@ -167,7 +167,7 @@ bool HTMLInputElement::HasPendingActivity() const {
 HTMLImageLoader& HTMLInputElement::EnsureImageLoader() {
   if (!image_loader_) {
     image_loader_ = MakeGarbageCollected<HTMLImageLoader>(this);
-    RegisterActiveScriptWrappable();
+    RegisterActiveScriptWrappable(GetExecutionContext()->GetIsolate());
   }
   return *image_loader_;
 }
@@ -996,7 +996,6 @@ void HTMLInputElement::ResetImpl() {
     SetNonDirtyValue(String());
     SetNeedsValidityCheck();
   }
-
   SetChecked(FastHasAttribute(html_names::kCheckedAttr));
   dirty_checkedness_ = false;
   HTMLFormControlElementWithState::ResetImpl();
@@ -1118,7 +1117,7 @@ bool HTMLInputElement::SizeShouldIncludeDecoration(int& preferred_size) const {
 }
 
 void HTMLInputElement::CloneNonAttributePropertiesFrom(const Element& source,
-                                                       CloneChildrenFlag flag) {
+                                                       NodeCloningData& data) {
   const auto& source_element = To<HTMLInputElement>(source);
 
   non_attribute_value_ = source_element.non_attribute_value_;
@@ -1128,7 +1127,7 @@ void HTMLInputElement::CloneNonAttributePropertiesFrom(const Element& source,
   is_indeterminate_ = source_element.is_indeterminate_;
   input_type_->CopyNonAttributeProperties(source_element);
 
-  TextControlElement::CloneNonAttributePropertiesFrom(source, flag);
+  TextControlElement::CloneNonAttributePropertiesFrom(source, data);
 
   needs_to_update_view_value_ = true;
   input_type_view_->UpdateView();
@@ -1142,7 +1141,7 @@ String HTMLInputElement::Value() const {
       return FastGetAttribute(html_names::kValueAttr);
     case ValueMode::kDefaultOn: {
       AtomicString value_string = FastGetAttribute(html_names::kValueAttr);
-      return value_string.IsNull() ? "on" : value_string;
+      return value_string.IsNull() ? AtomicString("on") : value_string;
     }
     case ValueMode::kValue:
       return non_attribute_value_;
@@ -1917,7 +1916,7 @@ int HTMLInputElement::scrollWidth() {
   LayoutUnit adjustment = box->ClientWidth() - editor_box->ClientWidth();
   int snapped_scroll_width =
       SnapSizeToPixel(editor_box->ScrollWidth() + adjustment,
-                      box->Location().X() + box->ClientLeft());
+                      box->PhysicalLocation().left + box->ClientLeft());
   return AdjustForAbsoluteZoom::AdjustLayoutUnit(
              LayoutUnit(snapped_scroll_width), box->StyleRef())
       .Round();

@@ -49,8 +49,6 @@ ScrollTimeline* ScrollTimeline::Create(Document& document,
   ScrollAxis axis =
       options->hasAxis() ? options->axis().AsEnum() : ScrollAxis::kBlock;
 
-  TimelineAttachment attachment = TimelineAttachment::kLocal;
-
   // The scrollingElement depends on style/layout-tree in quirks mode. Update
   // such that subsequent calls to ScrollingElementNoLayout returns up-to-date
   // information.
@@ -58,59 +56,39 @@ ScrollTimeline* ScrollTimeline::Create(Document& document,
     document.UpdateStyleAndLayoutTree();
 
   return Create(&document, source.value_or(document.ScrollingElementNoLayout()),
-                axis, attachment);
+                axis);
 }
 
 ScrollTimeline* ScrollTimeline::Create(Document* document,
                                        Element* source,
-                                       ScrollAxis axis,
-                                       TimelineAttachment attachment) {
+                                       ScrollAxis axis) {
   ScrollTimeline* scroll_timeline = MakeGarbageCollected<ScrollTimeline>(
-      document, attachment, ReferenceType::kSource, source, axis);
+      document, ReferenceType::kSource, source, axis);
   scroll_timeline->UpdateSnapshot();
 
   return scroll_timeline;
 }
 
 ScrollTimeline::ScrollTimeline(Document* document,
-                               TimelineAttachment attachment,
                                ReferenceType reference_type,
                                Element* reference,
                                ScrollAxis axis)
     : ScrollTimeline(
           document,
-          attachment,
-          attachment == TimelineAttachment::kDefer
-              ? nullptr
-              : MakeGarbageCollected<ScrollTimelineAttachment>(reference_type,
-                                                               reference,
-                                                               axis)) {}
+          MakeGarbageCollected<ScrollTimelineAttachment>(reference_type,
+                                                         reference,
+                                                         axis)) {}
 
 ScrollTimeline::ScrollTimeline(Document* document,
-                               TimelineAttachment attachment_type,
                                ScrollTimelineAttachment* attachment)
-    : ScrollSnapshotTimeline(document), attachment_type_(attachment_type) {
+    : ScrollSnapshotTimeline(document) {
   if (attachment) {
     attachments_.push_back(attachment);
   }
 }
 
 Element* ScrollTimeline::RetainingElement() const {
-  if (attachment_type_ == TimelineAttachment::kLocal) {
-    return CurrentAttachment()->GetReferenceElement();
-  }
-  // TODO(crbug.com/1425939): Remove this branch.
-  //
-  // The attachment concept is going away [1], at which point only local
-  // timelines will be reachable from JS, so we don't care about non-local
-  // timelines.
-  //
-  // A new concept similar to non-local timelines will be introduced, but such
-  // timelines will not be exposed to JS, and therefore the strong reference in
-  // blink::CSSAnimations is enough to keep the timeline alive.
-  //
-  // [1] https://github.com/w3c/csswg-drafts/issues/7759
-  return nullptr;
+  return CurrentAttachment()->GetReferenceElement();
 }
 
 // TODO(crbug.com/1060384): This section is missing from the spec rewrite.
@@ -168,12 +146,14 @@ ScrollTimeline::TimelineState ScrollTimeline::ComputeTimelineState() const {
   // github.com/w3c/csswg-drafts/issues/7401
   if (std::abs(state.scroll_offsets->end - state.scroll_offsets->start) > 0) {
     state.phase = TimelinePhase::kActive;
-    double progress = (current_offset - state.scroll_offsets->start) /
-                      (state.scroll_offsets->end - state.scroll_offsets->start);
-
-    base::TimeDelta duration = base::Seconds(GetDuration()->InSecondsF());
+    double offset = current_offset - state.scroll_offsets->start;
+    double range = state.scroll_offsets->end - state.scroll_offsets->start;
+    double duration_in_microseconds =
+        range * kScrollTimelineMicrosecondsPerPixel;
+    state.duration = absl::make_optional(ANIMATION_TIME_DELTA_FROM_MILLISECONDS(
+        duration_in_microseconds / 1000));
     state.current_time =
-        base::Milliseconds(progress * duration.InMillisecondsF());
+        base::Microseconds(offset * kScrollTimelineMicrosecondsPerPixel);
   }
   return state;
 }
@@ -221,17 +201,12 @@ void ScrollTimeline::Trace(Visitor* visitor) const {
   ScrollSnapshotTimeline::Trace(visitor);
 }
 
-bool ScrollTimeline::Matches(TimelineAttachment attachment_type,
-                             ReferenceType reference_type,
+bool ScrollTimeline::Matches(ReferenceType reference_type,
                              Element* reference_element,
                              ScrollAxis axis) const {
-  if (attachment_type_ == TimelineAttachment::kDefer) {
-    return attachment_type == TimelineAttachment::kDefer;
-  }
   const ScrollTimelineAttachment* attachment = CurrentAttachment();
   DCHECK(attachment);
-  return (attachment_type_ == attachment_type) &&
-         (attachment->GetReferenceType() == reference_type) &&
+  return (attachment->GetReferenceType() == reference_type) &&
          (attachment->GetReferenceElement() == reference_element) &&
          (attachment->GetAxis() == axis);
 }
@@ -243,35 +218,26 @@ ScrollAxis ScrollTimeline::GetAxis() const {
   return ScrollAxis::kBlock;
 }
 
-void ScrollTimeline::AddAttachment(ScrollTimelineAttachment* attachment) {
-  DCHECK_EQ(attachment_type_, TimelineAttachment::kDefer);
-  attachments_.push_back(attachment);
-}
-
-void ScrollTimeline::RemoveAttachment(ScrollTimelineAttachment* attachment) {
-  DCHECK_EQ(attachment_type_, TimelineAttachment::kDefer);
-  wtf_size_t i = attachments_.Find(attachment);
-  if (i != kNotFound) {
-    attachments_.EraseAt(i);
+absl::optional<double> ScrollTimeline::GetMaximumScrollPosition() const {
+  absl::optional<ScrollOffsets> scroll_offsets = GetResolvedScrollOffsets();
+  if (!scroll_offsets) {
+    return absl::nullopt;
   }
-}
+  LayoutBox* layout_box = ResolvedSource()->GetLayoutBox();
+  if (!layout_box) {
+    return absl::nullopt;
+  }
 
-cc::AnimationTimeline* ScrollTimeline::EnsureCompositorTimeline() {
-  if (compositor_timeline_)
-    return compositor_timeline_.get();
-
-  compositor_timeline_ = scroll_timeline_util::ToCompositorScrollTimeline(this);
-  return compositor_timeline_.get();
-}
-
-void ScrollTimeline::UpdateCompositorTimeline() {
-  if (!compositor_timeline_)
-    return;
-
-  ToScrollTimeline(compositor_timeline_.get())
-      ->UpdateScrollerIdAndScrollOffsets(
-          scroll_timeline_util::GetCompositorScrollElementId(ResolvedSource()),
-          GetResolvedScrollOffsets());
+  PaintLayerScrollableArea* scrollable_area = layout_box->GetScrollableArea();
+  if (!scrollable_area) {
+    return absl::nullopt;
+  }
+  ScrollOffset scroll_dimensions = scrollable_area->MaximumScrollOffset() -
+                                   scrollable_area->MinimumScrollOffset();
+  auto physical_orientation =
+      ToPhysicalScrollOrientation(GetAxis(), *layout_box);
+  return physical_orientation == kHorizontalScroll ? scroll_dimensions.x()
+                                                   : scroll_dimensions.y();
 }
 
 }  // namespace blink

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {CrSettingsPrefs, Router, routes, setNearbyShareSettingsForTesting} from 'chrome://os-settings/os_settings.js';
+import {CrSettingsPrefs, Router, routes, routesMojom, setNearbyShareSettingsForTesting} from 'chrome://os-settings/os_settings.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
@@ -87,7 +87,9 @@ suite('<os-settings-ui> menu', () => {
     const router = Router.getInstance();
     router.navigateTo(routes.BASIC, urlParams);
     assertEquals(urlParams.toString(), router.getQueryParameters().toString());
-    settingsMenu.shadowRoot.querySelector('a.item[href="personalization"]')
+    settingsMenu.shadowRoot
+        .querySelector(
+            `a.item[href="/${routesMojom.PERSONALIZATION_SECTION_PATH}"]`)
         .click();
     assertEquals('', router.getQueryParameters().toString());
   });
@@ -99,10 +101,11 @@ suite('<os-settings-ui> menu', () => {
 
     const main = ui.shadowRoot.querySelector('os-settings-main');
     assertTrue(!!main);
-    const mainPage = main.shadowRoot.querySelector('os-settings-page');
-    assertTrue(!!mainPage);
+    const mainPageContainer =
+        main.shadowRoot.querySelector('main-page-container');
+    assertTrue(!!mainPageContainer);
     const mainPageAdvancedToggle =
-        mainPage.shadowRoot.querySelector('#advancedToggle');
+        mainPageContainer.shadowRoot.querySelector('#advancedToggle');
     assertTrue(!!mainPageAdvancedToggle);
     const floatingMenu = ui.shadowRoot.querySelector('#left os-settings-menu');
     assertTrue(!!floatingMenu);
@@ -123,7 +126,10 @@ suite('<os-settings-ui> menu', () => {
     assertTrue(floatingMenu.advancedOpened);
 
     // Collapse 'Advanced' in the menu.
-    drawerMenu.$.advancedButton.click();
+    const advancedButton =
+        drawerMenu.shadowRoot.querySelector('#advancedButton');
+    assertTrue(!!advancedButton);
+    advancedButton.click();
     flush();
 
     // Collapsing it in the menu should not collapse it in the main area.
@@ -132,7 +138,7 @@ suite('<os-settings-ui> menu', () => {
     assertFalse(floatingMenu.advancedOpened);
 
     // Expand both 'Advanced's again.
-    drawerMenu.$.advancedButton.click();
+    advancedButton.click();
     flush();
 
     // Collapse 'Advanced' in the main area.

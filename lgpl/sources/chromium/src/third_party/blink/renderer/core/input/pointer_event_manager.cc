@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/pointer_lock_controller.h"
+#include "third_party/blink/renderer/core/page/touch_adjustment.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar.h"
 #include "third_party/blink/renderer/core/timing/event_timing.h"
@@ -108,7 +109,7 @@ void PointerEventManager::Clear() {
   pending_pointer_capture_target_.clear();
   dispatching_pointer_id_ = 0;
   resize_scrollable_area_.Clear();
-  offset_from_resize_corner_ = LayoutSize();
+  offset_from_resize_corner_ = {};
 }
 
 void PointerEventManager::Trace(Visitor* visitor) const {
@@ -418,9 +419,9 @@ void PointerEventManager::AdjustPointerEvent(WebPointerEvent& pointer_event,
         (device_scale_factor / page_scale_factor);
   }
 
-  LayoutSize hit_rect_size = GetHitTestRectForAdjustment(
-      *frame_,
-      LayoutSize(LayoutUnit(adjustment_width), LayoutUnit(adjustment_height)));
+  PhysicalSize hit_rect_size = GetHitTestRectForAdjustment(
+      *frame_, PhysicalSize(LayoutUnit(adjustment_width),
+                            LayoutUnit(adjustment_height)));
 
   if (hit_rect_size.IsEmpty())
     return;
@@ -432,15 +433,17 @@ void PointerEventManager::AdjustPointerEvent(WebPointerEvent& pointer_event,
   // TODO(szager): Shouldn't this be PositionInScreen() ?
   PhysicalOffset hit_test_point =
       PhysicalOffset::FromPointFRound(pointer_event.PositionInWidget());
-  hit_test_point -= PhysicalOffset(hit_rect_size * 0.5f);
+  hit_test_point -= PhysicalOffset(LayoutUnit(hit_rect_size.width * 0.5f),
+                                   LayoutUnit(hit_rect_size.height * 0.5f));
   HitTestLocation location(PhysicalRect(hit_test_point, hit_rect_size));
   HitTestResult hit_test_result =
       root_frame.GetEventHandler().HitTestResultAtLocation(location, hit_type);
   gfx::Point adjusted_point;
 
   if (pointer_event.pointer_type == WebPointerProperties::PointerType::kTouch) {
-    bool adjusted = frame_->GetEventHandler().BestClickableNodeForHitTestResult(
-        location, hit_test_result, adjusted_point, adjusted_node);
+    bool adjusted = frame_->GetEventHandler().BestNodeForHitTestResult(
+        TouchAdjustmentCandidateType::kClickable, location, hit_test_result,
+        adjusted_point, adjusted_node);
 
     if (adjusted)
       pointer_event.SetPositionInWidget(adjusted_point.x(), adjusted_point.y());
@@ -453,9 +456,9 @@ void PointerEventManager::AdjustPointerEvent(WebPointerEvent& pointer_event,
                  WebPointerProperties::PointerType::kEraser) {
     // We don't cache the adjusted point for Stylus in EventHandler to avoid
     // taps being adjusted; this is intended only for stylus handwriting.
-    bool adjusted =
-        frame_->GetEventHandler().BestStylusWritableNodeForHitTestResult(
-            location, hit_test_result, adjusted_point, adjusted_node);
+    bool adjusted = frame_->GetEventHandler().BestNodeForHitTestResult(
+        TouchAdjustmentCandidateType::kStylusWritable, location,
+        hit_test_result, adjusted_point, adjusted_node);
 
     if (adjusted)
       pointer_event.SetPositionInWidget(adjusted_point.x(), adjusted_point.y());
@@ -800,7 +803,7 @@ bool PointerEventManager::HandleResizerDrag(
         frame_->GetPage()->GetChromeClient().SetTouchAction(frame_,
                                                             TouchAction::kNone);
         offset_from_resize_corner_ =
-            LayoutSize(resize_scrollable_area_->OffsetFromResizeCorner(p));
+            resize_scrollable_area_->OffsetFromResizeCorner(p);
         return true;
       }
       break;
@@ -819,7 +822,7 @@ bool PointerEventManager::HandleResizerDrag(
       if (resize_scrollable_area_ && resize_scrollable_area_->InResizeMode()) {
         resize_scrollable_area_->SetInResizeMode(false);
         resize_scrollable_area_.Clear();
-        offset_from_resize_corner_ = LayoutSize();
+        offset_from_resize_corner_ = {};
         return true;
       }
       break;

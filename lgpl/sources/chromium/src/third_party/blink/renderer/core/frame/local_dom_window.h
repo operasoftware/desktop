@@ -48,6 +48,8 @@
 #include "third_party/blink/renderer/core/frame/dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/use_counter_impl.h"
+#include "third_party/blink/renderer/core/frame/window_event_handlers.h"
+#include "third_party/blink/renderer/core/frame/window_or_worker_global_scope.h"
 #include "third_party/blink/renderer/core/html/closewatcher/close_watcher.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
@@ -106,6 +108,8 @@ enum PageTransitionEventPersistence {
 // please ping dcheng@chromium.org first. You probably don't want to do that.
 class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
                                          public ExecutionContext,
+                                         public WindowOrWorkerGlobalScope,
+                                         public WindowEventHandlers,
                                          public Supplementable<LocalDOMWindow> {
   USING_PRE_FINALIZER(LocalDOMWindow, Dispose);
 
@@ -133,7 +137,11 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
     return token_;
   }
 
-  LocalFrame* GetFrame() const { return To<LocalFrame>(DOMWindow::GetFrame()); }
+  LocalFrame* GetFrame() const {
+    // UnsafeTo<> is safe here because DOMWindow's frame can only change to
+    // nullptr, and it was constructed with a LocalFrame in the constructor.
+    return UnsafeTo<LocalFrame>(DOMWindow::GetFrame());
+  }
 
   ScriptController& GetScriptController() const { return *script_controller_; }
 
@@ -524,8 +532,9 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // given window, it cannot be taken away.
   void SetHasStorageAccess();
 
-  bool HadActivationlessPaymentRequest() const;
-  void SetHadActivationlessPaymentRequest();
+  void maximize(ExceptionState&);
+  void minimize(ExceptionState&);
+  void restore(ExceptionState&);
 
  protected:
   // EventTarget overrides.
@@ -547,11 +556,17 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   bool HasInsecureContextInAncestors() const override;
 
+  Document& GetDocumentForWindowEventHandler() const override {
+    return *document();
+  }
+
   void Dispose();
 
   void DispatchLoadEvent();
 
   void SetIsPictureInPictureWindow();
+
+  bool CanUseWindowingControls(ExceptionState& exception_state);
 
   // Return the viewport size including scrollbars.
   gfx::Size GetViewportSize() const;

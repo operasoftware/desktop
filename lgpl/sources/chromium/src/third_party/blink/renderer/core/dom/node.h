@@ -37,6 +37,7 @@
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
 #include "third_party/blink/renderer/core/scroll/scroll_customization.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/custom_spaces.h"
@@ -72,9 +73,11 @@ class LayoutObject;
 class MathMLQualifiedName;
 class MutationObserver;
 class MutationObserverRegistration;
+class NodeCloningData;
 class NodeList;
 class NodeListsNodeData;
 class NodeRareData;
+class Part;
 class QualifiedName;
 class RegisteredEventListener;
 class ScrollTimeline;
@@ -90,6 +93,7 @@ class V8ScrollStateCallback;
 class V8UnionNodeOrStringOrTrustedScript;
 class V8UnionStringOrTrustedScript;
 class WebPluginContainerImpl;
+
 struct PhysicalRect;
 
 const int kElementNamespaceTypeShift = 5;
@@ -141,8 +145,6 @@ enum class SlotChangeType {
   kSignalSlotChangeEvent,
   kSuppressSlotChangeEvent,
 };
-
-enum class CloneChildrenFlag { kSkip, kClone, kCloneWithShadows };
 
 // LinkHighlight determines the largest enclosing node with hand cursor set.
 enum class LinkHighlightCandidate {
@@ -248,26 +250,37 @@ class CORE_EXPORT Node : public EventTarget {
   // https://dom.spec.whatwg.org/#concept-closed-shadow-hidden
   bool IsClosedShadowHiddenFrom(const Node&) const;
 
-  void Prepend(
+  // ParentNode interface. These functions are only actually web-exposed on
+  // interfaces that include ParentNode in their idl.
+  void prepend(
       const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
       ExceptionState& exception_state);
-  void Append(
+  void append(
       const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
       ExceptionState& exception_state);
-  void Before(
+  void replaceChildren(
       const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
       ExceptionState& exception_state);
-  void After(
+
+  // ChildNode interface. These functions are only actually web-exposed on
+  // interfaces that include ChildNode in their idl.
+  void before(
       const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
       ExceptionState& exception_state);
-  void ReplaceWith(
+  void after(
       const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
       ExceptionState& exception_state);
-  void ReplaceChildren(
+  void replaceWith(
       const HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>>& nodes,
       ExceptionState& exception_state);
   void remove(ExceptionState&);
   void remove();
+
+  // NonDocumentTypeChildNode interface. These functions are only actually
+  // web-exposed on  interfaces that include NonDocumentTypeChildNode in their
+  // idl.
+  Element* previousElementSibling();
+  Element* nextElementSibling();
 
   Node* PseudoAwareNextSibling() const;
   Node* PseudoAwarePreviousSibling() const;
@@ -287,8 +300,20 @@ class CORE_EXPORT Node : public EventTarget {
 
   bool hasChildren() const { return firstChild(); }
   Node* cloneNode(bool deep, ExceptionState&) const;
+
   // https://dom.spec.whatwg.org/#concept-node-clone
-  virtual Node* Clone(Document&, CloneChildrenFlag) const = 0;
+  // The implementation differs a bit from the spec algorithm, notably in the
+  // order that nodes are appended to their eventual destination. The spec
+  // requires each Element's children to be cloned before they are appended to
+  // the Element, whereas the Chromium implementation first attaches a new
+  // clone to its parent, and then clones children. This avoids an O(log-n^2)
+  // set of calls to Node::InsertedInto().
+  virtual Node* Clone(
+      Document& factory,
+      NodeCloningData& data,
+      ContainerNode* append_to,
+      ExceptionState& append_exception_state = ASSERT_NO_EXCEPTION) const = 0;
+
   // This is not web-exposed. We should rename it or remove it.
   Node* cloneNode(bool deep) const;
   void normalize();
@@ -615,11 +640,6 @@ class CORE_EXPORT Node : public EventTarget {
 
   void SetIsLink(bool f);
 
-  bool HasEventTargetData() const { return GetFlag(kHasEventTargetDataFlag); }
-  void SetHasEventTargetData(bool flag) {
-    SetFlag(flag, kHasEventTargetDataFlag);
-  }
-
   virtual void SetFocused(bool flag, mojom::blink::FocusType);
   void SetHasFocusWithin(bool flag);
   virtual void SetDragged(bool flag);
@@ -774,13 +794,6 @@ class CORE_EXPORT Node : public EventTarget {
   inline const ComputedStyle& ComputedStyleRef() const;
   bool ShouldSkipMarkingStyleDirty() const;
 
-  const ComputedStyle* EnsureComputedStyle(
-      PseudoId pseudo_element_specifier = kPseudoIdNone,
-      const AtomicString& pseudo_argument = g_null_atom) {
-    return VirtualEnsureComputedStyle(pseudo_element_specifier,
-                                      pseudo_argument);
-  }
-
   // ---------------------------------------------------------------------------
   // Notification of document structure changes (see container_node.h for more
   // notification methods)
@@ -901,9 +914,6 @@ class CORE_EXPORT Node : public EventTarget {
   // https://dom.spec.whatwg.org/#eventtarget-activation-behavior
   virtual bool HasActivationBehavior() const;
 
-  EventTargetData* GetEventTargetData() override;
-  EventTargetData& EnsureEventTargetData() override;
-
   void GetRegisteredMutationObserversOfType(
       HeapHashMap<Member<MutationObserver>, MutationRecordDeliveryOptions>&,
       MutationType,
@@ -956,6 +966,15 @@ class CORE_EXPORT Node : public EventTarget {
   void RegisterScrollTimeline(ScrollTimeline*);
   void UnregisterScrollTimeline(ScrollTimeline*);
 
+  void AddDOMPart(Part& part) { EnsureRareData().AddDOMPart(part); }
+  void RemoveDOMPart(Part& part) { EnsureRareData().RemoveDOMPart(part); }
+  bool HasDOMParts() const {
+    return HasRareData() && RareData()->HasDOMParts();
+  }
+  PartsList GetDOMParts() const { return RareData()->GetDOMParts(); }
+  void UpdateForRemovedDOMParts(ContainerNode& insertion_point);
+  void UpdateForInsertedDOMParts(ContainerNode& insertion_point);
+
   // For the imperative slot distribution API.
   void SetManuallyAssignedSlot(HTMLSlotElement* slot);
   HTMLSlotElement* ManuallyAssignedSlot();
@@ -1001,9 +1020,9 @@ class CORE_EXPORT Node : public EventTarget {
 
  private:
   enum NodeFlags : uint32_t {
-    // Let the NodeTypeMask comes first, so the shit operation can
-    // be eliminated when get NodeType for the reason of performance.
-    // Node type flags. These never change once created.
+    // getNodeType() is called extensively. As it's called quite a bit its
+    // value is first so that a bit-shift is not needed to extract the value.
+    // Also note the node-type never changes once created.
     kNodeTypeMask = 0xf,
     kIsContainerFlag = 1 << 4,
     kElementNamespaceTypeMask = 0x3 << kElementNamespaceTypeShift,
@@ -1035,24 +1054,23 @@ class CORE_EXPORT Node : public EventTarget {
     kCustomElementStateMask = 0x7 << kNodeCustomElementShift,
 
     kHasNameOrIsEditingTextFlag = 1 << 22,
-    kHasEventTargetDataFlag = 1 << 23,
 
-    kNeedsReattachLayoutTree = 1 << 24,
-    kChildNeedsReattachLayoutTree = 1 << 25,
+    kNeedsReattachLayoutTree = 1 << 23,
+    kChildNeedsReattachLayoutTree = 1 << 24,
 
-    kHasDuplicateAttributes = 1 << 26,
+    kHasDuplicateAttributes = 1 << 25,
 
-    kForceReattachLayoutTree = 1 << 27,
+    kForceReattachLayoutTree = 1 << 26,
 
-    kHasDisplayLockContext = 1 << 28,
+    kHasDisplayLockContext = 1 << 27,
 
-    kSelfOrAncestorHasDirAutoAttribute = 1 << 29,
-    kCachedDirectionalityIsRtl = 1 << 30,
-    kNeedsInheritDirectionalityFromParent = 1u << 31,
+    kSelfOrAncestorHasDirAutoAttribute = 1 << 28,
+    kCachedDirectionalityIsRtl = 1 << 29,
+    kNeedsInheritDirectionalityFromParent = 1u << 30,
 
     kDefaultNodeFlags = kIsFinishedParsingChildrenFlag,
 
-    // 0 bits remaining.
+    // 1 bit remaining.
   };
 
   ALWAYS_INLINE bool GetFlag(NodeFlags mask) const {
@@ -1151,13 +1169,6 @@ class CORE_EXPORT Node : public EventTarget {
   inline const ComputedStyle* GetComputedStyleAssumingElement() const;
 
  private:
-  // Gets nodeName without caching AtomicStrings. Used by
-  // debugName. Compositor may call debugName from the "impl" thread
-  // during "commit". The main thread is stopped at that time, but
-  // it is not safe to cache AtomicStrings because those are
-  // per-thread.
-  virtual String DebugNodeName() const;
-
   Node* ToNode() final;
 
   bool IsUserActionElementActive() const;
@@ -1170,10 +1181,6 @@ class CORE_EXPORT Node : public EventTarget {
   void SetStyleChange(StyleChangeType change_type) {
     node_flags_ = (node_flags_ & ~kStyleChangeMask) | change_type;
   }
-
-  virtual const ComputedStyle* VirtualEnsureComputedStyle(
-      PseudoId = kPseudoIdNone,
-      const AtomicString& pseudo_argument = g_null_atom);
 
   // Used exclusively by |EnsureRareData|.
   NodeRareData& CreateRareData();

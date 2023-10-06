@@ -69,12 +69,12 @@ class MockHost(MockSystemHost):
                 'specifiers': ['Win10', 'Release']
             },
             'Fake Test Linux': {
-                'port_name': 'linux-trusty',
-                'specifiers': ['Trusty', 'Release']
+                'port_name': 'linux',
+                'specifiers': ['Linux', 'Release']
             },
             'Fake Test Linux (dbg)': {
-                'port_name': 'linux-trusty',
-                'specifiers': ['Trusty', 'Debug']
+                'port_name': 'linux',
+                'specifiers': ['Linux', 'Debug']
             },
             'Fake Test Mac11': {
                 'port_name': 'mac-mac11',
@@ -82,8 +82,8 @@ class MockHost(MockSystemHost):
                 'is_try_builder': True,
             },
             'fake_blink_try_linux': {
-                'port_name': 'linux-trusty',
-                'specifiers': ['Trusty', 'Release'],
+                'port_name': 'linux',
+                'specifiers': ['Linux', 'Release'],
                 'is_try_builder': True,
             },
             'fake_blink_try_win': {
@@ -99,19 +99,28 @@ class MockHost(MockSystemHost):
             },
             # For the try flag unit tests.
             'linux-rel': {
-                'port_name': 'linux-trusty',
-                'specifiers': ['Trusty', 'Release'],
+                'port_name': 'linux',
+                'specifiers': ['Linux', 'Release'],
                 'is_try_builder': True,
+                'steps': {
+                    'blink_web_tests (with patch)': {},
+                },
             },
             'win7-rel': {
                 'port_name': 'win-win7',
                 'specifiers': ['Win7', 'Release'],
                 'is_try_builder': True,
+                'steps': {
+                    'blink_web_tests (with patch)': {},
+                },
             },
             'mac-rel': {
                 'port_name': 'mac-mac12',
-                'specifiers': ['Trusty', 'Release'],
+                'specifiers': ['Linux', 'Release'],
                 'is_try_builder': True,
+                'steps': {
+                    'blink_web_tests (with patch)': {},
+                },
             },
         })
         self.results_fetcher = MockTestResultsFetcher.from_host(self)

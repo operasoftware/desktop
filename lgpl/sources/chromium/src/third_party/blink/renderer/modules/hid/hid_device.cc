@@ -453,7 +453,7 @@ void HIDDevice::Trace(Visitor* visitor) const {
   visitor->Trace(receiver_);
   visitor->Trace(device_requests_);
   visitor->Trace(collections_);
-  EventTargetWithInlineData::Trace(visitor);
+  EventTarget::Trace(visitor);
   ScriptWrappable::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
@@ -555,7 +555,7 @@ void HIDDevice::FinishReceiveFeatureReport(
 
 void HIDDevice::MarkRequestComplete(ScriptPromiseResolver* resolver) {
   auto find_result = device_requests_.find(resolver);
-  DCHECK_NE(device_requests_.end(), find_result);
+  CHECK_NE(device_requests_.end(), find_result);
   device_requests_.erase(find_result);
 }
 

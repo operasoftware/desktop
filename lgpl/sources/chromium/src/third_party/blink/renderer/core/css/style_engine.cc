@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/core/css/container_query_evaluator.h"
 #include "third_party/blink/renderer/core/css/counter_style_map.h"
 #include "third_party/blink/renderer/core/css/css_default_style_sheets.h"
+#include "third_party/blink/renderer/core/css/css_font_family_value.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/css_uri_value.h"
@@ -114,6 +115,7 @@
 #include "third_party/blink/renderer/platform/theme/web_theme_engine_helper.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace blink {
 
@@ -175,6 +177,27 @@ unsigned GetRuleSetFlags(const HeapHashSet<Member<RuleSet>> rule_sets) {
   return flags;
 }
 
+const Vector<AtomicString> ConvertFontFamilyToVector(const CSSValue* value) {
+  const CSSValueList* family_list = DynamicTo<CSSValueList>(value);
+  if (!family_list) {
+    return Vector<AtomicString>();
+  }
+  wtf_size_t length = family_list->length();
+  if (!length) {
+    return Vector<AtomicString>();
+  }
+  Vector<AtomicString> families(length);
+  for (wtf_size_t i = 0; i < length; i++) {
+    const CSSFontFamilyValue* family_value =
+        DynamicTo<CSSFontFamilyValue>(family_list->Item(i));
+    if (!family_value) {
+      return Vector<AtomicString>();
+    }
+    families[i] = family_value->Value();
+  }
+  return families;
+}
+
 }  // namespace
 
 StyleEngine::StyleEngine(Document& document)
@@ -215,6 +238,9 @@ StyleEngine::StyleEngine(Document& document)
       WebThemeEngineHelper::GetNativeThemeEngine()->GetForcedColors();
   UpdateForcedBackgroundColor();
   UpdateColorScheme();
+
+  // Mostly for the benefit of unit tests.
+  UpdateViewportSize();
 }
 
 StyleEngine::~StyleEngine() = default;
@@ -884,7 +910,6 @@ void StyleEngine::UpdateGenericFontFamilySettings() {
   if (resolver_) {
     resolver_->InvalidateMatchedPropertiesCache();
   }
-  FontCache::Get().InvalidateNGShapeCache();
   FontCache::Get().InvalidateShapeCache();
 }
 
@@ -2204,32 +2229,11 @@ void StyleEngine::EnsureUAStyleForElement(const Element& element) {
 void StyleEngine::EnsureUAStyleForPseudoElement(PseudoId pseudo_id) {
   DCHECK(global_rule_set_);
 
-  if (IsTransitionPseudoElement(pseudo_id)) {
-    EnsureUAStyleForTransitionPseudos();
-    return;
-  }
-
   if (CSSDefaultStyleSheets::Instance()
           .EnsureDefaultStyleSheetsForPseudoElement(pseudo_id)) {
     global_rule_set_->MarkDirty();
     UpdateActiveStyle();
   }
-}
-
-void StyleEngine::EnsureUAStyleForTransitionPseudos() {
-  if (ua_view_transition_style_) {
-    return;
-  }
-
-  // Note that we don't need to mark any state dirty for style invalidation
-  // here. This is done externally by the code which invalidates this style
-  // sheet.
-  auto* transition = ViewTransitionUtils::GetActiveTransition(GetDocument());
-  auto* style_sheet_contents = CSSDefaultStyleSheets::ParseUASheet(
-      transition ? transition->UAStyleSheet() : "");
-  ua_view_transition_style_ = MakeGarbageCollected<RuleSet>();
-  ua_view_transition_style_->AddRulesFromSheet(
-      style_sheet_contents, CSSDefaultStyleSheets::ScreenEval());
 }
 
 void StyleEngine::EnsureUAStyleForForcedColors() {
@@ -2244,12 +2248,14 @@ void StyleEngine::EnsureUAStyleForForcedColors() {
 }
 
 RuleSet* StyleEngine::DefaultViewTransitionStyle() const {
-  DCHECK(ua_view_transition_style_);
-  return ua_view_transition_style_.Get();
-}
+  auto* transition = ViewTransitionUtils::GetActiveTransition(GetDocument());
+  if (!transition) {
+    return nullptr;
+  }
 
-void StyleEngine::InvalidateUAViewTransitionStyle() {
-  ua_view_transition_style_ = nullptr;
+  auto* css_style_sheet = transition->UAStyleSheet();
+  return &css_style_sheet->Contents()->EnsureRuleSet(
+      CSSDefaultStyleSheets::ScreenEval());
 }
 
 bool StyleEngine::HasRulesForId(const AtomicString& id) const {
@@ -2918,10 +2924,10 @@ void StyleEngine::AddFontPaletteValuesRules(const RuleSet& rule_set) {
       font_palette_values_rules = rule_set.FontPaletteValuesRules();
   for (auto& rule : font_palette_values_rules) {
     // TODO(https://crbug.com/1170794): Handle cascade layer reordering here.
-    font_palette_values_rule_map_.Set(
-        std::make_pair(rule->GetName(),
-                       String(rule->GetFontFamilyAsString()).FoldCase()),
-        rule);
+    for (auto& family : ConvertFontFamilyToVector(rule->GetFontFamily())) {
+      font_palette_values_rule_map_.Set(
+          std::make_pair(rule->GetName(), String(family).FoldCase()), rule);
+    }
   }
 }
 
@@ -3033,42 +3039,40 @@ void StyleEngine::UpdateStyleForNonEligibleContainer(Element& container) {
   // This may be due to legacy layout fallback, inline box, table box, etc.
   // Also, if we could not predict that the LayoutObject would not be created,
   // like if the parent LayoutObject returns false for IsChildAllowed.
-  auto* cq_data = container.GetContainerQueryData();
+  ContainerQueryData* cq_data = container.GetContainerQueryData();
   if (!cq_data) {
     return;
   }
 
   StyleRecalcChange change;
-  if (ContainerQueryEvaluator* evaluator =
-          cq_data->GetContainerQueryEvaluator()) {
-    ContainerQueryEvaluator::Change query_change =
-        evaluator->SizeContainerChanged(GetDocument(), container,
-                                        PhysicalSize(), kPhysicalAxisNone);
-    switch (query_change) {
-      case ContainerQueryEvaluator::Change::kNone:
-        DCHECK(cq_data->SkippedStyleRecalc());
+  ContainerQueryEvaluator& evaluator =
+      container.EnsureContainerQueryEvaluator();
+  ContainerQueryEvaluator::Change query_change =
+      evaluator.SizeContainerChanged(PhysicalSize(), kPhysicalAxisNone);
+  switch (query_change) {
+    case ContainerQueryEvaluator::Change::kNone:
+      DCHECK(cq_data->SkippedStyleRecalc());
+      break;
+    case ContainerQueryEvaluator::Change::kNearestContainer:
+      if (!IsShadowHost(container)) {
+        change = change.ForceRecalcSizeContainer();
         break;
-      case ContainerQueryEvaluator::Change::kNearestContainer:
-        if (!IsShadowHost(container)) {
-          change = change.ForceRecalcSizeContainer();
-          break;
-        }
-        // Since the nearest container is found in shadow-including ancestors
-        // and not in flat tree ancestors, and style recalc traversal happens in
-        // flat tree order, we need to invalidate inside flat tree descendant
-        // containers if such containers are inside shadow trees.
-        //
-        // See also StyleRecalcChange::FlagsForChildren where we turn
-        // kRecalcContainer into kRecalcDescendantContainers when traversing
-        // past a shadow host.
-        [[fallthrough]];
-      case ContainerQueryEvaluator::Change::kDescendantContainers:
-        change = change.ForceRecalcDescendantSizeContainers();
-        break;
-    }
-    if (query_change != ContainerQueryEvaluator::Change::kNone) {
-      container.ComputedStyleRef().ClearCachedPseudoElementStyles();
-    }
+      }
+      // Since the nearest container is found in shadow-including ancestors
+      // and not in flat tree ancestors, and style recalc traversal happens in
+      // flat tree order, we need to invalidate inside flat tree descendant
+      // containers if such containers are inside shadow trees.
+      //
+      // See also StyleRecalcChange::FlagsForChildren where we turn
+      // kRecalcContainer into kRecalcDescendantContainers when traversing
+      // past a shadow host.
+      [[fallthrough]];
+    case ContainerQueryEvaluator::Change::kDescendantContainers:
+      change = change.ForceRecalcDescendantSizeContainers();
+      break;
+  }
+  if (query_change != ContainerQueryEvaluator::Change::kNone) {
+    container.ComputedStyleRef().ClearCachedPseudoElementStyles();
   }
 
   DecrementSkippedContainerRecalc();
@@ -3097,14 +3101,12 @@ void StyleEngine::UpdateStyleAndLayoutTreeForContainer(
 
   StyleRecalcChange change;
 
-  auto* cq_data = container.GetContainerQueryData();
-  DCHECK(cq_data);
-  auto* evaluator = cq_data->GetContainerQueryEvaluator();
-  DCHECK(evaluator);
-
   ContainerQueryEvaluator::Change query_change =
-      evaluator->SizeContainerChanged(GetDocument(), container, physical_size,
-                                      physical_axes);
+      container.EnsureContainerQueryEvaluator().SizeContainerChanged(
+          physical_size, physical_axes);
+
+  ContainerQueryData* cq_data = container.GetContainerQueryData();
+  CHECK(cq_data);
 
   switch (query_change) {
     case ContainerQueryEvaluator::Change::kNone:
@@ -3153,6 +3155,7 @@ void StyleEngine::UpdateStyleAndLayoutTreeForContainer(
   if (cq_data->SkippedStyleRecalc()) {
     DecrementSkippedContainerRecalc();
   }
+  UpdateViewportSize();
   RecalcStyleForContainer(container, change);
 
   if (container.NeedsReattachLayoutTree()) {
@@ -3333,6 +3336,7 @@ void StyleEngine::UpdateStyleAndLayoutTree() {
   UpdateViewportStyle();
 
   if (GetDocument().documentElement()) {
+    UpdateViewportSize();
     NthIndexCache nth_index_cache(GetDocument());
     if (NeedsStyleRecalc()) {
       TRACE_EVENT0("blink,blink_style", "Document::recalcStyle");
@@ -3878,7 +3882,6 @@ void StyleEngine::Trace(Visitor* visitor) const {
   visitor->Trace(text_tracks_);
   visitor->Trace(vtt_originating_element_);
   visitor->Trace(parent_for_detached_subtree_);
-  visitor->Trace(ua_view_transition_style_);
   visitor->Trace(style_image_cache_);
   visitor->Trace(fill_or_clip_path_uri_value_cache_);
   visitor->Trace(style_containment_scope_tree_);
@@ -3963,6 +3966,11 @@ const CSSValue* StyleEngine::GetCachedFillOrClipPathURIValue(
 
 void StyleEngine::BaseURLChanged() {
   fill_or_clip_path_uri_value_cache_.clear();
+}
+
+void StyleEngine::UpdateViewportSize() {
+  viewport_size_ =
+      CSSToLengthConversionData::ViewportSize(GetDocument().GetLayoutView());
 }
 
 }  // namespace blink

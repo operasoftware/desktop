@@ -49,6 +49,7 @@ class CORE_EXPORT InterpolableValue {
   virtual bool IsGridTrackList() const { return false; }
   virtual bool IsGridTrackRepeater() const { return false; }
   virtual bool IsGridTrackSize() const { return false; }
+  virtual bool IsFontPalette() const { return false; }
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   virtual bool IsShader() const { return false; }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)

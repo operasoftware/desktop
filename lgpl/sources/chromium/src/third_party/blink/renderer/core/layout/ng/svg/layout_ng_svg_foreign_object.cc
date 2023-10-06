@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space_builder.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/transformed_hit_test_location.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
@@ -51,11 +52,21 @@ gfx::RectF LayoutNGSVGForeignObject::ObjectBoundingBox() const {
 
 gfx::RectF LayoutNGSVGForeignObject::StrokeBoundingBox() const {
   NOT_DESTROYED();
+  return viewport_;
+}
+
+gfx::RectF LayoutNGSVGForeignObject::DecoratedBoundingBox() const {
+  NOT_DESTROYED();
   return VisualRectInLocalSVGCoordinates();
 }
 
 gfx::RectF LayoutNGSVGForeignObject::VisualRectInLocalSVGCoordinates() const {
   NOT_DESTROYED();
+  if (RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()) {
+    PhysicalOffset offset = PhysicalLocation();
+    PhysicalSize size = Size();
+    return gfx::RectF(offset.left, offset.top, size.width, size.height);
+  }
   return gfx::RectF(FrameRect());
 }
 
@@ -70,7 +81,7 @@ AffineTransform LayoutNGSVGForeignObject::LocalToSVGParentTransform() const {
   return transform;
 }
 
-LayoutPoint LayoutNGSVGForeignObject::Location() const {
+LayoutPoint LayoutNGSVGForeignObject::LocationInternal() const {
   NOT_DESTROYED();
   return overridden_location_;
 }
@@ -88,7 +99,7 @@ bool LayoutNGSVGForeignObject::CreatesNewFormattingContext() const {
   return true;
 }
 
-void LayoutNGSVGForeignObject::UpdateBlockLayout() {
+void LayoutNGSVGForeignObject::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
 
@@ -100,12 +111,9 @@ void LayoutNGSVGForeignObject::UpdateBlockLayout() {
   // TODO(fs): Remove this. AFAICS in all cases where descendants compute some
   // form of CTM, they stop at their nearest ancestor LayoutSVGRoot, and thus
   // will not care about (reach) this value.
-  if (needs_transform_update_) {
-    local_transform_ =
-        foreign->CalculateTransform(SVGElement::kIncludeMotionTransform);
-  }
+  UpdateTransformBeforeLayout();
 
-  LayoutRect old_frame_rect = FrameRect();
+  PhysicalRect old_frame_rect(PhysicalLocation(), Size());
 
   // Resolve the viewport in the local coordinate space - this does not include
   // zoom.
@@ -126,16 +134,10 @@ void LayoutNGSVGForeignObject::UpdateBlockLayout() {
                                          LayoutUnit(viewport_.height() * zoom))
                                 .ConvertToLogical(style.GetWritingMode());
 
-  if (!RuntimeEnabledFeatures::LayoutNewSVGForeignObjectEntryEnabled()) {
-    SetOverrideLogicalWidth(zoomed_size.inline_size);
-    SetOverrideLogicalHeight(zoomed_size.block_size);
-  }
-
   // Use the zoomed version of the viewport as the location, because we will
   // interpose a transform that "unzooms" the effective zoom to let the children
   // of the foreign object exist with their specified zoom.
-  gfx::PointF zoomed_location =
-      gfx::ScalePoint(viewport_.origin(), style.EffectiveZoom());
+  gfx::PointF zoomed_location = gfx::ScalePoint(viewport_.origin(), zoom);
 
   // Set box origin to the foreignObject x/y translation, so positioned objects
   // in XHTML content get correct positions. A regular LayoutBoxModelObject
@@ -144,20 +146,28 @@ void LayoutNGSVGForeignObject::UpdateBlockLayout() {
   // specifying them through CSS.
   overridden_location_ = LayoutPoint(zoomed_location);
 
-  if (RuntimeEnabledFeatures::LayoutNewSVGForeignObjectEntryEnabled()) {
-    NGConstraintSpaceBuilder builder(
-        style.GetWritingMode(), style.GetWritingDirection(),
-        /* is_new_fc */ true, /* adjust_inline_size_if_needed */ false);
-    builder.SetAvailableSize(zoomed_size);
-    builder.SetIsFixedInlineSize(true);
-    builder.SetIsFixedBlockSize(true);
-    NGBlockNode(this).Layout(builder.ToConstraintSpace());
-  } else {
-    UpdateNGBlockLayout();
+  NGConstraintSpaceBuilder builder(
+      style.GetWritingMode(), style.GetWritingDirection(),
+      /* is_new_fc */ true, /* adjust_inline_size_if_needed */ false);
+  builder.SetAvailableSize(zoomed_size);
+  builder.SetIsFixedInlineSize(true);
+  builder.SetIsFixedBlockSize(true);
+  const auto* result = NGBlockNode(this).Layout(builder.ToConstraintSpace());
+
+  if (RuntimeEnabledFeatures::LayoutNewStickyLogicEnabled()) {
+    // Any propagated sticky-descendants may have invalid sticky-constraints.
+    // Clear them now.
+    if (const auto* sticky_descendants =
+            result->PhysicalFragment().PropagatedStickyDescendants()) {
+      for (const auto& sticky_descendant : *sticky_descendants) {
+        sticky_descendant->SetStickyConstraints(nullptr);
+      }
+    }
   }
 
   DCHECK(!NeedsLayout() || ChildLayoutBlockedByDisplayLock());
-  const bool bounds_changed = old_frame_rect != FrameRect();
+  const bool bounds_changed =
+      old_frame_rect != PhysicalRect(PhysicalLocation(), Size());
 
   // Invalidate all resources of this client if our reference box changed.
   if (EverHadLayout() && bounds_changed)
@@ -205,7 +215,7 @@ bool LayoutNGSVGForeignObject::NodeAtPointFromSVG(
   HitTestLocation local_without_offset(*local_location, -PhysicalLocation());
   HitTestResult layer_result(result.GetHitTestRequest(), local_without_offset);
   bool retval = Layer()->HitTest(local_without_offset, layer_result,
-                                 PhysicalRect(PhysicalRect::InfiniteIntRect()));
+                                 PhysicalRect(InfiniteIntRect()));
 
   // Preserve the "point in inner node frame" from the original request,
   // since |layer_result| is a hit test rooted at the <foreignObject> element,

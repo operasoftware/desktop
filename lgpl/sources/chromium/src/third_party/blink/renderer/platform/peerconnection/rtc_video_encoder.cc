@@ -20,7 +20,6 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/system/sys_info.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/thread_annotations.h"
@@ -66,47 +65,6 @@
 #endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
 namespace {
-
-// Enabled-by-default: only used as a kill-switch.
-BASE_FEATURE(kForceSoftwareForLowResolutions,
-             "ForceSoftwareForLowResolutions",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
-#if BUILDFLAG(IS_CHROMEOS_ASH) && defined(ARCH_CPU_ARM_FAMILY)
-bool IsRK3399Board() {
-  const std::string board = base::SysInfo::GetLsbReleaseBoard();
-  const char* kRK3399Boards[] = {
-      "bob",
-      "kevin",
-      "rainier",
-      "scarlet",
-  };
-  for (const char* b : kRK3399Boards) {
-    if (board.find(b) == 0u) {  // if |board| starts with |b|.
-      return true;
-    }
-  }
-  return false;
-}
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) && defined(ARCH_CPU_ARM_FAMILY)
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-bool IsZeroCopyTabCaptureEnabled() {
-  // If you change this function, please change the code of the same function
-  // in
-  // https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc.
-#if defined(ARCH_CPU_ARM_FAMILY)
-  // The GL driver used on RK3399 has a problem to enable zero copy tab capture.
-  // See b/267966835.
-  // TODO(b/239503724): Remove this code when RK3399 reaches EOL.
-  static bool kIsRK3399Board = IsRK3399Board();
-  if (kIsRK3399Board) {
-    return false;
-  }
-#endif  // defined(ARCH_CPU_ARM_FAMILY)
-  return base::FeatureList::IsEnabled(blink::features::kZeroCopyTabCapture);
-}
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 bool IsNV12GpuMemoryBufferVideoFrame(const webrtc::VideoFrame& input_image) {
   rtc::scoped_refptr<webrtc::VideoFrameBuffer> video_frame_buffer =
@@ -330,18 +288,25 @@ struct CrossThreadCopier<SignaledValue> {
 
 namespace blink {
 
+namespace features {
+
+// When disabled, SW is forced at <360p. When enabled, SW is forced at <=360p.
+BASE_FEATURE(kForcingSoftwareIncludes360,
+             "ForcingSoftwareIncludes360",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+}  // namespace features
+
 namespace {
-media::VideoEncodeAccelerator::Config::InterLayerPredMode
-CopyFromWebRtcInterLayerPredMode(
+media::SVCInterLayerPredMode CopyFromWebRtcInterLayerPredMode(
     const webrtc::InterLayerPredMode inter_layer_pred) {
   switch (inter_layer_pred) {
     case webrtc::InterLayerPredMode::kOff:
-      return media::VideoEncodeAccelerator::Config::InterLayerPredMode::kOff;
+      return media::SVCInterLayerPredMode::kOff;
     case webrtc::InterLayerPredMode::kOn:
-      return media::VideoEncodeAccelerator::Config::InterLayerPredMode::kOn;
+      return media::SVCInterLayerPredMode::kOn;
     case webrtc::InterLayerPredMode::kOnKeyPic:
-      return media::VideoEncodeAccelerator::Config::InterLayerPredMode::
-          kOnKeyPic;
+      return media::SVCInterLayerPredMode::kOnKeyPic;
   }
 }
 
@@ -351,8 +316,7 @@ bool CreateSpatialLayersConfig(
     const webrtc::VideoCodec& codec_settings,
     std::vector<media::VideoEncodeAccelerator::Config::SpatialLayer>*
         spatial_layers,
-    media::VideoEncodeAccelerator::Config::InterLayerPredMode*
-        inter_layer_pred) {
+    media::SVCInterLayerPredMode* inter_layer_pred) {
   absl::optional<webrtc::ScalabilityMode> scalability_mode =
       codec_settings.GetScalabilityMode();
 
@@ -367,6 +331,7 @@ bool CreateSpatialLayersConfig(
   // We fill SpatialLayer only in temporal layer or spatial layer encoding.
   switch (codec_settings.codecType) {
     case webrtc::kVideoCodecH264:
+#if !BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
       if (scalability_mode.has_value() &&
           *scalability_mode != webrtc::ScalabilityMode::kL1T1) {
         DVLOG(1)
@@ -377,6 +342,7 @@ bool CreateSpatialLayersConfig(
         return true;
       }
       break;
+#endif  // !BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
     case webrtc::kVideoCodecVP8: {
       int number_of_temporal_layers = 1;
       if (scalability_mode.has_value()) {
@@ -396,7 +362,8 @@ bool CreateSpatialLayersConfig(
         }
       }
       if (number_of_temporal_layers > 1) {
-        if (codec_settings.mode == webrtc::VideoCodecMode::kScreensharing) {
+        if (codec_settings.codecType == webrtc::kVideoCodecVP8 &&
+            codec_settings.mode == webrtc::VideoCodecMode::kScreensharing) {
           // This is a VP8 stream with screensharing using temporal layers for
           // temporal scalability. Since this implementation does not yet
           // implement temporal layers, fall back to software codec, if cfm and
@@ -547,7 +514,7 @@ bool IsZeroCopyEnabled(webrtc::VideoContentType content_type) {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     // The zero-copy capture is available for all sources in ChromeOS
     // Ash-chrome.
-    return IsZeroCopyTabCaptureEnabled();
+    return base::FeatureList::IsEnabled(blink::features::kZeroCopyTabCapture);
 #else
     // Currently, zero copy capture screenshare is available only for tabs.
     // Since it is impossible to determine the content source, tab, window or
@@ -888,7 +855,7 @@ void RTCVideoEncoder::Impl::NotifyEncoderInfoChange(
 void RTCVideoEncoder::Impl::Enqueue(FrameChunk frame_chunk,
                                     SignaledValue encode_event) {
   TRACE_EVENT1("webrtc", "RTCVideoEncoder::Impl::Enqueue", "timestamp",
-               frame_chunk.timestamp);
+               frame_chunk.timestamp_us);
   DVLOG(3) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
@@ -1096,11 +1063,13 @@ void RTCVideoEncoder::Impl::RequireBitstreamBuffers(
 void RTCVideoEncoder::Impl::BitstreamBufferReady(
     int32_t bitstream_buffer_id,
     const media::BitstreamBufferMetadata& metadata) {
-  TRACE_EVENT0("webrtc", "RTCVideoEncoder::Impl::BitstreamBufferReady");
+  TRACE_EVENT2("webrtc", "RTCVideoEncoder::Impl::BitstreamBufferReady",
+               "timestamp", metadata.timestamp.InMicroseconds(),
+               "bitstream_buffer_id", bitstream_buffer_id);
   DVLOG(3) << __func__ << " bitstream_buffer_id=" << bitstream_buffer_id
            << ", payload_size=" << metadata.payload_size_bytes
            << ", key_frame=" << metadata.key_frame
-           << ", timestamp ms=" << metadata.timestamp.InMilliseconds();
+           << ", timestamp ms=" << metadata.timestamp.InMicroseconds();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (bitstream_buffer_id < 0 ||
@@ -1353,7 +1322,7 @@ void RTCVideoEncoder::Impl::EncodeOneFrame(FrameChunk frame_chunk) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!input_buffers_free_.empty());
   TRACE_EVENT1("webrtc", "RTCVideoEncoder::Impl::EncodeOneFrame", "timestamp",
-               frame_chunk.timestamp);
+               frame_chunk.timestamp_us);
 
   if (!video_encoder_) {
     async_encode_event_.SetAndReset(WEBRTC_VIDEO_CODEC_ERROR);
@@ -1523,7 +1492,7 @@ void RTCVideoEncoder::Impl::EncodeOneFrameWithNativeInput(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(input_buffers_.empty() && input_buffers_free_.empty());
   TRACE_EVENT1("webrtc", "RTCVideoEncoder::Impl::EncodeOneFrameWithNativeInput",
-               "timestamp", frame_chunk.timestamp);
+               "timestamp", frame_chunk.timestamp_us);
 
   if (!video_encoder_) {
     async_encode_event_.SetAndReset(WEBRTC_VIDEO_CODEC_ERROR);
@@ -1729,20 +1698,42 @@ int32_t RTCVideoEncoder::InitEncode(
     Release();
   }
 
+#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
+  // Use the presence of gpu::ContextCapabilities as a proxy for determining
+  // whether we're dealing with a HW-accelerated encoder. The capabilities are
+  // always null in the case of external OpenH264, and they are required to be
+  // non-null for the regular GpuVideoAcceleratorFactories implementation to
+  // provide a VEA.
+  const bool is_hardware_accelerated =
+      codec_settings->codecType != webrtc::kVideoCodecH264 ||
+      gpu_factories_->ContextCapabilities() != nullptr;
+#else
+  const bool is_hardware_accelerated = true;
+#endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
+
   // Several HW encoders are known to yield worse quality compared to SW
   // encoders for smaller resolutions such as 180p. (270p should also be a
   // problem but some HW encoders already fallback for resolutions not divisible
   // by 4.) At 360p, manual testing suggests HW and SW are roughly on par in
   // terms of quality.
-  if (base::FeatureList::IsEnabled(kForceSoftwareForLowResolutions) &&
-      codec_settings->height < 360) {
+  //
+  // Android is excluded from this logic because there are situations where a
+  // codec like H264 is available in HW but not SW in which case SW fallback
+  // would result in a change of codec, see https://crbug.com/1469318.
+#if !BUILDFLAG(IS_ANDROID)
+  uint16_t force_sw_height = 359;
+  if (base::FeatureList::IsEnabled(features::kForcingSoftwareIncludes360)) {
+    force_sw_height = 360;
+  }
+  if (is_hardware_accelerated && codec_settings->height <= force_sw_height) {
     LOG(WARNING)
         << "Fallback to SW due to low resolution being less than 360p ("
         << codec_settings->width << "x" << codec_settings->height << ")";
     return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
   }
+#endif
 
-  if (profile_ >= media::H264PROFILE_MIN &&
+  if (is_hardware_accelerated && profile_ >= media::H264PROFILE_MIN &&
       profile_ <= media::H264PROFILE_MAX &&
       (codec_settings->width % 2 != 0 || codec_settings->height % 2 != 0)) {
     DLOG(ERROR)
@@ -1764,8 +1755,7 @@ int32_t RTCVideoEncoder::InitEncode(
 
   std::vector<media::VideoEncodeAccelerator::Config::SpatialLayer>
       spatial_layers;
-  auto inter_layer_pred =
-      media::VideoEncodeAccelerator::Config::InterLayerPredMode::kOff;
+  auto inter_layer_pred = media::SVCInterLayerPredMode::kOff;
   if (!CreateSpatialLayersConfig(*codec_settings, &spatial_layers,
                                  &inter_layer_pred)) {
     return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
@@ -1859,7 +1849,7 @@ int32_t RTCVideoEncoder::Encode(
     const std::vector<webrtc::VideoFrameType>* frame_types) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(webrtc_sequence_checker_);
   TRACE_EVENT1("webrtc", "RTCVideoEncoder::Encode", "timestamp",
-               input_image.timestamp());
+               input_image.timestamp_us());
   DVLOG(3) << __func__;
   if (!impl_) {
     DVLOG(3) << "Encoder is not initialized";

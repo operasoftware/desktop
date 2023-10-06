@@ -432,6 +432,32 @@ TEST_F(RTCVideoEncoderAdapterTest, SetRatesUninitialized) {
   adapter().SetRates({new_bitrate, new_framerate});
 }
 
+TEST_F(RTCVideoEncoderAdapterTest, SetRatesFailure) {
+  webrtc::VideoCodec codec;
+  codec.width = kFrameSize1.width();
+  codec.height = kFrameSize1.height();
+  codec.maxFramerate = 60;
+  codec.startBitrate = 9000;
+
+  ASSERT_EQ(adapter().InitEncode(&codec, kVideoEncoderSettings),
+            WEBRTC_VIDEO_CODEC_OK);
+  std::vector<webrtc::VideoFrameType> frame_types = {
+      webrtc::VideoFrameType::kVideoFrameKey};
+  ASSERT_EQ(adapter().Encode(CreateTestFrame(kFrameSize1, {}), &frame_types),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  webrtc::VideoBitrateAllocation new_bitrate;
+  new_bitrate.SetBitrate(0, 0, 18000);
+  constexpr auto new_framerate = 30;
+  test_encoder().set_status(
+      media::EncoderStatus::Codes::kEncoderInitializationError);
+  adapter().SetRates({new_bitrate, new_framerate});
+
+  // The encoder should reject encodes following a failure to set the rates.
+  ASSERT_EQ(adapter().Encode(CreateTestFrame(kFrameSize1, {}), &frame_types),
+            WEBRTC_VIDEO_CODEC_UNINITIALIZED);
+}
+
 TEST_F(RTCVideoEncoderAdapterTest, ReleaseUninitialized) {
   // Since we didn't initialize the encoder, Release() should do
   // nothing (if it does, TestEncoder will fail assertions).
@@ -456,8 +482,7 @@ TEST_F(RTCVideoEncoderAdapterTest, ReleaseAfterFailedReInit) {
             WEBRTC_VIDEO_CODEC_UNINITIALIZED);
 
   // Since we failed to re-initialize the encoder, Release() should do
-  // nothing (if it does, TestEncoder will fail assertions).
-  EXPECT_EQ(adapter().Release(), WEBRTC_VIDEO_CODEC_OK);
+  // nothing (verified in TearDown()).
 }
 
 }  // namespace blink

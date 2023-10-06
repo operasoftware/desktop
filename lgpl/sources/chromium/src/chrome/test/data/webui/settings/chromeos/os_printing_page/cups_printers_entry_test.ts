@@ -4,12 +4,14 @@
 
 import 'chrome://os-settings/lazy_load.js';
 
-import {PrinterListEntry, PrinterStatusReason, PrinterType, SettingsCupsPrintersEntryElement} from 'chrome://os-settings/lazy_load.js';
+import {PrinterListEntry, PrinterSettingsUserAction, PrinterStatusReason, PrinterType, SettingsCupsPrintersEntryElement} from 'chrome://os-settings/lazy_load.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {IronIconElement} from 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertFalse, assertNull, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {isVisible} from 'chrome://webui-test/test_util.js';
+
+import {FakeMetricsPrivate} from '../fake_metrics_private.js';
 
 function createPrinterEntry(printerType: PrinterType): PrinterListEntry {
   return {
@@ -41,16 +43,23 @@ suite('<settings-cups-printers-entry>', () => {
   let printerEntryTestElement: SettingsCupsPrintersEntryElement;
 
   setup(() => {
-    printerEntryTestElement =
-        document.createElement('settings-cups-printers-entry');
-    assertTrue(!!printerEntryTestElement);
-    printerEntryTestElement.printerStatusReasonCache = new Map();
-    document.body.appendChild(printerEntryTestElement);
+    initializePrinterEntryTestElement();
   });
 
   teardown(() => {
     printerEntryTestElement.remove();
   });
+
+  function initializePrinterEntryTestElement() {
+    if (printerEntryTestElement) {
+      printerEntryTestElement.remove();
+    }
+    printerEntryTestElement =
+        document.createElement('settings-cups-printers-entry');
+    assertTrue(!!printerEntryTestElement);
+    printerEntryTestElement.printerStatusReasonCache = new Map();
+    document.body.appendChild(printerEntryTestElement);
+  }
 
   test('initializePrinterEntry', () => {
     const expectedPrinterName = 'Test name';
@@ -119,6 +128,8 @@ suite('<settings-cups-printers-entry>', () => {
   // Verify the correct printer status icon is shown based on the printer's
   // status reason.
   test('savedPrinterCorrectPrinterStatusIcon', () => {
+    const jelly_enabled = loadTimeData.getValue('isJellyEnabled');
+    initializePrinterEntryTestElement();
     const printerStatusReasonCache = new Map();
     printerStatusReasonCache.set('id1', PrinterStatusReason.NO_ERROR);
     printerStatusReasonCache.set('id2', PrinterStatusReason.OUT_OF_PAPER);
@@ -139,31 +150,56 @@ suite('<settings-cups-printers-entry>', () => {
     assertTrue(!!printerSubtext);
 
     // Start at the unknown state.
-    assertEquals('os-settings:printer-status-grey', printerStatusIcon.icon);
+    if (jelly_enabled) {
+      assertEquals(
+          'os-settings:printer-status-illo-grey', printerStatusIcon.icon);
+    } else {
+      assertEquals('os-settings:printer-status-grey', printerStatusIcon.icon);
+    }
     assertEquals('', printerSubtext.textContent?.trim());
 
     // Set to an low severity error status reason.
     printerEntryTestElement.set('printerEntry.printerInfo.printerId', 'id2');
-    assertEquals('os-settings:printer-status-orange', printerStatusIcon.icon);
+    if (jelly_enabled) {
+      assertEquals(
+          'os-settings:printer-status-illo-orange', printerStatusIcon.icon);
+    } else {
+      assertEquals('os-settings:printer-status-orange', printerStatusIcon.icon);
+    }
     assertEquals(
         loadTimeData.getString('printerStatusOutOfPaper'),
         printerSubtext.textContent!.trim());
 
     // Set to a good status reason.
     printerEntryTestElement.set('printerEntry.printerInfo.printerId', 'id1');
-    assertEquals('os-settings:printer-status-green', printerStatusIcon.icon);
+    if (jelly_enabled) {
+      assertEquals(
+          'os-settings:printer-status-illo-green', printerStatusIcon.icon);
+    } else {
+      assertEquals('os-settings:printer-status-green', printerStatusIcon.icon);
+    }
     assertEquals('', printerSubtext.textContent?.trim());
 
     // Set to a high severity error status reason.
     printerEntryTestElement.set('printerEntry.printerInfo.printerId', 'id3');
-    assertEquals('os-settings:printer-status-red', printerStatusIcon.icon);
+    if (jelly_enabled) {
+      assertEquals(
+          'os-settings:printer-status-illo-red', printerStatusIcon.icon);
+    } else {
+      assertEquals('os-settings:printer-status-red', printerStatusIcon.icon);
+    }
     assertEquals(
         loadTimeData.getString('printerStatusPrinterUnreachable'),
         printerSubtext.textContent!.trim());
 
     // Set to unknown status reason.
     printerEntryTestElement.set('printerEntry.printerInfo.printerId', 'id4');
-    assertEquals('os-settings:printer-status-green', printerStatusIcon.icon);
+    if (jelly_enabled) {
+      assertEquals(
+          'os-settings:printer-status-illo-green', printerStatusIcon.icon);
+    } else {
+      assertEquals('os-settings:printer-status-green', printerStatusIcon.icon);
+    }
     assertEquals('', printerSubtext.textContent?.trim());
   });
 
@@ -188,5 +224,97 @@ suite('<settings-cups-printers-entry>', () => {
         createPrinterEntry(PrinterType.SAVED);
     assertTrue(isVisible(printerEntryTestElement.shadowRoot!.querySelector(
         '#printerStatusIcon')));
+  });
+
+  // Verify clicking the setup or save button is recorded to metrics.
+  test('recordUserActionMetric', () => {
+    const fakeMetricsPrivate = new FakeMetricsPrivate();
+    chrome.metricsPrivate =
+        fakeMetricsPrivate as unknown as typeof chrome.metricsPrivate;
+
+    // Enable the save printer buttons.
+    printerEntryTestElement.savingPrinter = false;
+    printerEntryTestElement.userPrintersAllowed = true;
+
+    // Verify saving an automatic printer is recorded.
+    printerEntryTestElement.printerEntry =
+        createPrinterEntry(PrinterType.AUTOMATIC);
+    flush();
+    printerEntryTestElement.shadowRoot!
+        .querySelector<HTMLElement>('#automaticPrinterButton')!.click();
+    assertEquals(
+        1,
+        fakeMetricsPrivate.countMetricValue(
+            'Printing.CUPS.SettingsUserAction',
+            PrinterSettingsUserAction.SAVE_PRINTER));
+
+    // Verify saving a discovered printer is recorded.
+    printerEntryTestElement.printerEntry =
+        createPrinterEntry(PrinterType.DISCOVERED);
+    flush();
+    printerEntryTestElement.shadowRoot!
+        .querySelector<HTMLElement>('#setupPrinterButton')!.click();
+    assertEquals(
+        2,
+        fakeMetricsPrivate.countMetricValue(
+            'Printing.CUPS.SettingsUserAction',
+            PrinterSettingsUserAction.SAVE_PRINTER));
+  });
+
+  // Verify the correct ARIA label is computed based on the entry attributes.
+  test('entryAriaLabel', () => {
+    initializePrinterEntryTestElement();
+
+    const printerStatusReasonCache = new Map();
+    printerStatusReasonCache.set('id1', PrinterStatusReason.OUT_OF_INK);
+    printerEntryTestElement.printerStatusReasonCache = printerStatusReasonCache;
+    printerEntryTestElement.printerEntry =
+        createPrinterEntry(PrinterType.SAVED);
+
+    const printerName = 'Test name';
+    const index = 0;
+    const numPrinters = 3;
+    printerEntryTestElement.focusRowIndex = index;
+    printerEntryTestElement.numPrinters = numPrinters;
+    printerEntryTestElement.set('printerEntry.printerInfo.printerId', 'id1');
+
+    flush();
+    assertEquals(
+        loadTimeData.getStringF(
+            'printerEntryAriaLabel', printerName, 'Out of ink', index + 1,
+            numPrinters),
+        printerEntryTestElement.shadowRoot!
+            .querySelector<HTMLElement>('#entry')!.ariaLabel!.trim());
+  });
+
+  // Verify the correct button label is shown for discovered printers when the
+  // "print-preview-discovered-printers" flag is disabled.
+  test('discoveredPrintersButtonLabel_flagOff', () => {
+    printerEntryTestElement.printerEntry =
+        createPrinterEntry(PrinterType.DISCOVERED);
+    flush();
+    assertEquals(
+        loadTimeData.getString('setupPrinter'),
+        printerEntryTestElement.shadowRoot!
+            .querySelector<HTMLElement>(
+                '#setupPrinterButton')!.textContent!.trim());
+  });
+
+  // Verify the correct button label is shown for discovered printers when the
+  // "print-preview-discovered-printers" flag is enabled.
+  test('discoveredPrintersButtonLabel_flagOn', () => {
+    loadTimeData.overrideValues({
+      isPrintPreviewDiscoveredPrintersEnabled: true,
+    });
+    initializePrinterEntryTestElement();
+
+    printerEntryTestElement.printerEntry =
+        createPrinterEntry(PrinterType.DISCOVERED);
+    flush();
+    assertEquals(
+        loadTimeData.getString('savePrinter'),
+        printerEntryTestElement.shadowRoot!
+            .querySelector<HTMLElement>(
+                '#setupPrinterButton')!.textContent!.trim());
   });
 });

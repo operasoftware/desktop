@@ -67,7 +67,7 @@ def backward_compatible_api_func(cg_context):
     if name:
         pass
     elif cg_context.constructor:
-        if cg_context.is_named_constructor:
+        if cg_context.is_legacy_factory_function:
             name = "CreateForJSConstructor"
         else:
             name = "Create"
@@ -159,14 +159,14 @@ def callback_function_name(cg_context,
     elif cg_context.constant:
         kind = "Constant"
     elif cg_context.constructor_group:
-        if cg_context.is_named_constructor:
-            kind = "NamedConstructor"
+        if cg_context.is_legacy_factory_function:
+            kind = "LegacyFactoryFunction"
         else:
             property_name = ""
             kind = "Constructor"
     elif cg_context.exposed_construct:
-        if cg_context.is_named_constructor:
-            kind = "NamedConstructorProperty"
+        if cg_context.is_legacy_factory_function:
+            kind = "LegacyFactoryFunctionProperty"
         elif cg_context.legacy_window_alias:
             kind = "LegacyWindowAlias"
         else:
@@ -437,7 +437,7 @@ def bind_callback_local_vars(code_node, cg_context):
                 CodeGenAccumulator.require_include_headers([
                     "third_party/blink/renderer/platform/bindings/no_alloc_direct_call_exception_state.h"
                 ]))
-        if cg_context.is_named_constructor:
+        if cg_context.is_legacy_factory_function:
             init_args.append("\"{}\"".format(cg_context.property_.identifier))
         else:
             init_args.append("${class_like_name}")
@@ -470,8 +470,11 @@ def bind_callback_local_vars(code_node, cg_context):
             text = ("DOMWindow* ${blink_receiver} = "
                     "${class_name}::ToWrappableUnsafe(${v8_receiver});")
         else:
-            text = ("LocalDOMWindow* ${blink_receiver} = To<LocalDOMWindow>("
-                    "${class_name}::ToWrappableUnsafe(${v8_receiver}));")
+            # ToWrappableUnsafe will always return non-null, so we can use
+            # UnsafeTo via a reference to avoid the nullptr check as well.
+            text = (
+                "LocalDOMWindow* ${blink_receiver} = &UnsafeTo<LocalDOMWindow>("
+                "*${class_name}::ToWrappableUnsafe(${v8_receiver}));")
     else:
         pattern = ("{_1}* ${blink_receiver} = "
                    "${class_name}::ToWrappableUnsafe(${v8_receiver});")
@@ -873,7 +876,8 @@ def _make_bindings_logging_id(cg_context):
         logging_id = "{}.{}".format(logging_id, "get")
     elif cg_context.attribute_set:
         logging_id = "{}.{}".format(logging_id, "set")
-    elif cg_context.constructor_group and not cg_context.is_named_constructor:
+    elif (cg_context.constructor_group
+          and not cg_context.is_legacy_factory_function):
         logging_id = "{}.{}".format(cg_context.class_like.identifier,
                                     "constructor")
     return logging_id
@@ -942,7 +946,7 @@ def make_check_constructor_call(cg_context):
                    "ExceptionMessages::ConstructorCalledAsFunction());\n"
                    "return;")),
     ])
-    if not cg_context.is_named_constructor:
+    if not cg_context.is_legacy_factory_function:
         node.append(
             CxxLikelyIfNode(
                 cond=("ConstructorMode::Current(${isolate}) == "
@@ -954,6 +958,42 @@ def make_check_constructor_call(cg_context):
             "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
         ]))
     return node
+
+
+def make_check_coop_restrict_properties_access(cg_context):
+    assert isinstance(cg_context, CodeGenContext)
+
+    T = TextNode
+
+    if cg_context.class_like.identifier != "Window":
+        return None
+
+    ext_attrs = cg_context.member_like.extended_attributes
+    if "CrossOrigin" not in ext_attrs:
+        return None
+
+    # COOP: restrict-properties never restricts postMessage() and closed
+    # accesses, which should still be possible across browsing context groups.
+    if cg_context.property_.identifier in ("postMessage", "closed"):
+        return None
+
+    values = ext_attrs.values_of("CrossOrigin")
+    if cg_context.attribute_get and not (not values or "Getter" in values):
+        return None
+    elif cg_context.attribute_set and not ("Setter" in values):
+        return None
+
+    return CxxUnlikelyIfNode(
+        cond=("UNLIKELY(${blink_receiver}->"
+              "IsAccessBlockedByCoopRestrictProperties(${isolate}))"),
+        body=[
+            T("""\
+${exception_state}.ThrowSecurityError(
+"Cross-Origin-Opener-Policy: 'restrict-properties' blocked the access.",
+"Cross-Origin-Opener-Policy: 'restrict-properties' blocked the access.");\
+"""),
+            T("return;"),
+        ])
 
 
 def make_check_receiver(cg_context):
@@ -1673,13 +1713,6 @@ def make_v8_set_return_value(cg_context):
         return T("bindings::V8SetReturnValue(${info}, ${return_value}, "
                  "${isolate}, ${blink_receiver});")
 
-    if return_type.is_typedef and return_type.identifier == "SyncIteratorType":
-        # Sync iterator objects (default iterator objects, map iterator objects,
-        # and set iterator objects) are implemented as ScriptWrappable
-        # instances.
-        return T("bindings::V8SetReturnValue(${info}, ${return_value}, "
-                 "${blink_receiver});")
-
     # [CheckSecurity=ReturnValue]
     #
     # The returned object must be wrapped in its own realm instead of the
@@ -1689,26 +1722,26 @@ def make_v8_set_return_value(cg_context):
     # and 'getSVGDocument' operation of HTML{IFrame,Frame,Object,Embed}Element
     # interfaces, and Window.frameElement attribute, so far.
     #
-    # All the interfaces above except for Window support 'contentWindow'
-    # attribute and that's the global object of the creation context of the
-    # returned V8 wrapper.  Window.frameElement is implemented with [Custom]
-    # for now and there is no need to support it.
-    #
     # Note that the global object has its own context and there is no need to
     # pass the creation context to ToV8.
     if (cg_context.member_like.extended_attributes.value_of("CheckSecurity") ==
             "ReturnValue"):
-        condition = F(
-            "!ToV8Traits<{}>::ToV8(ToScriptState(To<LocalFrame>("
-            "${blink_receiver}->contentWindow()->GetFrame()), "
-            "${script_state}->World()), ${return_value})"
-            ".ToLocal(&v8_value)", native_value_tag(return_type))
         node = CxxBlockNode([
             T("// [CheckSecurity=ReturnValue]"),
-            T("DCHECK(IsA<LocalFrame>("
-              "${blink_receiver}->contentWindow()->GetFrame()));"),
+            F(
+                "Frame* blink_frame = {};",
+                "${blink_receiver}->GetFrame()->Parent()"
+                if cg_context.member_like.identifier == "frameElement" else
+                "${blink_receiver}->contentWindow()->GetFrame()"),
+            T("DCHECK(IsA<LocalFrame>(blink_frame));"),
             T("v8::Local<v8::Value> v8_value;"),
-            CxxUnlikelyIfNode(cond=condition, body=T("return;")),
+            CxxUnlikelyIfNode(cond=F(
+                "!ToV8Traits<{}>::ToV8("
+                "ToScriptState(To<LocalFrame>(blink_frame), "
+                "${script_state}->World()),"
+                "${return_value}).ToLocal(&v8_value)",
+                native_value_tag(return_type)),
+                              body=T("return;")),
             T("bindings::V8SetReturnValue(${info}, v8_value);"),
         ])
         node.accumulate(
@@ -1753,9 +1786,10 @@ def make_v8_set_return_value(cg_context):
 
     if return_type_body.is_interface:
         args = ["${info}", "${return_value}"]
-        if return_type_body.identifier == "Window":
+        if (return_type_body.identifier == "Window"
+                or return_type_body.identifier == "Location"):
             args.append("${blink_receiver}")
-            args.append("bindings::V8ReturnValue::kMaybeCrossOriginWindow")
+            args.append("bindings::V8ReturnValue::kMaybeCrossOrigin")
         elif cg_context.constructor or cg_context.member_like.is_static:
             args.append("${creation_context}")
         elif cg_context.for_world == cg_context.MAIN_WORLD:
@@ -1769,9 +1803,18 @@ def make_v8_set_return_value(cg_context):
                  "(${info}, ${return_value}->GetExoticObject(), "
                  "${blink_receiver});")
 
+    if return_type_body.is_sync_iterator:
+        # Sync iterator objects (default iterator objects, map iterator
+        # objects, and set iterator objects) are implemented as ScriptWrappable
+        # instances.
+        return T("bindings::V8SetReturnValue(${info}, ${return_value}, "
+                 "${blink_receiver});")
+
     if return_type.is_promise:
-        return T("bindings::V8SetReturnValue"
-                 "(${info}, ${return_value}.V8Value());")
+        return T("bindings::V8SetReturnValue(${info}, ${return_value});")
+
+    if return_type.is_any or return_type_body.is_object:
+        return T("bindings::V8SetReturnValue(${info}, ${return_value});")
 
     return T("bindings::V8SetReturnValue(${info}, ${v8_return_value});")
 
@@ -1845,6 +1888,8 @@ def make_attribute_get_callback_def(cg_context, function_name):
         make_report_high_entropy(cg_context),
         make_report_measure_as(cg_context),
         make_log_activity(cg_context),
+        EmptyNode(),
+        make_check_coop_restrict_properties_access(cg_context),
         EmptyNode(),
     ])
 
@@ -1967,7 +2012,7 @@ EventListener* event_handler = JSEventHandler::CreateOrNull(
             func_name = "PerformAttributeSetCEReactionsReflectTypeBoolean"
         elif idl_type.type_name == "String":
             func_name = "PerformAttributeSetCEReactionsReflectTypeString"
-        elif idl_type.type_name == "StringTreatNullAs":
+        elif idl_type.type_name == "StringLegacyNullToEmptyString":
             func_name = ("PerformAttributeSetCEReactionsReflect"
                          "TypeStringLegacyNullToEmptyString")
         elif idl_type.type_name == "StringOrNull":
@@ -2031,7 +2076,6 @@ def make_constant_callback_def(cg_context, function_name):
 
     logging_nodes = SequenceNode([
         make_report_deprecate_as(cg_context),
-        make_report_high_entropy(cg_context),
         make_report_measure_as(cg_context),
         make_log_activity(cg_context),
     ])
@@ -2129,6 +2173,7 @@ def make_constructor_function_def(cg_context, function_name):
 
     body.extend([
         make_report_deprecate_as(cg_context),
+        make_report_high_entropy(cg_context),
         make_report_measure_as(cg_context),
         make_log_activity(cg_context),
         EmptyNode(),
@@ -2154,6 +2199,10 @@ def make_constructor_function_def(cg_context, function_name):
               "${return_value}->AssociateWithWrapper(${isolate}, "
               "${class_name}::GetWrapperTypeInfo(), ${v8_receiver});"))
         body.append(T("bindings::V8SetReturnValue(${info}, v8_wrapper);"))
+
+    body.extend([
+        make_report_high_entropy_direct(cg_context),
+    ])
 
     return func_def
 
@@ -2216,7 +2265,8 @@ def make_exposed_construct_callback_def(cg_context, function_name):
     return func_def
 
 
-def make_named_constructor_property_callback_def(cg_context, function_name):
+def make_legacy_factory_function_property_callback_def(cg_context,
+                                                       function_name):
     assert isinstance(cg_context, CodeGenContext)
     assert isinstance(function_name, str)
 
@@ -2236,32 +2286,34 @@ def make_named_constructor_property_callback_def(cg_context, function_name):
     assert isinstance(constructor_group, web_idl.ConstructorGroup)
     assert isinstance(constructor_group.owner, web_idl.Interface)
     named_ctor_v8_bridge = v8_bridge_class_name(constructor_group.owner)
-    cgc = CodeGenContext(
-        interface=constructor_group.owner,
-        constructor_group=constructor_group,
-        is_named_constructor=True,
-        class_name=named_ctor_v8_bridge)
+    cgc = CodeGenContext(interface=constructor_group.owner,
+                         constructor_group=constructor_group,
+                         is_legacy_factory_function=True,
+                         class_name=named_ctor_v8_bridge)
     named_ctor_name = callback_function_name(cgc)
     named_ctor_def = make_constructor_callback_def(cgc, named_ctor_name)
 
     return_value_cache_return_early = """\
-static const V8PrivateProperty::SymbolKey kPrivatePropertyNamedConstructor;
-auto&& v8_private_named_constructor =
-    V8PrivateProperty::GetSymbol(${isolate}, kPrivatePropertyNamedConstructor);
-v8::Local<v8::Value> v8_named_constructor;
-if (!v8_private_named_constructor.GetOrUndefined(${v8_receiver})
-         .ToLocal(&v8_named_constructor)) {
+static const V8PrivateProperty::SymbolKey
+    kPrivatePropertyLegacyFactoryFunction;
+auto&& v8_private_legacy_factory_function =
+    V8PrivateProperty::GetSymbol(
+        ${isolate},
+        kPrivatePropertyLegacyFactoryFunction);
+v8::Local<v8::Value> v8_legacy_factory_function;
+if (!v8_private_legacy_factory_function.GetOrUndefined(${v8_receiver})
+         .ToLocal(&v8_legacy_factory_function)) {
   return;
 }
-if (!v8_named_constructor->IsUndefined()) {
-  bindings::V8SetReturnValue(${info}, v8_named_constructor);
+if (!v8_legacy_factory_function->IsUndefined()) {
+  bindings::V8SetReturnValue(${info}, v8_legacy_factory_function);
   return;
 }
 """
 
     pattern = """\
 v8::Local<v8::Value> v8_value;
-if (!bindings::CreateNamedConstructorFunction(
+if (!bindings::CreateLegacyFactoryFunctionFunction(
          ${script_state},
          {callback},
          "{func_name}",
@@ -2272,7 +2324,7 @@ if (!bindings::CreateNamedConstructorFunction(
 }
 bindings::V8SetReturnValue(${info}, v8_value);
 """
-    create_named_constructor_function = _format(
+    create_legacy_factory_function_function = _format(
         pattern,
         callback=named_ctor_name,
         func_name=constructor_group.identifier,
@@ -2280,12 +2332,12 @@ bindings::V8SetReturnValue(${info}, v8_value);
         v8_bridge=named_ctor_v8_bridge)
 
     return_value_cache_update_value = """\
-v8_private_named_constructor.Set(${v8_receiver}, v8_value);
+v8_private_legacy_factory_function.Set(${v8_receiver}, v8_value);
 """
 
     body.extend([
         TextNode(return_value_cache_return_early),
-        TextNode(create_named_constructor_function),
+        TextNode(create_legacy_factory_function_function),
         TextNode(return_value_cache_update_value),
     ])
 
@@ -2649,6 +2701,8 @@ def make_operation_function_def(cg_context, function_name):
         make_report_high_entropy(cg_context),
         make_report_measure_as(cg_context),
         make_log_activity(cg_context),
+        EmptyNode(),
+        make_check_coop_restrict_properties_access(cg_context),
         EmptyNode(),
     ])
 
@@ -3174,7 +3228,7 @@ def make_named_property_getter_callback(cg_context, function_name):
     # existence by heuristics.
     type = cg_context.return_type.unwrap()
     if type.is_any or type.is_object:
-        not_found_expr = "${return_value}.empty()"
+        not_found_expr = "${return_value}.IsEmpty()"
     elif type.is_string:
         not_found_expr = "${return_value}.IsNull()"
     elif type.is_interface:
@@ -3300,8 +3354,10 @@ if (!is_creating) {
                             EmptyNode(),
                             make_v8_set_return_value(cg_context),
                             TextNode("""\
-% if interface.identifier == "CSSStyleDeclaration":
-// CSSStyleDeclaration is abusing named properties.
+% if interface.identifier == "CSSStyleDeclaration" or \
+     interface.identifier == "HTMLEmbedElement" or \
+     interface.identifier == "HTMLObjectElement":
+// ${interface.identifier} is abusing named properties.
 // Do not intercept if the property is not found.
 % else:
 bindings::V8SetReturnValue(${info}, nullptr);
@@ -4052,6 +4108,13 @@ def make_cross_origin_indexed_getter_callback(cg_context, function_name):
         return func_def
 
     bind_return_value(body, cg_context, overriding_args=["${index}"])
+
+    # Do this before the index verification below, because we do not want to
+    # reveal any information about the number of frames in this window.
+    body.extend([
+        make_check_coop_restrict_properties_access(cg_context),
+        EmptyNode(),
+    ])
 
     body.extend([
         TextNode("""\
@@ -5380,10 +5443,18 @@ def make_property_entries_and_callback_defs(cg_context, attribute_entries,
         for member in members:
             is_context_dependent = member.exposure.is_context_dependent(
                 global_names)
-            exposure_conditional = expr_from_exposure(
-                member.exposure,
-                global_names=global_names,
-                may_use_feature_selector=True)
+            if isinstance(member, web_idl.OverloadGroup):
+                exposure_conditional = expr_or([
+                    expr_from_exposure(overload.exposure,
+                                       global_names=global_names,
+                                       may_use_feature_selector=True)
+                    for overload in member
+                ])
+            else:
+                exposure_conditional = expr_from_exposure(
+                    member.exposure,
+                    global_names=global_names,
+                    may_use_feature_selector=True)
 
             if "PerWorldBindings" in member.extended_attributes:
                 worlds = (CodeGenContext.MAIN_WORLD,
@@ -5512,17 +5583,18 @@ def make_property_entries_and_callback_defs(cg_context, attribute_entries,
                 exposed_construct=exposed_construct,
                 prop_callback_name=prop_callback_name))
 
-    def process_named_constructor_group(named_constructor_group,
-                                        is_context_dependent,
-                                        exposure_conditional, world):
+    def process_legacy_factory_function_group(legacy_factory_function_group,
+                                              is_context_dependent,
+                                              exposure_conditional, world):
         cgc = cg_context.make_copy(
-            exposed_construct=named_constructor_group,
-            is_named_constructor=True,
+            exposed_construct=legacy_factory_function_group,
+            is_legacy_factory_function=True,
             for_world=world,
             v8_callback_type=CodeGenContext.V8_ACCESSOR_NAME_GETTER_CALLBACK)
         prop_callback_name = callback_function_name(cgc)
-        prop_callback_node = make_named_constructor_property_callback_def(
-            cgc, prop_callback_name)
+        prop_callback_node = (
+            make_legacy_factory_function_property_callback_def(
+                cgc, prop_callback_name))
 
         callback_def_nodes.extend([
             prop_callback_node,
@@ -5534,7 +5606,7 @@ def make_property_entries_and_callback_defs(cg_context, attribute_entries,
                 is_context_dependent=is_context_dependent,
                 exposure_conditional=exposure_conditional,
                 world=world,
-                exposed_construct=named_constructor_group,
+                exposed_construct=legacy_factory_function_group,
                 prop_callback_name=prop_callback_name))
 
     def process_operation_group(operation_group, is_context_dependent,
@@ -5591,12 +5663,13 @@ def make_property_entries_and_callback_defs(cg_context, attribute_entries,
         iterate(interface.constructor_groups, process_constructor_group)
         iterate(interface.exposed_constructs, process_exposed_construct)
         iterate(interface.legacy_window_aliases, process_exposed_construct)
-        named_constructor_groups = [
+        legacy_factory_function_groups = [
             group for construct in interface.exposed_constructs
-            for group in construct.named_constructor_groups
-            if construct.named_constructor_groups
+            for group in construct.legacy_factory_function_groups
+            if construct.legacy_factory_function_groups
         ]
-        iterate(named_constructor_groups, process_named_constructor_group)
+        iterate(legacy_factory_function_groups,
+                process_legacy_factory_function_group)
     if not class_like.is_callback_interface:
         iterate(class_like.operation_groups, process_operation_group)
     if interface and interface.stringifier:
@@ -5960,8 +6033,7 @@ def make_install_interface_template(cg_context, function_name, class_name,
             T("""\
 // HTMLAllCollection-specific settings
 // https://html.spec.whatwg.org/C/#the-htmlallcollection-interface
-${instance_object_template}->SetCallAsFunctionHandler(
-    ${class_name}::LegacyCallCustom);
+${instance_object_template}->SetCallAsFunctionHandler(ItemOperationCallback);
 ${instance_object_template}->MarkAsUndetectable();
 """))
 
@@ -7305,7 +7377,7 @@ def _collect_include_headers(class_like):
             if x:
                 operations.extend(x.operations)
         for exposed_construct in class_like.exposed_constructs:
-            operations.extend(exposed_construct.named_constructors)
+            operations.extend(exposed_construct.legacy_factory_functions)
     for operation in operations:
         collect_from_idl_type(operation.return_type)
         for argument in operation.arguments:
@@ -7451,10 +7523,6 @@ def generate_class_like(class_like,
                 return_type="void",
                 static=True))
 
-    if class_like.identifier == "HTMLAllCollection":
-        add_custom_callback_impl_decl(
-            name=name_style.func("LegacyCallCustom"),
-            arg_decls=["const v8::FunctionCallbackInfo<v8::Value>&"])
     for attribute in class_like.attributes:
         custom_values = attribute.extended_attributes.values_of("Custom")
         is_cross_origin = "CrossOrigin" in attribute.extended_attributes

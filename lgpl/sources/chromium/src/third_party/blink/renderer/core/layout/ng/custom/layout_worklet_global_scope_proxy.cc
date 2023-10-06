@@ -16,7 +16,6 @@
 #include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
@@ -40,16 +39,10 @@ LayoutWorkletGlobalScopeProxy::LayoutWorkletGlobalScopeProxy(
       StringView("LayoutWorklet #") + String::Number(global_scope_number);
 
   LocalFrameClient* frame_client = frame->Client();
-  const String user_agent =
-      RuntimeEnabledFeatures::SendFullUserAgentAfterReductionEnabled(window)
-          ? frame_client->FullUserAgent(window->Url())
-      : RuntimeEnabledFeatures::UserAgentReductionEnabled(window)
-          ? frame_client->ReducedUserAgent(window->Url())
-          : frame_client->UserAgent(window->Url());
-
   auto creation_params = std::make_unique<GlobalScopeCreationParams>(
       window->Url(), mojom::blink::ScriptType::kModule, global_scope_name,
-      user_agent, frame_client->UserAgentMetadata(window->Url()),
+      frame_client->UserAgent(window->Url()),
+      frame_client->UserAgentMetadata(window->Url()),
       frame_client->CreateWorkerFetchContext(),
       mojo::Clone(window->GetContentSecurityPolicy()->GetParsedPolicies()),
       Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),

@@ -18,11 +18,11 @@ namespace blink {
 
 enum {
   kUnderInvalidationChecking = 1 << 0,
-  kScrollUnification = 1 << 1,
-  kSolidColorLayers = 1 << 2,
-  kCompositeScrollAfterPaint = 1 << 3,
-  kUsedColorSchemeRootScrollbars = 1 << 4,
-  kFluentScrollbar = 1 << 5,
+  kSolidColorLayers = 1 << 1,
+  kCompositeScrollAfterPaint = 1 << 2,
+  kUsedColorSchemeRootScrollbars = 1 << 3,
+  kFluentScrollbar = 1 << 4,
+  kSparseObjectPaintProperties = 1 << 5,
 };
 
 class PaintTestConfigurations
@@ -30,7 +30,8 @@ class PaintTestConfigurations
       private ScopedPaintUnderInvalidationCheckingForTest,
       private ScopedSolidColorLayersForTest,
       private ScopedCompositeScrollAfterPaintForTest,
-      private ScopedUsedColorSchemeRootScrollbarsForTest {
+      private ScopedUsedColorSchemeRootScrollbarsForTest,
+      private ScopedSparseObjectPaintPropertiesForTest {
  public:
   PaintTestConfigurations()
       : ScopedPaintUnderInvalidationCheckingForTest(GetParam() &
@@ -39,14 +40,11 @@ class PaintTestConfigurations
         ScopedCompositeScrollAfterPaintForTest(GetParam() &
                                                kCompositeScrollAfterPaint),
         ScopedUsedColorSchemeRootScrollbarsForTest(
-            GetParam() & kUsedColorSchemeRootScrollbars) {
+            GetParam() & kUsedColorSchemeRootScrollbars),
+        ScopedSparseObjectPaintPropertiesForTest(GetParam() &
+                                                 kSparseObjectPaintProperties) {
     std::vector<base::test::FeatureRef> enabled_features = {};
     std::vector<base::test::FeatureRef> disabled_features = {};
-    if (GetParam() & kScrollUnification) {
-      enabled_features.push_back(::features::kScrollUnification);
-    } else {
-      disabled_features.push_back(::features::kScrollUnification);
-    }
     if (GetParam() & kFluentScrollbar) {
       enabled_features.push_back(::features::kFluentScrollbar);
     } else {
@@ -75,13 +73,13 @@ class PaintTestConfigurations
 //    // TODO(crbug.com/1414885): Fix this test.
 //    return;
 //  }
-#define INSTANTIATE_PAINT_TEST_SUITE_P(test_class)                       \
-  INSTANTIATE_TEST_SUITE_P(                                              \
-      All, test_class,                                                   \
-      ::testing::Values(0, kScrollUnification, kSolidColorLayers,        \
-                        kCompositeScrollAfterPaint,                      \
-                        kCompositeScrollAfterPaint | kScrollUnification, \
-                        kUsedColorSchemeRootScrollbars, kFluentScrollbar))
+#define PAINT_TEST_SUITE_P_VALUES                   \
+  0, kSolidColorLayers, kCompositeScrollAfterPaint, \
+      kUsedColorSchemeRootScrollbars, kFluentScrollbar
+
+#define INSTANTIATE_PAINT_TEST_SUITE_P(test_class) \
+  INSTANTIATE_TEST_SUITE_P(All, test_class,        \
+                           ::testing::Values(PAINT_TEST_SUITE_P_VALUES))
 
 }  // namespace blink
 

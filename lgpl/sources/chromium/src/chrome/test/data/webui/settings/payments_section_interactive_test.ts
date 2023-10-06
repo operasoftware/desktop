@@ -12,7 +12,7 @@ import {assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome://w
 import {eventToPromise, isVisible, whenAttributeIs} from 'chrome://webui-test/test_util.js';
 import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 
-import {createCreditCardEntry, createIbanEntry, TestPaymentsManager} from './passwords_and_autofill_fake_data.js';
+import {createCreditCardEntry, createIbanEntry, TestPaymentsManager} from './autofill_fake_data.js';
 // clang-format on
 
 /**
@@ -46,7 +46,12 @@ suite('PaymentsSectionCreditCardEditDialogTest', function() {
     PaymentsManagerImpl.setInstance(paymentsManager);
 
     const section = document.createElement('settings-payments-section');
-    section.prefs = {autofill: {credit_card_enabled: {value: true}}};
+    section.prefs = {
+      autofill: {
+        credit_card_enabled: {value: true},
+        payment_methods_mandatory_reauth: {value: true},
+      },
+    };
     document.body.appendChild(section);
     await flushTasks();
     return section;
@@ -157,7 +162,7 @@ suite('PaymentsSectionCreditCardEditDialogTest', function() {
 
     // Simulate clicking the 'Edit' button in the menu.
     section.$.menuEditCreditCard.click();
-    flush();
+    await flushTasks();
     const creditCardDialog =
         section.shadowRoot!.querySelector('settings-credit-card-edit-dialog');
     assertTrue(!!creditCardDialog);

@@ -185,7 +185,7 @@ TEST_P(PaintChunksToCcLayerTest, EffectFilterGroupingNestedWithTransforms) {
 #if BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
       nullptr,
 #endif  // BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
-      filter.AsCcFilterOperations(), gfx::SizeF()));
+      filter.AsCcFilterOperations()));
   EXPECT_THAT(
       output,
       ElementsAre(
@@ -341,7 +341,7 @@ TEST_P(PaintChunksToCcLayerTest, FilterEffectSpaceInversion) {
 #if BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
       nullptr,
 #endif  // BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
-      filter.AsCcFilterOperations(), gfx::SizeF()));
+      filter.AsCcFilterOperations()));
   EXPECT_THAT(
       output,
       ElementsAre(
@@ -1065,7 +1065,7 @@ TEST_P(PaintChunksToCcLayerTest, EmptyChunkRect) {
 #if BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
       nullptr,
 #endif  // BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
-      filter.AsCcFilterOperations(), gfx::SizeF()));
+      filter.AsCcFilterOperations()));
   EXPECT_THAT(output, ElementsAre(PaintOpEq<cc::SaveLayerOp>(
                                       SkRect::MakeXYWH(0, 0, 0, 0),
                                       expected_flags),           // <e1>
@@ -1075,7 +1075,8 @@ TEST_P(PaintChunksToCcLayerTest, EmptyChunkRect) {
 static sk_sp<cc::PaintFilter> MakeFilter(gfx::RectF bounds) {
   PaintFilter::CropRect rect(gfx::RectFToSkRect(bounds));
   return sk_make_sp<ColorFilterPaintFilter>(
-      SkColorFilters::Blend(SK_ColorBLUE, SkBlendMode::kSrc), nullptr, &rect);
+      cc::ColorFilter::MakeBlend(SkColors::kBlue, SkBlendMode::kSrc), nullptr,
+      &rect);
 }
 
 TEST_P(PaintChunksToCcLayerTest, ReferenceFilterOnEmptyChunk) {
@@ -1105,7 +1106,7 @@ TEST_P(PaintChunksToCcLayerTest, ReferenceFilterOnEmptyChunk) {
 #if BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
       nullptr,
 #endif  // BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
-      filter.AsCcFilterOperations(), gfx::SizeF()));
+      filter.AsCcFilterOperations()));
   EXPECT_THAT(output, ElementsAre(PaintOpIs<cc::SaveOp>(),
                                   PaintOpIs<cc::TranslateOp>(),  // layer offset
                                   PaintOpEq<cc::SaveLayerOp>(
@@ -1148,7 +1149,7 @@ TEST_P(PaintChunksToCcLayerTest, ReferenceFilterOnChunkWithDrawingDisplayItem) {
 #if BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
       nullptr,
 #endif  // BUILDFLAG(OPERA_FEATURE_CC_GPU_SHADER_FILTERS)
-      filter.AsCcFilterOperations(), gfx::SizeF()));
+      filter.AsCcFilterOperations()));
   EXPECT_THAT(
       output,
       ElementsAre(PaintOpIs<cc::SaveOp>(),

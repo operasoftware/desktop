@@ -78,7 +78,7 @@ namespace {
 
 void TestGreenDiv(DummyPageHolder& page_holder) {
   const Document& doc = page_holder.GetDocument();
-  Element* div = doc.getElementById("div");
+  Element* div = doc.getElementById(AtomicString("div"));
   ASSERT_TRUE(div);
   ASSERT_TRUE(div->GetComputedStyle());
   EXPECT_EQ(
@@ -96,7 +96,8 @@ TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLStyleInBody) {
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><style>div { color: "
       "green }</style><div id='div'></div></body></html>",
       static_cast<size_t>(118));
-  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  page_holder->GetFrame().ForceSynchronousDocumentInstall(
+      AtomicString("text/xml"), data);
   TestGreenDiv(*page_holder);
 }
 
@@ -109,7 +110,8 @@ TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLLinkInBody) {
       "href='data:text/css,div{color:green}' /><div "
       "id='div'></div></body></html>",
       static_cast<size_t>(146));
-  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  page_holder->GetFrame().ForceSynchronousDocumentInstall(
+      AtomicString("text/xml"), data);
   TestGreenDiv(*page_holder);
 }
 
@@ -121,7 +123,8 @@ TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLStyleInHead) {
       "<html xmlns='http://www.w3.org/1999/xhtml'><head><style>div { color: "
       "green }</style></head><body><div id='div'></div></body></html>",
       static_cast<size_t>(131));
-  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  page_holder->GetFrame().ForceSynchronousDocumentInstall(
+      AtomicString("text/xml"), data);
   TestGreenDiv(*page_holder);
 }
 
@@ -134,7 +137,8 @@ TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLLinkInHead) {
       "href='data:text/css,div{color:green}' /></head><body><div "
       "id='div'></div></body></html>",
       static_cast<size_t>(159));
-  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  page_holder->GetFrame().ForceSynchronousDocumentInstall(
+      AtomicString("text/xml"), data);
   TestGreenDiv(*page_holder);
 }
 
@@ -148,7 +152,8 @@ TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XMLStyleSheet) {
       "xmlns='http://www.w3.org/1999/xhtml'><body><div "
       "id='div'></div></body></html>",
       static_cast<size_t>(155));
-  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  page_holder->GetFrame().ForceSynchronousDocumentInstall(
+      AtomicString("text/xml"), data);
   TestGreenDiv(*page_holder);
 }
 

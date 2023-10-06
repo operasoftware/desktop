@@ -38,8 +38,14 @@ constexpr VideoCodecProfileAndWebRTCProfile kSupportedProfiles[] = {
 
 #if BUILDFLAG(IS_WIN)
 constexpr webrtc::ScalabilityMode kSupportedScalabilityModes[] = {
-    webrtc::ScalabilityMode::kL1T1, webrtc::ScalabilityMode::kL1T2,
-    webrtc::ScalabilityMode::kL1T3};
+    webrtc::ScalabilityMode::kL1T1,
+    webrtc::ScalabilityMode::kL1T2,
+    webrtc::ScalabilityMode::kL1T3,
+};
+#elif BUILDFLAG(IS_MAC)
+constexpr webrtc::ScalabilityMode kSupportedScalabilityModes[] = {
+    webrtc::ScalabilityMode::kL1T1,
+};
 #endif  // BUILDFLAG(IS_WIN)
 
 webrtc::SdpVideoFormat H264ProfileToWebRtcFormat(
@@ -59,16 +65,10 @@ webrtc::SdpVideoFormat H264ProfileToWebRtcFormat(
   const webrtc::H264ProfileLevelId profile_level_id(
       profile, webrtc::H264Level::kLevel3_1);
 
-#if BUILDFLAG(IS_WIN)
   const absl::InlinedVector<webrtc::ScalabilityMode,
                             webrtc::kScalabilityModeCount>
       scalability_modes(std::begin(kSupportedScalabilityModes),
                         std::end(kSupportedScalabilityModes));
-#else
-  const absl::InlinedVector<webrtc::ScalabilityMode,
-                            webrtc::kScalabilityModeCount>
-      scalability_modes;
-#endif  // BUILDFLAG(IS_WIN)
   webrtc::SdpVideoFormat format(
       cricket::kH264CodecName,
       {{cricket::kH264FmtpProfileLevelId,

@@ -205,6 +205,7 @@ class FakeMediaMetricsProvider
                   media::mojom::MediaURLScheme url_scheme,
                   media::mojom::MediaStreamType media_stream_type) override {}
   void OnError(media::mojom::blink::PipelineStatusPtr status) override {}
+  void SetDryRunResult(const String& codec_name, bool result) override {}
   void OnFallback(::media::mojom::blink::PipelineStatusPtr status) override {}
   void SetIsEME() override {}
   void SetTimeToMetadata(base::TimeDelta elapsed) override {}

@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://webui-test/mojo_webui_test_support.js';
 import 'chrome://bookmarks-side-panel.top-chrome/bookmarks_list.js';
 
 import {BookmarkFolderElement, FOLDER_OPEN_CHANGED_EVENT} from 'chrome://bookmarks-side-panel.top-chrome/bookmark_folder.js';
 import {BookmarksApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_api_proxy.js';
 import {BookmarksListElement, LOCAL_STORAGE_OPEN_FOLDERS_KEY} from 'chrome://bookmarks-side-panel.top-chrome/bookmarks_list.js';
-import {ShoppingListApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/commerce/shopping_list_api_proxy.js';
-import {BookmarkProductInfo} from 'chrome://bookmarks-side-panel.top-chrome/shopping_list.mojom-webui.js';
+import {ShoppingListApiProxyImpl} from 'chrome://bookmarks-side-panel.top-chrome/shared/commerce/shopping_list_api_proxy.js';
+import {BookmarkProductInfo} from 'chrome://bookmarks-side-panel.top-chrome/shared/shopping_list.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {fakeMetricsPrivate, MetricsTracker} from 'chrome://webui-test/metrics_test_support.js';
@@ -69,11 +68,13 @@ suite('SidePanelBookmarksListTest', () => {
     bookmarkId: BigInt(3),
     info: {
       title: 'Product Foo',
+      clusterTitle: 'Product Cluster Foo',
       domain: 'foo.com',
       imageUrl: {url: 'https://foo.com/image'},
       productUrl: {url: 'https://foo.com/product'},
       currentPrice: '$12',
       previousPrice: '$34',
+      clusterId: BigInt(12345),
     },
   }];
 
@@ -291,6 +292,14 @@ suite('SidePanelBookmarksListTest', () => {
         products[0]!);
     await flushTasks();
     checkShoppingListVisibility(newbookmarksList, true);
+    assertEquals(
+        2,
+        metrics.count('Commerce.PriceTracking.SidePanel.TrackedProductsShown'));
+
+    shoppingListApi.getCallbackRouterRemote().priceUntrackedForBookmark(
+        products[0]!);
+    await flushTasks();
+    checkShoppingListVisibility(newbookmarksList, false);
     assertEquals(
         2,
         metrics.count('Commerce.PriceTracking.SidePanel.TrackedProductsShown'));

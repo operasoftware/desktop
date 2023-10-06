@@ -39,11 +39,16 @@ class CORE_EXPORT LayoutNGTableColumn : public LayoutBox {
   // Clears needs-layout for child columns too.
   void ClearNeedsLayoutForChildren() const;
 
-  LayoutSize Size() const override;
+  PhysicalSize Size() const override;
 
-  LayoutPoint Location() const override;
+  LayoutPoint LocationInternal() const override;
 
   // LayoutObject methods start.
+
+  void UpdateLayout() final {
+    NOT_DESTROYED();
+    NOTREACHED_NORETURN();
+  }
 
   const char* GetName() const override {
     NOT_DESTROYED();
@@ -78,13 +83,6 @@ class CORE_EXPORT LayoutNGTableColumn : public LayoutBox {
   }
 
  protected:
-  // Required by LayoutBox, but not used.
-  MinMaxSizes ComputeIntrinsicLogicalWidths() const override {
-    NOT_DESTROYED();
-    NOTIMPLEMENTED();
-    return MinMaxSizes();
-  }
-
   bool IsOfType(LayoutObjectType type) const override {
     NOT_DESTROYED();
     return type == kLayoutObjectTableCol || LayoutBox::IsOfType(type);

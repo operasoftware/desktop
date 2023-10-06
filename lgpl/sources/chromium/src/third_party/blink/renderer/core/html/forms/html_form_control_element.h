@@ -38,11 +38,6 @@ namespace blink {
 
 class HTMLFormElement;
 
-constexpr const char* kPopoverTargetActionToggle = "toggle";
-constexpr const char* kPopoverTargetActionShow = "show";
-constexpr const char* kPopoverTargetActionHide = "hide";
-constexpr const char* kPopoverTargetActionHover = "hover";
-
 // HTMLFormControlElement is the default implementation of
 // ListedElement, and listed element implementations should use
 // HTMLFormControlElement unless there is a special reason.
@@ -163,7 +158,7 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
   String NameForAutofill() const;
 
   void CloneNonAttributePropertiesFrom(const Element&,
-                                       CloneChildrenFlag) override;
+                                       NodeCloningData&) override;
 
   FormAssociated* ToFormAssociatedOrNull() override { return this; }
   void AssociateWith(HTMLFormElement*) override;

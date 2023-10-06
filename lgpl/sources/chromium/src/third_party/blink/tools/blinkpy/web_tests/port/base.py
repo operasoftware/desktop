@@ -42,6 +42,7 @@ import tempfile
 from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
+from typing import Set
 
 import six
 from six.moves import zip_longest
@@ -128,6 +129,8 @@ ARTIFACTS_SUB_DIR = 'layout-test-results'
 ARCHIVED_RESULTS_LIMIT = 25
 
 ENABLE_THREADED_COMPOSITING_FLAG = '--enable-threaded-compositing'
+DISABLE_THREADED_COMPOSITING_FLAG = '--disable-threaded-compositing'
+DISABLE_THREADED_ANIMATION_FLAG = '--disable-threaded-animation'
 
 
 class Port(object):
@@ -150,8 +153,6 @@ class Port(object):
     # the documentation in docs/testing/web_test_expectations.md when this list
     # changes.
     ALL_SYSTEMS = (
-        ('mac10.13', 'x86'),
-        ('mac10.14', 'x86'),
         ('mac10.15', 'x86'),
         ('mac11', 'x86'),
         ('mac11-arm64', 'arm64'),
@@ -162,17 +163,17 @@ class Port(object):
         ('win10.20h2', 'x86'),
         ('win11-arm64', 'arm64'),
         ('win11', 'x86_64'),
-        ('trusty', 'x86_64'),
+        ('linux', 'x86_64'),
         ('fuchsia', 'x86_64'),
     )
 
     CONFIGURATION_SPECIFIER_MACROS = {
         'mac': [
-            'mac10.13', 'mac10.14', 'mac10.15', 'mac11', 'mac11-arm64',
-            'mac12', 'mac12-arm64', 'mac13', 'mac13-arm64'
+            'mac10.15', 'mac11', 'mac11-arm64', 'mac12', 'mac12-arm64',
+            'mac13', 'mac13-arm64'
         ],
         'win': ['win10.20h2', 'win11-arm64', 'win11'],
-        'linux': ['trusty'],
+        'linux': ['linux'],
         'fuchsia': ['fuchsia'],
     }
 
@@ -200,12 +201,6 @@ class Port(object):
     BASELINE_EXTENSIONS = ('.wav', '.txt', '.png')
 
     FLAG_EXPECTATIONS_PREFIX = 'FlagExpectations'
-
-    # The following is used for concetenating WebDriver test names.
-    WEBDRIVER_SUBTEST_SEPARATOR = '>>'
-
-    # The following is used for concetenating WebDriver test names in pytest format.
-    WEBDRIVER_SUBTEST_PYTEST_SEPARATOR = '::'
 
     # The following two constants must match. When adding a new WPT root, also
     # remember to update configurations in:
@@ -272,6 +267,7 @@ class Port(object):
         self.server_process_constructor = server_process.ServerProcess  # This can be overridden for testing.
         self._http_lock = None  # FIXME: Why does this live on the port object?
         self._dump_reader = None
+        self._skip_base_tests = set()
 
         # Configuration and target are always set by PortFactory so this is only
         # relevant in cases where a Port is created without it (testing mostly).
@@ -283,6 +279,11 @@ class Port(object):
         # set the default to make unit tests happy
         if not hasattr(options, 'wpt_only'):
             self.set_option_default('wpt_only', False)
+        if not hasattr(options, 'no_virtual_tests'):
+            self.set_option_default('virtual_tests', True)
+        else:
+            self.set_option_default('virtual_tests',
+                                    not options.no_virtual_tests)
         self._test_configuration = None
         self._results_directory = None
         self._used_expectation_files = None
@@ -379,7 +380,7 @@ class Port(object):
                 '--ignore-certificate-errors-spki-list=' + WPT_FINGERPRINT +
                 ',' + SXG_FINGERPRINT + ',' + SXG_WPT_FINGERPRINT,
                 # Required for WebTransport tests.
-                '--origin-to-force-quic-on=web-platform.test:11000',
+                '--webtransport-developer-mode',
                 '--user-data-dir'
             ]
             if self.get_option('nocheck_sys_deps', False):
@@ -415,7 +416,7 @@ class Port(object):
 
     @memoized
     def _build_args_gn_content(self):
-        args_gn_file = self._build_path('args.gn')
+        args_gn_file = self.build_path('args.gn')
         if not self._filesystem.exists(args_gn_file):
             _log.error('Unable to find %s', args_gn_file)
             return ''
@@ -942,8 +943,15 @@ class Port(object):
         path_in_wpt = match.group(2)
         for expectation, ref_path_in_wpt in self.wpt_manifest(
                 wpt_path).extract_reference_list(path_in_wpt):
-            ref_absolute_path = self._filesystem.join(
-                self.web_tests_dir(), wpt_path + ref_path_in_wpt)
+            if 'external/wpt' in wpt_path:
+                ref_path_in_web_tests = wpt_path + ref_path_in_wpt
+            else:
+                # References in this manifest are already generated with
+                # `/wpt_internal` in the URL. Remove the leading '/' for
+                # joining.
+                ref_path_in_web_tests = ref_path_in_wpt[1:]
+            ref_absolute_path = self._filesystem.join(self.web_tests_dir(),
+                                                      ref_path_in_web_tests)
             reftest_list.append((expectation, ref_absolute_path))
         return reftest_list
 
@@ -963,7 +971,8 @@ class Port(object):
         tests = self.real_tests(paths)
 
         if paths:
-            tests.extend(self._virtual_tests_matching_paths(paths))
+            if self._options.virtual_tests:
+                tests.extend(self._virtual_tests_matching_paths(paths))
             if (any(wpt_path in path for wpt_path in self.WPT_DIRS
                     for path in paths)
                     # TODO(robertma): Remove this special case when external/wpt is moved to wpt.
@@ -981,7 +990,8 @@ class Port(object):
                 dirname = self._filesystem.dirname(test) + '/'
                 tests_by_dir[dirname].append(test)
 
-            tests.extend(self._all_virtual_tests(tests_by_dir))
+            if self._options.virtual_tests:
+                tests.extend(self._all_virtual_tests(tests_by_dir))
             tests.extend(wpt_tests)
         return tests
 
@@ -1015,7 +1025,7 @@ class Port(object):
         # When collecting test cases, skip these directories.
         skipped_directories = set([
             'platform', 'resources', 'support', 'script-tests', 'reference',
-            'reftest', 'SmokeTests'
+            'reftest', 'TestLists'
         ])
         # Also ignore all WPT directories. Note that this is only an
         # optimization; is_non_wpt_test_file should skip WPT regardless.
@@ -1098,7 +1108,8 @@ class Port(object):
                 'manifest_update', False):
             _log.debug('Generating MANIFEST.json for %s...', path)
             WPTManifest.ensure_manifest(self, path)
-        return WPTManifest(self.host, manifest_path, exclude_jsshell)
+        return WPTManifest(self.host, manifest_path,
+                           self.get_option('test_types'), exclude_jsshell)
 
     def is_wpt_file(self, path):
         """Returns whether a path is a WPT test file."""
@@ -1383,10 +1394,11 @@ class Port(object):
         return (self.skipped_due_to_smoke_tests(test)
                 or self.skipped_in_never_fix_tests(test)
                 or self.virtual_test_skipped_due_to_platform_config(test)
-                or self.skipped_due_to_exclusive_virtual_tests(test))
+                or self.skipped_due_to_exclusive_virtual_tests(test)
+                or self.skipped_due_to_skip_base_tests(test))
 
     @memoized
-    def _tests_from_file(self, filename):
+    def tests_from_file(self, filename: str) -> Set[str]:
         tests = set()
         file_contents = self._filesystem.read_text_file(filename)
         for line in file_contents.splitlines():
@@ -1407,7 +1419,7 @@ class Port(object):
         smoke_test_filename = self.path_to_smoke_tests_file()
         if not self._filesystem.exists(smoke_test_filename):
             return False
-        smoke_tests = self._tests_from_file(smoke_test_filename)
+        smoke_tests = self.tests_from_file(smoke_test_filename)
         return test not in smoke_tests
 
     def default_smoke_test_only(self):
@@ -1432,7 +1444,7 @@ class Port(object):
 
         # Historically we only have one smoke tests list. That one now becomes
         # the default
-        return self._filesystem.join(self.web_tests_dir(), 'SmokeTests',
+        return self._filesystem.join(self.web_tests_dir(), 'TestLists',
                                      'Default.txt')
 
     @memoized
@@ -1509,6 +1521,33 @@ class Port(object):
                     return True
         return False
 
+    @memoized
+    def skipped_due_to_skip_base_tests(self, test):
+        """Checks if the test should be skipped due to the skip_base_test rule
+        of any virtual suite.
+
+        If the test is not a virtual test, it will be skipped if it's in the
+        skip_base_test list of any virtual suite. If the test is a virtual
+        test, it will not be skipped.
+        """
+        # This check doesn't apply to virtual tests
+        if self.lookup_virtual_test_base(test):
+            return False
+
+        # Ensure that this was called at least once, to process all suites
+        # information
+        vts = self.virtual_test_suites()
+        if test in self._skip_base_tests:
+            return True
+        # We also need to check if a parent folder of a test is in the list
+        # Can't use "Starts with" as we need the exact entry for an efficient
+        # search of the set
+        test_folders = test.split('/')
+        for i in range(len(test_folders)):
+            if '/'.join(test_folders[:i]) + '/' in self._skip_base_tests:
+                return True
+        return False
+
     def name(self):
         """Returns a name that uniquely identifies this particular type of port.
 
@@ -1523,7 +1562,7 @@ class Port(object):
     def version(self):
         """Returns a string indicating the version of a given platform
 
-        For example, "win10" or "trusty". This is used to help identify the
+        For example, "win10" or "linux". This is used to help identify the
         exact port when parsing test expectations, determining search paths,
         and logging information.
         """
@@ -1579,6 +1618,20 @@ class Port(object):
     @memoized
     def args_for_test(self, test_name):
         args = self._lookup_virtual_test_args(test_name)
+
+        if self._should_run_single_threaded(test_name):
+            if (DISABLE_THREADED_COMPOSITING_FLAG not in args
+                    and ENABLE_THREADED_COMPOSITING_FLAG not in args):
+                args.append(DISABLE_THREADED_COMPOSITING_FLAG)
+        else:
+            if not ENABLE_THREADED_COMPOSITING_FLAG in args:
+                # There are no virtual suites with
+                # --disable-threaded-compositing arg
+                args.append(ENABLE_THREADED_COMPOSITING_FLAG)
+        if (DISABLE_THREADED_COMPOSITING_FLAG in args
+                and DISABLE_THREADED_ANIMATION_FLAG not in args):
+            args.append(DISABLE_THREADED_ANIMATION_FLAG)
+
         pac_url = self.extract_wpt_pac(test_name)
         if pac_url is not None:
             args.append("--proxy-pac-url=" + pac_url)
@@ -1596,10 +1649,10 @@ class Port(object):
                 self._filesystem.sanitize_filename(test_name), current_time)
             args.append('--trace-startup-file=' + file_name)
 
-        if self._is_in_allowlist_for_threaded_compositing(test_name):
-            if (ENABLE_THREADED_COMPOSITING_FLAG not in args):
-                args.append(ENABLE_THREADED_COMPOSITING_FLAG)
-
+        assert (ENABLE_THREADED_COMPOSITING_FLAG in args
+                and DISABLE_THREADED_COMPOSITING_FLAG not in args) or (
+                    DISABLE_THREADED_COMPOSITING_FLAG in args
+                    and ENABLE_THREADED_COMPOSITING_FLAG not in args)
         return args
 
     @memoized
@@ -1615,7 +1668,7 @@ class Port(object):
         # an exception is raised when merging the bot times json files. This happens  whenever they
         # are outputted into the results directory. Temporarily we will return the bot times json
         # file relative to the target directory.
-        return self._build_path('webkit_test_times', 'bot_times_ms.json')
+        return self.build_path('webkit_test_times', 'bot_times_ms.json')
 
     def results_directory(self):
         """Returns the absolute path directory which will store all web tests outputted
@@ -1641,21 +1694,21 @@ class Port(object):
 
     def inspector_build_directory(self):
         if self._build_is_chrome_branded():
-            return self._build_path('gen', 'third_party',
-                                    'devtools-frontend-internal',
-                                    'devtools-frontend', 'front_end')
-        return self._build_path('gen', 'third_party', 'devtools-frontend',
-                                'src', 'front_end')
+            return self.build_path('gen', 'third_party',
+                                   'devtools-frontend-internal',
+                                   'devtools-frontend', 'front_end')
+        return self.build_path('gen', 'third_party', 'devtools-frontend',
+                               'src', 'front_end')
 
     def generated_sources_directory(self):
-        return self._build_path('gen')
+        return self.build_path('gen')
 
     def apache_config_directory(self):
         return self._path_finder.path_from_blink_tools('apache_config')
 
     def default_results_directory(self):
         """Returns the absolute path to the build directory."""
-        return self._build_path()
+        return self.build_path()
 
     @memoized
     def typ_host(self):
@@ -1899,7 +1952,6 @@ class Port(object):
         refer to them as one term or alias specific values to more generic ones. For example:
 
         (win10, win11) -> win # Abbreviate all Windows versions into one namesake.
-        (precise, trusty) -> linux  # Change specific name of Linux distro to a more generic term.
 
         Returns a dictionary, each key representing a macro term ('win', for example),
         and value being a list of valid configuration specifiers (such as ['win10', 'win11']).
@@ -1978,11 +2030,10 @@ class Port(object):
             return expectations
 
         for (_, _, filenames) in self._filesystem.walk(flag_path):
-            if 'README.txt' in filenames:
-                filenames.remove('README.txt')
-            if 'PRESUBMIT.py' in filenames:
-                filenames.remove('PRESUBMIT.py')
             for filename in filenames:
+                if (filename.startswith('README') or filename.endswith('~')
+                        or filename == 'PRESUBMIT.py'):
+                    continue
                 path = self._filesystem.join(flag_path, filename)
                 try:
                     expectations[path] = self._filesystem.read_text_file(path)
@@ -2031,7 +2082,6 @@ class Port(object):
         """
         return filter(None, [
             self.path_to_generic_test_expectations_file(),
-            self.path_to_webdriver_expectations_file(),
             self._filesystem.join(self.web_tests_dir(), 'NeverFixTests'),
             self._filesystem.join(self.web_tests_dir(),
                                   'StaleTestExpectations'),
@@ -2066,11 +2116,6 @@ class Port(object):
     @memoized
     def path_to_generic_test_expectations_file(self):
         return self._filesystem.join(self.web_tests_dir(), 'TestExpectations')
-
-    @memoized
-    def path_to_webdriver_expectations_file(self):
-        return self._filesystem.join(self.web_tests_dir(),
-                                     'WebDriverExpectations')
 
     def path_to_flag_specific_expectations_file(self, flag_specific):
         return self._filesystem.join(self.web_tests_dir(),
@@ -2210,14 +2255,14 @@ class Port(object):
 
     def _path_to_driver(self, target=None):
         """Returns the full path to the test driver."""
-        return self._build_path(target, self.driver_name())
+        return self.build_path(target, self.driver_name())
 
     def _path_to_image_diff(self):
         """Returns the full path to the image_diff binary, or None if it is not available.
 
         This is likely used only by diff_image()
         """
-        return self._build_path('image_diff')
+        return self.build_path('image_diff')
 
     def _absolute_baseline_path(self, platform_dir):
         """Return the absolute path to the top of the baseline tree for a
@@ -2317,7 +2362,6 @@ class Port(object):
         try:
             test_suite_json = json.loads(
                 self._filesystem.read_text_file(path_to_virtual_test_suites))
-            current_time = datetime.now()
             for json_config in test_suite_json:
                 # Strings are treated as comments.
                 if isinstance(json_config, str):
@@ -2331,6 +2375,8 @@ class Port(object):
                         '{} contains entries with the same prefix: {!r}. Please combine them'
                         .format(path_to_virtual_test_suites, json_config))
                 virtual_test_suites.append(vts)
+                for entry in vts.skip_base_tests:
+                    self._skip_base_tests.add(self.normalize_test_name(entry))
         except ValueError as error:
             raise ValueError('{} is not a valid JSON file: {}'.format(
                 path_to_virtual_test_suites, error))
@@ -2522,6 +2568,16 @@ class Port(object):
                 return suite
         return None
 
+    def get_suite_name_and_base_test(self, test_name):
+        # This assumes test_name is a valid test, and returns suite name
+        # and base test. For non virtual tests, returns empty string for
+        # suite name
+        if test_name.startswith('virtual/'):
+            _, name, base_test = test_name.split('/', 2)
+            return name, base_test
+
+        return '', test_name
+
     def lookup_virtual_test_base(self, test_name):
         suite = self._lookup_virtual_suite(test_name)
         if not suite:
@@ -2546,16 +2602,37 @@ class Port(object):
         normalized_test_name = self.normalize_test_name(test_name)
         for suite in self.virtual_test_suites():
             if normalized_test_name.startswith(suite.full_prefix):
-                return suite.args
+                return suite.args.copy()
         return []
 
-    def _is_in_allowlist_for_threaded_compositing(self, test_name):
-        # We start with a very simple and small subset of the tests to create
-        # the infrastructure for an allowlist and plan to move to an external
-        # file soon.
-        return test_name.startswith("vibration")
+    @memoized
+    def _get_blocked_tests_for_threaded_compositing_testing(self):
+        path = self._filesystem.join(self.web_tests_dir(),
+                                     'TestLists/SingleThreadedTests')
+        return set(self._filesystem.read_text_file(path).split('\n'))
 
-    def _build_path(self, *comps):
+    def _should_run_single_threaded(self, test_name):
+        # We currently only turn on threaded compositing tests for Linux
+        if not self.host.platform.is_linux():
+            return True
+        # We currently only turn on threaded compositing for web_tests
+        if self.is_wpt_test(test_name):
+            return True
+
+        block_list = self._get_blocked_tests_for_threaded_compositing_testing()
+
+        if test_name in block_list:
+            return True
+
+        # We apply the setting of a base test to all of its virtual versions
+        base_name = self.lookup_virtual_test_base(test_name)
+        if base_name:
+            if base_name in block_list:
+                return True
+
+        return False
+
+    def build_path(self, *comps):
         """Returns a path from the build directory."""
         return self._build_path_with_target(self._options.target, *comps)
 
@@ -2605,7 +2682,7 @@ class Port(object):
             for font_dir in font_dirs:
                 font_path = self._filesystem.join(font_dir, font_file)
                 if not self._filesystem.isabs(font_path):
-                    font_path = self._build_path(font_path)
+                    font_path = self.build_path(font_path)
                 if self._check_file_exists(font_path, '', more_logging=False):
                     result.append(font_path)
                     exists = True
@@ -2621,57 +2698,6 @@ class Port(object):
                                        message)
         return result
 
-    @staticmethod
-    def split_webdriver_test_name(test_name):
-        """Splits a WebDriver test name into a filename and a subtest name and
-        returns both of them. E.g.
-
-        test.py>>foo.html -> (test.py, foo.html)
-        test.py           -> (test.py, None)
-        """
-        separator_index = test_name.find(Port.WEBDRIVER_SUBTEST_SEPARATOR)
-        if separator_index == -1:
-            return (test_name, None)
-        webdriver_test_name = test_name[:separator_index]
-        separator_len = len(Port.WEBDRIVER_SUBTEST_SEPARATOR)
-        subtest_suffix = test_name[separator_index + separator_len:]
-        return (webdriver_test_name, subtest_suffix)
-
-    @staticmethod
-    def add_webdriver_subtest_suffix(test_name, subtest_name):
-        """Appends a subtest name to a WebDriver test name. E.g.
-
-        (test.py, foo.html) -> test.py>>foo.html
-        (test.py, None)     -> test.py
-        """
-        if subtest_name:
-            return test_name + Port.WEBDRIVER_SUBTEST_SEPARATOR + subtest_name
-        return test_name
-
-    @staticmethod
-    def split_webdriver_subtest_pytest_name(test_name):
-        """Splits a WebDriver test name in pytest format into a filename and a subtest name and
-        returns both of them. E.g.
-
-        test.py::foo.html -> (test.py, foo.html)
-        test.py           -> (test.py, None)
-        """
-        names_after_split = test_name.split(
-            Port.WEBDRIVER_SUBTEST_PYTEST_SEPARATOR)
-
-        assert len(names_after_split) <= 2, \
-            "%s has a length greater than 2 after split by ::" % (test_name)
-        if len(names_after_split) == 1:
-            return (names_after_split[0], None)
-
-        return (names_after_split[0], names_after_split[1])
-
-    @staticmethod
-    def add_webdriver_subtest_pytest_suffix(test_name, subtest_name):
-        if subtest_name is None:
-            return test_name
-        return test_name + Port.WEBDRIVER_SUBTEST_PYTEST_SEPARATOR + subtest_name
-
 
 class VirtualTestSuite(object):
     def __init__(self,
@@ -2679,6 +2705,7 @@ class VirtualTestSuite(object):
                  platforms=None,
                  bases=None,
                  exclusive_tests=None,
+                 skip_base_tests=None,
                  args=None,
                  owners=None,
                  expires=None):
@@ -2695,11 +2722,23 @@ class VirtualTestSuite(object):
             exclusive_tests = []
         assert isinstance(exclusive_tests, list)
 
+        if skip_base_tests == "ALL":
+            skip_base_tests = bases
+        elif skip_base_tests is None:
+            skip_base_tests = []
+        assert isinstance(skip_base_tests, list)
         self.full_prefix = 'virtual/' + prefix + '/'
         self.platforms = [x.lower() for x in platforms]
         self.bases = bases
         self.exclusive_tests = exclusive_tests
-        self.args = args
+        self.skip_base_tests = skip_base_tests
+        self.args = sorted(args)
+        # always put --enable-threaded-compositing at the end of list, so that after appending
+        # this parameter due to crrev.com/c/4599846, we do not need to restart content shell
+        # if the parameter set is same.
+        if ENABLE_THREADED_COMPOSITING_FLAG in self.args:
+            self.args.remove(ENABLE_THREADED_COMPOSITING_FLAG)
+            self.args.append(ENABLE_THREADED_COMPOSITING_FLAG)
 
     def __repr__(self):
         return "VirtualTestSuite('%s', %s, %s, %s)" % (self.full_prefix,

@@ -170,11 +170,19 @@ bool PaintChunker::AddHitTestDataToCurrentChunk(const PaintChunk::Id& id,
   auto& chunk = chunks_->back();
   chunk.bounds.Union(rect);
   if (touch_action != TouchAction::kAuto) {
-    chunk.EnsureHitTestData().touch_action_rects.push_back(
-        TouchActionRect{rect, touch_action});
+    auto& touch_action_rects = chunk.EnsureHitTestData().touch_action_rects;
+    if (touch_action_rects.empty() ||
+        !touch_action_rects.back().rect.Contains(rect) ||
+        touch_action_rects.back().allowed_touch_action != touch_action) {
+      touch_action_rects.push_back(TouchActionRect{rect, touch_action});
+    }
   }
-  if (blocking_wheel)
-    chunk.EnsureHitTestData().wheel_event_rects.push_back(rect);
+  if (blocking_wheel) {
+    auto& wheel_event_rects = chunk.EnsureHitTestData().wheel_event_rects;
+    if (wheel_event_rects.empty() || !wheel_event_rects.back().Contains(rect)) {
+      wheel_event_rects.push_back(rect);
+    }
+  }
   return created_new_chunk;
 }
 
@@ -204,17 +212,24 @@ void PaintChunker::AddSelectionToCurrentChunk(
   auto& chunk = chunks_->back();
 
 #if DCHECK_IS_ON()
+  gfx::Rect bounds_rect = chunk.bounds;
+
+  // In rare cases in the wild, the bounds_rect is 1 pixel off from the
+  // edge_rect below. We were unable to find the root cause, or to reproduce
+  // this locally, so we're relaxing the DCHECK. See https://crbug.com/1441243.
+  bounds_rect.Outset(1);
+
   if (start) {
     gfx::Rect edge_rect = gfx::BoundingRect(start->edge_start, start->edge_end);
-    DCHECK(chunk.bounds.Contains(edge_rect))
-        << chunk.bounds.ToString() << " does not contain "
+    DCHECK(bounds_rect.Contains(edge_rect))
+        << bounds_rect.ToString() << " does not contain "
         << edge_rect.ToString() << ", original bounds: " << debug_info;
   }
 
   if (end) {
     gfx::Rect edge_rect = gfx::BoundingRect(end->edge_start, end->edge_end);
-    DCHECK(chunk.bounds.Contains(edge_rect))
-        << chunk.bounds.ToString() << " does not contain "
+    DCHECK(bounds_rect.Contains(edge_rect))
+        << bounds_rect.ToString() << " does not contain "
         << edge_rect.ToString() << ", original bounds: " << debug_info;
   }
 #endif

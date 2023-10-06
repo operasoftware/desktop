@@ -84,17 +84,20 @@ void CustomElement::AddEmbedderCustomElementNameForTesting(
 }
 
 bool CustomElement::IsHyphenatedSpecElementName(const AtomicString& name) {
-  // Even if Blink does not implement one of the related specs, (for
-  // example annotation-xml is from MathML, which Blink does not
-  // implement) we must prohibit using the name because that is
-  // required by the HTML spec which we *do* implement. Don't remove
-  // names from this list without removing them from the HTML spec
-  // first.
+  // Even if Blink does not implement one of the related specs, we must prohibit
+  // using the name because that is required by the HTML spec which we *do*
+  // implement. Don't remove names from this list without removing them from the
+  // HTML spec first.
   DEFINE_STATIC_LOCAL(HashSet<AtomicString>, hyphenated_spec_element_names,
                       ({
-                          "annotation-xml", "color-profile", "font-face",
-                          "font-face-src", "font-face-uri", "font-face-format",
-                          "font-face-name", "missing-glyph",
+                          AtomicString("annotation-xml"),
+                          AtomicString("color-profile"),
+                          AtomicString("font-face"),
+                          AtomicString("font-face-src"),
+                          AtomicString("font-face-uri"),
+                          AtomicString("font-face-format"),
+                          AtomicString("font-face-name"),
+                          AtomicString("missing-glyph"),
                       }));
   return hyphenated_spec_element_names.Contains(name);
 }

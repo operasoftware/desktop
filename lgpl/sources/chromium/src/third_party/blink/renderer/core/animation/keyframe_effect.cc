@@ -230,7 +230,7 @@ KeyframeEffect::KeyframeEffect(Element* target,
     // pseudo element originates from.
     target_element_ = DynamicTo<PseudoElement>(target)->OriginatingElement();
     DCHECK(!target_element_->IsPseudoElement());
-    target_pseudo_ = target->tagName();
+    target_pseudo_ = PseudoElement::PseudoElementNameForEvents(target);
   }
 
   CountAnimatedProperties();
@@ -424,7 +424,9 @@ void KeyframeEffect::StartAnimationOnCompositor(
     absl::optional<double> start_time,
     base::TimeDelta time_offset,
     double animation_playback_rate,
-    CompositorAnimation* compositor_animation) {
+    CompositorAnimation* compositor_animation,
+    bool is_monotonic_timeline,
+    bool is_boundary_aligned) {
   DCHECK(!HasActiveAnimationsOnCompositor());
   // TODO(petermayo): Maybe we should recheck that we can start on the
   // compositor if we have the compositable IDs somewhere.
@@ -439,7 +441,8 @@ void KeyframeEffect::StartAnimationOnCompositor(
   CompositorAnimations::StartAnimationOnCompositor(
       *effect_target_, group, start_time, time_offset, SpecifiedTiming(),
       NormalizedTiming(), GetAnimation(), *compositor_animation, *Model(),
-      compositor_keyframe_model_ids_, animation_playback_rate);
+      compositor_keyframe_model_ids_, animation_playback_rate,
+      is_monotonic_timeline, is_boundary_aligned);
   DCHECK(!compositor_keyframe_model_ids_.empty());
 }
 
@@ -838,8 +841,9 @@ ActiveInterpolationsMap KeyframeEffect::InterpolationsForCommitStyles() {
       /*suppressed_animations=*/nullptr, kDefaultPriority, property_pass_filter,
       this);
 
-  if (removed)
+  if (removed) {
     ClearEffects();
+  }
 
   return results;
 }

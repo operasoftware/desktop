@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COLOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COLOR_H_
 
+#include <iosfwd>
 #include <tuple>
 #include "base/gtest_prod_util.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -102,7 +103,7 @@ class PLATFORM_EXPORT Color {
     kNone,
   };
 
-  static bool IsColorFunction(ColorSpace color_space) {
+  static bool IsPredefinedColorSpace(ColorSpace color_space) {
     return color_space == ColorSpace::kSRGB ||
            color_space == ColorSpace::kSRGBLinear ||
            color_space == ColorSpace::kDisplayP3 ||
@@ -129,6 +130,22 @@ class PLATFORM_EXPORT Color {
     return color_space == ColorSpace::kLab ||
            color_space == ColorSpace::kOklab ||
            color_space == ColorSpace::kLch || color_space == ColorSpace::kOklch;
+  }
+
+  static bool IsChromaSecondComponent(ColorSpace color_space) {
+    return color_space == ColorSpace::kLch || color_space == ColorSpace::kOklch;
+  }
+
+  static bool IsLegacyColorSpace(ColorSpace color_space) {
+    return color_space == ColorSpace::kSRGBLegacy ||
+           color_space == ColorSpace::kHSL || color_space == ColorSpace::kHWB;
+  }
+
+  static bool ColorSpaceHasHue(ColorSpace color_space) {
+    return color_space == Color::ColorSpace::kLch ||
+           color_space == Color::ColorSpace::kOklch ||
+           color_space == Color::ColorSpace::kHSL ||
+           color_space == Color::ColorSpace::kHWB;
   }
 
   // The default constructor creates a transparent color.
@@ -341,6 +358,12 @@ class PLATFORM_EXPORT Color {
   ColorSpace GetColorSpace() const { return color_space_; }
   void ConvertToColorSpace(ColorSpace destination_color_space);
 
+  // Colors can parse calc(NaN) and calc(Infinity). At computed value time this
+  // function is called which resolves all NaNs to zero and +/-infinities to
+  // maximum/minimum values, if they exist. It leaves finite values unchanged.
+  // See https://github.com/w3c/csswg-drafts/issues/8629
+  void ResolveNonFiniteValues();
+
   FRIEND_TEST_ALL_PREFIXES(BlinkColor, ColorMixNone);
   FRIEND_TEST_ALL_PREFIXES(BlinkColor, ColorInterpolation);
   FRIEND_TEST_ALL_PREFIXES(BlinkColor, HueInterpolation);
@@ -350,6 +373,7 @@ class PLATFORM_EXPORT Color {
   FRIEND_TEST_ALL_PREFIXES(BlinkColor, ExportAsXYZD50Floats);
 
  private:
+  String SerializeLegacyColorAsCSSColor() const;
   constexpr explicit Color(RGBA32 color)
       : param0_is_none_(0),
         param1_is_none_(0),
@@ -412,6 +436,9 @@ class PLATFORM_EXPORT Color {
   // The alpha value for the color is guaranteed to be in the [0, 1] interval.
   float alpha_ = 0.f;
 };
+
+// For unit tests and similar.
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream& os, const Color& color);
 
 PLATFORM_EXPORT int DifferenceSquared(const Color&, const Color&);
 PLATFORM_EXPORT Color ColorFromPremultipliedARGB(RGBA32);

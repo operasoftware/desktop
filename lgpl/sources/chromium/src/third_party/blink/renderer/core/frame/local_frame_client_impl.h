@@ -41,6 +41,7 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/common/performance/performance_timeline_constants.h"
 #include "third_party/blink/public/common/responsiveness_metrics/user_interaction_latency.h"
 #include "third_party/blink/public/common/subresource_load_metrics.h"
 #include "third_party/blink/public/mojom/devtools/devtools_agent.mojom-blink-forward.h"
@@ -146,7 +147,7 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void DispatchWillSendSubmitEvent(HTMLFormElement*) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
-  void NavigateBackForward(
+  bool NavigateBackForward(
       int offset,
       absl::optional<scheduler::TaskAttributionId>
           soft_navigation_heuristics_task_id) const override;
@@ -157,10 +158,12 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
                                  UserInteractionType interaction_type) override;
   void DidChangeCpuTiming(base::TimeDelta) override;
   void DidObserveLoadingBehavior(LoadingBehaviorFlag) override;
+  void DidObserveJavaScriptFrameworks(
+      const JavaScriptFrameworkDetectionResult&) override;
   void DidObserveSubresourceLoad(
       const SubresourceLoadMetrics& subresource_load_metrics) override;
   void DidObserveNewFeatureUsage(const UseCounterFeature&) override;
-  void DidObserveSoftNavigation(uint32_t count) override;
+  void DidObserveSoftNavigation(SoftNavigationMetrics metrics) override;
   void DidObserveLayoutShift(double score, bool after_input_or_scroll) override;
   void PreloadSubresourceOptimizationsForOrigins(
       const WTF::HashSet<scoped_refptr<const SecurityOrigin>>& origins)
@@ -172,8 +175,6 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   String UserAgentOverride(const KURL& url) override;
   WTF::String UserAgent(const KURL& url) override;
-  WTF::String FullUserAgent(const KURL& url) override;
-  WTF::String ReducedUserAgent(const KURL& url) override;
   absl::optional<blink::UserAgentMetadata> UserAgentMetadata(
       const KURL& url) override;
   WTF::String DoNotTrackValue() override;
@@ -306,8 +307,6 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   Member<WebLocalFrameImpl> web_frame_;
 
   String user_agent_;
-  String full_user_agent_;
-  String reduced_user_agent_;
 };
 
 template <>

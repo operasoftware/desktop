@@ -21,7 +21,8 @@ suite('ModelSettingsPolicyTest', function() {
     document.body.appendChild(model);
 
     model.documentSettings = {
-      hasCssMediaStyles: false,
+      allPagesHaveCustomSize: false,
+      allPagesHaveCustomOrientation: false,
       hasSelection: false,
       isModifiable: true,
       isScalingDisabled: false,
@@ -184,6 +185,19 @@ suite('ModelSettingsPolicyTest', function() {
        duplexCap: {option: [{type: 'NO_DUPLEX', is_default: true}]},
        duplexPolicy: DuplexModeRestriction.UNSET,
        duplexDefault: DuplexModeRestriction.UNSET,
+       expectedValue: false,
+       expectedAvailable: false,
+       expectedManaged: false,
+       expectedEnforced: false,
+       expectedShortEdge: false,
+       expectedShortEdgeAvailable: false,
+       expectedShortEdgeEnforced: false,
+     },
+     {
+       // Policies are undefined.
+       duplexCap: {option: [{type: 'NO_DUPLEX', is_default: true}]},
+       duplexPolicy: undefined,
+       duplexDefault: undefined,
        expectedValue: false,
        expectedAvailable: false,
        expectedManaged: false,

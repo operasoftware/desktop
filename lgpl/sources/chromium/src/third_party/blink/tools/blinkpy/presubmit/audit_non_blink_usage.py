@@ -34,8 +34,8 @@ _CONFIG = [
             # TODO(dcheng): Should these be in a more specific config?
             'gfx::ColorSpace',
             'gfx::CubicBezier',
-            'gfx::HDRMode',
             'gfx::HDRMetadata',
+            'gfx::HdrMetadataExtendedRange',
             'gfx::ICCProfile',
             'gfx::RadToDeg',
 
@@ -75,7 +75,6 @@ _CONFIG = [
             'base::FilePath',
             'base::FunctionRef',
             'base::GetUniqueIdForProcess',
-            'base::GUID',
             'base::HexStringToUInt64',
             'base::Hours',
             "base::i18n::TextDirection",
@@ -319,6 +318,7 @@ _CONFIG = [
 
             # cc painting and raster types.
             'cc::CategorizedWorkerPool',
+            'cc::ColorFilter',
             'cc::InspectablePaintRecorder',
             'cc::InspectableRecordPaintCanvas',
             'cc::PaintCanvas',
@@ -532,9 +532,6 @@ _CONFIG = [
             'skia::.+',
             'url::.+',
 
-            # Power scheduling instrumentation, which only depends on //base
-            "power_scheduler::.+",
-
             # Nested namespaces under the blink namespace
             'bindings::.+',
             'canvas_heuristic_parameters::.+',
@@ -543,6 +540,7 @@ _CONFIG = [
             'css_parsing_utils::.+',
             'css_toggle_key_handling::.+',
             'cssvalue::.+',
+            'element_locator::.+',
             'encoding::.+',
             'encoding_enum::.+',
             'event_handling_util::.+',
@@ -575,6 +573,7 @@ _CONFIG = [
             'trace_event::.+',
             'unicode::.+',
             'vector_math::.+',
+            'v8_compile_hints::.+',
             'web_core_test_support::.+',
             'worker_pool::.+',
             'xpath::.+',
@@ -588,6 +587,7 @@ _CONFIG = [
             'v8::.+',
             'v8_inspector::.+',
             'inspector_protocol_encoding::.+',
+            'snappy::.+',
 
             # Inspector instrumentation and protocol
             'probe::.+',
@@ -859,6 +859,12 @@ _CONFIG = [
         ],
     },
     {
+        'paths': ['third_party/blink/renderer/core/exported/web_view_impl.cc'],
+        'allowed': [
+            'base::TaskAnnotator',
+        ],
+    },
+    {
         'paths': ['third_party/blink/renderer/core/clipboard'],
         'allowed': ['base::EscapeForHTML'],
     },
@@ -900,6 +906,13 @@ _CONFIG = [
             # The existing code already contains gin::IsolateHolder.
             'gin::IsolateHolder',
         ],
+    },
+    {
+        'paths':
+        ['third_party/blink/renderer/core/frame/deprecation/deprecation.cc'],
+        'allowed': [
+            'base::CommandLine',
+        ]
     },
     {
         'paths': ['third_party/blink/renderer/core/frame/visual_viewport.cc'],
@@ -1302,7 +1315,6 @@ _CONFIG = [
             'gpu::MailboxHolder',
             'media::.+',
             'libyuv::.+',
-            'viz::SkColorTypeToResourceFormat',
             'viz::SkColorTypeToSinglePlaneSharedImageFormat',
         ]
     },
@@ -1318,6 +1330,7 @@ _CONFIG = [
             'base::MakeFixedFlatMap',
             'base::SharedMemory',
             'base::StringPiece',
+            'base::NumberToString',
             'base::ThreadTaskRunnerHandle',
             'media::.+',
             'libopus::.+',
@@ -1430,9 +1443,11 @@ _CONFIG = [
         'paths': [
             'third_party/blink/renderer/modules/webgpu/',
         ],
-        # The WebGPU Blink module needs access to the WebGPU control
-        # command buffer interface.
         'allowed': [
+            'base::CommandLine',
+            'switches::kEnableUnsafeWebGPU',
+            # The WebGPU Blink module needs access to the WebGPU control
+            # command buffer interface.
             'gpu::webgpu::PowerPreference',
             'gpu::webgpu::WebGPUInterface',
             'media::PIXEL_FORMAT_NV12',
@@ -1867,6 +1882,29 @@ _CONFIG = [
             'shared_highlighting::kFragmentTextBackgroundColorARGB',
         ]
     },
+    {
+        'paths': [
+            'third_party/blink/renderer/core/events/keyboard_event.h',
+            'third_party/blink/renderer/core/events/keyboard_event.cc',
+        ],
+        'allowed': [
+            'base::StringPiece16',
+            'base::i18n::UTF16CharIterator',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/service_worker/service_worker_router_type_converter.cc',
+            'third_party/blink/renderer/modules/service_worker/service_worker_router_type_converter_test.cc',
+            # TODO(crbug.com/1371756): consolidate code using liburlpattern.
+            # Especially, consolidate manifest and this code.
+        ],
+        'allowed': [
+            'liburlpattern::Parse',
+            'liburlpattern::Part',
+            'liburlpattern::PartType',
+        ]
+    }
 ]
 
 

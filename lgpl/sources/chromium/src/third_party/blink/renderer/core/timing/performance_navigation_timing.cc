@@ -55,7 +55,7 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
     mojom::blink::ResourceTimingInfoPtr resource_timing,
     base::TimeTicks time_origin)
     : PerformanceResourceTiming(std::move(resource_timing),
-                                "navigation",
+                                AtomicString("navigation"),
                                 time_origin,
                                 window.CrossOriginIsolatedCapability(),
                                 &window),
@@ -109,17 +109,17 @@ AtomicString PerformanceNavigationTiming::GetNavigationType(
   switch (type) {
     case kWebNavigationTypeReload:
     case kWebNavigationTypeFormResubmittedReload:
-      return "reload";
+      return AtomicString("reload");
     case kWebNavigationTypeBackForward:
     case kWebNavigationTypeFormResubmittedBackForward:
-      return "back_forward";
+      return AtomicString("back_forward");
     case kWebNavigationTypeLinkClicked:
     case kWebNavigationTypeFormSubmitted:
     case kWebNavigationTypeOther:
-      return "navigate";
+      return AtomicString("navigate");
   }
   NOTREACHED();
-  return "navigate";
+  return AtomicString("navigate");
 }
 
 DOMHighResTimeStamp PerformanceNavigationTiming::unloadEventStart() const {
@@ -211,7 +211,7 @@ AtomicString PerformanceNavigationTiming::type() const {
   if (DomWindow()) {
     return GetNavigationType(GetDocumentLoader()->GetNavigationType());
   }
-  return "navigate";
+  return AtomicString("navigate");
 }
 
 AtomicString PerformanceNavigationTiming::deliveryType() const {
@@ -373,10 +373,11 @@ void PerformanceNavigationTiming::BuildJSONValue(
   builder.AddNumber("loadEventEnd", loadEventEnd());
   builder.AddString("type", type());
   builder.AddNumber("redirectCount", redirectCount());
-
   builder.AddNumber(
       "activationStart",
       PerformanceNavigationTimingActivationStart::activationStart(*this));
+  builder.AddNumber("criticalCHRestart",
+                    criticalCHRestart(builder.GetScriptState()));
 
   if (RuntimeEnabledFeatures::BackForwardCacheNotRestoredReasonsEnabled(
           ExecutionContext::From(builder.GetScriptState()))) {
@@ -389,12 +390,6 @@ void PerformanceNavigationTiming::BuildJSONValue(
   if (RuntimeEnabledFeatures::PerformanceNavigateSystemEntropyEnabled(
           ExecutionContext::From(builder.GetScriptState()))) {
     builder.Add("systemEntropy", GetSystemEntropy(GetDocumentLoader()));
-  }
-
-  if (RuntimeEnabledFeatures::CriticalCHRestartNavigationTimingEnabled(
-          ExecutionContext::From(builder.GetScriptState()))) {
-    builder.Add("criticalCHRestart",
-                criticalCHRestart(builder.GetScriptState()));
   }
 }
 

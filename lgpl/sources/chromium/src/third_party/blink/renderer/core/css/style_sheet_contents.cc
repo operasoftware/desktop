@@ -269,9 +269,9 @@ static wtf_size_t ReplaceRuleIfExistsInternal(
       child_rules[i] = new_rule;
       return i;
     }
-    if (IsA<StyleRuleGroup>(rule)) {
+    if (auto* style_rule_group = DynamicTo<StyleRuleGroup>(rule)) {
       if (ReplaceRuleIfExistsInternal(old_rule, new_rule,
-                                      To<StyleRuleGroup>(rule)->ChildRules()) !=
+                                      style_rule_group->ChildRules()) !=
           std::numeric_limits<wtf_size_t>::max()) {
         return 0;  // Dummy non-failure value.
       }
@@ -798,34 +798,6 @@ void StyleSheetContents::NotifyRemoveFontFaceRule(
   StyleSheetContents* root = RootStyleSheet();
   RemoveFontFaceRules(root->loading_clients_, font_face_rule);
   RemoveFontFaceRules(root->completed_clients_, font_face_rule);
-}
-
-static void FindFontFaceRulesFromRules(
-    const HeapVector<Member<StyleRuleBase>>& rules,
-    HeapVector<Member<const StyleRuleFontFace>>& font_face_rules) {
-  for (unsigned i = 0; i < rules.size(); ++i) {
-    StyleRuleBase* rule = rules[i].Get();
-
-    if (auto* font_face_rule = DynamicTo<StyleRuleFontFace>(rule)) {
-      font_face_rules.push_back(font_face_rule);
-    } else if (auto* media_rule = DynamicTo<StyleRuleMedia>(rule)) {
-      // We cannot know whether the media rule matches or not, but
-      // for safety, remove @font-face in the media rule (if exists).
-      FindFontFaceRulesFromRules(media_rule->ChildRules(), font_face_rules);
-    }
-  }
-}
-
-void StyleSheetContents::FindFontFaceRules(
-    HeapVector<Member<const StyleRuleFontFace>>& font_face_rules) {
-  for (unsigned i = 0; i < import_rules_.size(); ++i) {
-    if (!import_rules_[i]->GetStyleSheet()) {
-      continue;
-    }
-    import_rules_[i]->GetStyleSheet()->FindFontFaceRules(font_face_rules);
-  }
-
-  FindFontFaceRulesFromRules(ChildRules(), font_face_rules);
 }
 
 void StyleSheetContents::Trace(Visitor* visitor) const {

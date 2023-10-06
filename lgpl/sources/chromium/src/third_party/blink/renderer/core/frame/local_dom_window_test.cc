@@ -240,16 +240,6 @@ TEST_F(LocalDOMWindowTest, UserAgent) {
   const auto url = KURL("https://example.test");
   EXPECT_EQ(GetFrame().DomWindow()->UserAgent(url),
             GetFrame().Loader().UserAgent(url));
-  {
-    ScopedUserAgentReductionForTest s1(true);
-    EXPECT_EQ(GetFrame().DomWindow()->UserAgent(url),
-              GetFrame().Loader().ReducedUserAgent(url));
-  }
-  {
-    ScopedSendFullUserAgentAfterReductionForTest s1(true);
-    EXPECT_EQ(GetFrame().DomWindow()->UserAgent(url),
-              GetFrame().Loader().FullUserAgent(url));
-  }
 }
 
 // Tests ExecutionContext::GetContentSecurityPolicyForCurrentWorld().

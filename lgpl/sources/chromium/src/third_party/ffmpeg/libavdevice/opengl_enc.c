@@ -594,7 +594,8 @@ static av_cold int opengl_read_limits(AVFormatContext *h)
     }
 
     av_log(h, AV_LOG_DEBUG, "OpenGL version: %s\n", version);
-    sscanf(version, "%d.%d", &major, &minor);
+    if (sscanf(version, "%d.%d", &major, &minor) != 2)
+        return AVERROR(ENOSYS);
 
     for (i = 0; required_extensions[i].extension; i++) {
         if (major < required_extensions[i].major &&
@@ -1198,6 +1199,10 @@ static int opengl_draw(AVFormatContext *h, void *input, int repaint, int is_pkt)
     enum AVPixelFormat pix_fmt = h->streams[0]->codecpar->format;
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
     int ret;
+
+    /* At this point, opengl->glcontext implies opengl->glcontext */
+    if (opengl->glcontext)
+        SDL_GL_MakeCurrent(opengl->window, opengl->glcontext);
 
 #if CONFIG_SDL2
     if (!opengl->no_window && (ret = opengl_sdl_process_events(h)) < 0)

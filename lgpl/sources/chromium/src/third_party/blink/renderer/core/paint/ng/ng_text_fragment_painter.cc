@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/core/paint/paint_auto_dark_mode.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/selection_bounds_recorder.h"
-#include "third_party/blink/renderer/core/paint/text_painter.h"
 #include "third_party/blink/renderer/core/paint/text_painter_base.h"
 #include "third_party/blink/renderer/core/style/applied_text_decoration.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
@@ -202,12 +201,10 @@ void NGTextFragmentPainter::PaintSymbol(const LayoutObject* layout_object,
                                         const PhysicalSize box_size,
                                         const PaintInfo& paint_info,
                                         const PhysicalOffset& paint_offset) {
-  PhysicalRect marker_rect(ListMarker::RelativeSymbolMarkerRect(
-      style, LayoutCounter::ListStyle(layout_object, style), box_size.width));
+  const AtomicString& type = LayoutCounter::ListStyle(layout_object, style);
+  PhysicalRect marker_rect(
+      ListMarker::RelativeSymbolMarkerRect(style, type, box_size.width));
   marker_rect.Move(paint_offset);
-
-  // TODO(1229581): Use PhysicalRect directly.
-  const LayoutRect marker = marker_rect.ToLayoutRect();
 
   DCHECK(layout_object);
 #if DCHECK_IS_ON()
@@ -222,15 +219,14 @@ void NGTextFragmentPainter::PaintSymbol(const LayoutObject* layout_object,
   Color color(layout_object->ResolveColor(GetCSSPropertyColor()));
   if (BoxModelObjectPainter::ShouldForceWhiteBackgroundForPrintEconomy(
           layout_object->GetDocument(), style)) {
-    color = TextPainter::TextColorForWhiteBackground(color);
+    color = TextPainterBase::TextColorForWhiteBackground(color);
   }
   // Apply the color to the list marker text.
   context.SetFillColor(color);
   context.SetStrokeColor(color);
   context.SetStrokeStyle(kSolidStroke);
   context.SetStrokeThickness(1.0f);
-  gfx::Rect snapped_rect = ToPixelSnappedRect(marker);
-  const AtomicString& type = LayoutCounter::ListStyle(layout_object, style);
+  const gfx::Rect snapped_rect = ToPixelSnappedRect(marker_rect);
   AutoDarkMode auto_dark_mode(
       PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kListSymbol));
   if (type == keywords::kDisc) {
@@ -243,12 +239,29 @@ void NGTextFragmentPainter::PaintSymbol(const LayoutObject* layout_object,
              type == keywords::kDisclosureClosed) {
     Path path =
         GetCanonicalDisclosurePath(style, type == keywords::kDisclosureOpen);
-    path.Transform(AffineTransform().Scale(marker.Width(), marker.Height()));
-    path.Translate(gfx::Vector2dF(marker.X(), marker.Y()));
+    path.Transform(AffineTransform::MakeScaleNonUniform(marker_rect.Width(),
+                                                        marker_rect.Height()));
+    path.Translate(gfx::Vector2dF(marker_rect.X(), marker_rect.Y()));
     context.FillPath(path, auto_dark_mode);
   } else {
     NOTREACHED();
   }
+}
+
+bool NGTextFragmentPainter::ShouldRecordHitTestData(
+    const PaintInfo& paint_info) const {
+  // Hit test data are only needed for compositing.
+  if (paint_info.ShouldOmitCompositingInfo()) {
+    return false;
+  }
+
+  // We need to record hit test data for a text fragment when an ancestor
+  // inline element has special hit test situations. Touch action doesn't apply
+  // to non-replaced inline elements so we don't need to check it here.
+  // TODO(crbug.com/1413877): Handle pointer-events.
+  return cursor_.CurrentItem()
+      ->GetLayoutObject()
+      ->InsideBlockingWheelEventHandler();
 }
 
 void NGTextFragmentPainter::Paint(const PaintInfo& paint_info,
@@ -283,6 +296,13 @@ void NGTextFragmentPainter::Paint(const PaintInfo& paint_info,
   if (UNLIKELY(text_combine))
     LayoutNGTextCombine::AssertStyleIsValid(style);
 #endif
+
+  if (ShouldRecordHitTestData(paint_info)) {
+    paint_info.context.GetPaintController().RecordHitTestData(
+        *text_item.GetDisplayItemClient(), ToPixelSnappedRect(physical_box),
+        layout_object->EffectiveAllowedTouchAction(),
+        layout_object->InsideBlockingWheelEventHandler());
+  }
 
   // Determine whether or not we’ll need a writing-mode rotation, but don’t
   // actually rotate until we reach the steps that need it.
