@@ -104,8 +104,9 @@ void TCPWritableStreamWrapper::OnAbortSignal() {
   }
 }
 
-ScriptPromise TCPWritableStreamWrapper::Write(ScriptValue chunk,
-                                              ExceptionState& exception_state) {
+ScriptPromise<IDLUndefined> TCPWritableStreamWrapper::Write(
+    ScriptValue chunk,
+    ExceptionState& exception_state) {
   // There can only be one call to write() in progress at a time.
   DCHECK(!write_promise_resolver_);
   DCHECK(!buffer_source_);
@@ -115,18 +116,19 @@ ScriptPromise TCPWritableStreamWrapper::Write(ScriptValue chunk,
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNetworkError,
         "The underlying data pipe was disconnected.");
-    return ScriptPromise();
+    return ScriptPromise<IDLUndefined>();
   }
 
   buffer_source_ = V8BufferSource::Create(GetScriptState()->GetIsolate(),
                                           chunk.V8Value(), exception_state);
   if (exception_state.HadException()) {
-    return ScriptPromise();
+    return ScriptPromise<IDLUndefined>();
   }
   DCHECK(buffer_source_);
 
-  write_promise_resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(
-      GetScriptState(), exception_state.GetContext());
+  write_promise_resolver_ =
+      MakeGarbageCollected<ScriptPromiseResolver<IDLUndefined>>(
+          GetScriptState(), exception_state.GetContext());
   auto promise = write_promise_resolver_->Promise();
 
   WriteDataAsynchronously();
@@ -167,7 +169,7 @@ size_t TCPWritableStreamWrapper::WriteDataSynchronously(
   // This use of saturated cast means that we will fallback to asynchronous
   // sending if |data| is larger than 4GB. In practice we'd never be able to
   // send 4GB synchronously anyway.
-  uint32_t num_bytes = base::saturated_cast<uint32_t>(data.size());
+  size_t num_bytes = data.size();
   MojoResult result =
       data_pipe_->WriteData(data.data(), &num_bytes, MOJO_WRITE_DATA_FLAG_NONE);
 
@@ -230,13 +232,13 @@ void TCPWritableStreamWrapper::ErrorStream(int32_t error_code) {
                            ? write_promise_resolver_->GetScriptState()
                            : GetScriptState();
   // Scope is needed because there's no ScriptState* on the call stack for
-  // ScriptValue::From.
+  // ScriptValue.
   ScriptState::Scope scope{script_state};
 
-  auto exception = ScriptValue::From(
-      script_state, V8ThrowDOMException::CreateOrDie(
-                        script_state->GetIsolate(),
-                        DOMExceptionCode::kNetworkError, message));
+  auto exception = ScriptValue(script_state->GetIsolate(),
+                               V8ThrowDOMException::CreateOrDie(
+                                   script_state->GetIsolate(),
+                                   DOMExceptionCode::kNetworkError, message));
 
   // Can be already reset due to HandlePipeClosed() called previously.
   if (data_pipe_) {

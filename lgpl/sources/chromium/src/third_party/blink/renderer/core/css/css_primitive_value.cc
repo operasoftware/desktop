@@ -125,8 +125,12 @@ CSSPrimitiveValue::UnitCategory CSSPrimitiveValue::UnitTypeToUnitCategory(
 
 bool CSSPrimitiveValue::IsCalculatedPercentageWithLength() const {
   // TODO(crbug.com/979895): Move this function to |CSSMathFunctionValue|.
-  return IsCalculated() &&
-         To<CSSMathFunctionValue>(this)->Category() == kCalcPercentLength;
+  if (!IsCalculated()) {
+    return false;
+  }
+  CalculationResultCategory category =
+      To<CSSMathFunctionValue>(this)->Category();
+  return category == kCalcLengthFunction || category == kCalcIntrinsicSize;
 }
 
 bool CSSPrimitiveValue::IsResolution() const {
@@ -192,11 +196,22 @@ bool CSSPrimitiveValue::IsPercentage() const {
   return To<CSSMathFunctionValue>(this)->IsPercentage();
 }
 
+bool CSSPrimitiveValue::IsResolvableLength() const {
+  return IsLength() && !InvolvesLayout();
+}
+
 bool CSSPrimitiveValue::HasPercentage() const {
   if (IsNumericLiteralValue()) {
     return To<CSSNumericLiteralValue>(this)->IsPercentage();
   }
   return To<CSSMathFunctionValue>(this)->ExpressionNode()->HasPercentage();
+}
+
+bool CSSPrimitiveValue::InvolvesLayout() const {
+  if (IsNumericLiteralValue()) {
+    return To<CSSNumericLiteralValue>(this)->IsPercentage();
+  }
+  return To<CSSMathFunctionValue>(this)->ExpressionNode()->InvolvesLayout();
 }
 
 bool CSSPrimitiveValue::IsTime() const {
@@ -247,6 +262,9 @@ CSSPrimitiveValue* CSSPrimitiveValue::CreateFromLength(const Length& length,
       }
       return CSSNumericLiteralValue::Create(num, UnitType::kPercentage);
     }
+    case Length::kFlex:
+      return CSSNumericLiteralValue::Create(length.GetFloatValue(),
+                                            UnitType::kFlex);
     default:
       break;
   }
@@ -278,6 +296,24 @@ double CSSPrimitiveValue::ComputeDotsPerPixel() const {
   }
 
   return To<CSSNumericLiteralValue>(this)->ComputeDotsPerPixel();
+}
+
+double CSSPrimitiveValue::ComputeDegrees(
+    const CSSLengthResolver& length_resolver) const {
+  double result =
+      IsCalculated()
+          ? To<CSSMathFunctionValue>(this)->ComputeDegrees(length_resolver)
+          : To<CSSNumericLiteralValue>(this)->ComputeDegrees();
+  return CSSValueClampingUtils::ClampAngle(result);
+}
+
+double CSSPrimitiveValue::ComputeSeconds(
+    const CSSLengthResolver& length_resolver) const {
+  double result =
+      IsCalculated()
+          ? To<CSSMathFunctionValue>(this)->ComputeSeconds(length_resolver)
+          : To<CSSNumericLiteralValue>(this)->ComputeSeconds();
+  return CSSValueClampingUtils::ClampTime(result);
 }
 
 template <>
@@ -341,6 +377,22 @@ int CSSPrimitiveValue::ComputeInteger(
   return IsCalculated()
              ? To<CSSMathFunctionValue>(this)->ComputeInteger(length_resolver)
              : To<CSSNumericLiteralValue>(this)->ComputeInteger();
+}
+
+double CSSPrimitiveValue::ComputeNumber(
+    const CSSLengthResolver& length_resolver) const {
+  DCHECK(IsNumber());
+  return IsCalculated()
+             ? To<CSSMathFunctionValue>(this)->ComputeNumber(length_resolver)
+             : To<CSSNumericLiteralValue>(this)->ComputeNumber();
+}
+
+double CSSPrimitiveValue::ComputePercentage(
+    const CSSLengthResolver& length_resolver) const {
+  DCHECK(IsPercentage());
+  return IsCalculated() ? To<CSSMathFunctionValue>(this)->ComputePercentage(
+                              length_resolver)
+                        : To<CSSNumericLiteralValue>(this)->ComputePercentage();
 }
 
 double CSSPrimitiveValue::ComputeLengthDouble(
@@ -477,7 +529,7 @@ double CSSPrimitiveValue::ConversionToCanonicalUnitsScaleFactor(
 
 Length CSSPrimitiveValue::ConvertToLength(
     const CSSLengthResolver& length_resolver) const {
-  if (IsLength()) {
+  if (IsResolvableLength()) {
     return ComputeLength<Length>(length_resolver);
   }
   if (IsPercentage()) {
@@ -853,7 +905,7 @@ const char* CSSPrimitiveValue::UnitTypeToString(UnitType type) {
       return "khz";
     case UnitType::kTurns:
       return "turn";
-    case UnitType::kFraction:
+    case UnitType::kFlex:
       return "fr";
     case UnitType::kViewportWidth:
       return "vw";

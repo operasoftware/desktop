@@ -101,9 +101,7 @@ static void AutoExpandSearchableHiddenElementsUpFrameTree(Range* range) {
 
   // If the active match is hidden inside a hidden=until-found element, then we
   // should reveal it so find-in-page can scroll to it.
-  if (RuntimeEnabledFeatures::BeforeMatchEventEnabled(
-          first_node.GetExecutionContext()) &&
-      DisplayLockUtilities::RevealHiddenUntilFoundAncestors(first_node)) {
+  if (DisplayLockUtilities::RevealHiddenUntilFoundAncestors(first_node)) {
     needs_layout_shift_allowance = true;
     UseCounter::Count(first_node.GetDocument(),
                       WebFeature::kBeforematchRevealedHiddenMatchable);
@@ -137,8 +135,6 @@ static void AutoExpandSearchableHiddenElementsUpFrameTree(Range* range) {
       frame_needs_style_and_layout |=
           HTMLDetailsElement::ExpandDetailsAncestors(*frame_element);
       frame_needs_style_and_layout |=
-          RuntimeEnabledFeatures::BeforeMatchEventEnabled(
-              frame_element->GetExecutionContext()) &&
           DisplayLockUtilities::RevealHiddenUntilFoundAncestors(*frame_element);
       if (frame_needs_style_and_layout) {
         frame_element->GetDocument().UpdateStyleAndLayoutForNode(
@@ -166,7 +162,7 @@ static void ScrollToVisible(Range* match) {
       settings ? settings->GetSmoothScrollForFindEnabled() : false;
   mojom::blink::ScrollBehavior scroll_behavior =
       smooth_find_enabled ? mojom::blink::ScrollBehavior::kSmooth
-                          : mojom::blink::ScrollBehavior::kAuto;
+                          : mojom::blink::ScrollBehavior::kInstant;
   scroll_into_view_util::ScrollRectToVisible(
       *first_node.GetLayoutObject(), PhysicalRect(match->BoundingBox()),
       ScrollAlignment::CreateScrollIntoViewParams(
@@ -487,8 +483,8 @@ void TextFinder::ReportFindInPageResultToAccessibility(int identifier) {
   Node* end_node = active_match_->endContainer();
   ax_object_cache->HandleTextMarkerDataAdded(start_node, end_node);
 
-  int32_t start_id = ax_object_cache->GetAXID(start_node);
-  int32_t end_id = ax_object_cache->GetAXID(end_node);
+  int32_t start_id = start_node->GetDomNodeId();
+  int32_t end_id = end_node->GetDomNodeId();
 
   auto params = mojom::blink::FindInPageResultAXParams::New(
       identifier, active_match_index_ + 1, start_id,

@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/event_interface_names.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
@@ -68,7 +69,9 @@ NavigateEvent::NavigateEvent(ExecutionContext* context,
       info_(init->hasInfo()
                 ? init->info()
                 : ScriptValue(context->GetIsolate(),
-                              v8::Undefined(context->GetIsolate()))) {
+                              v8::Undefined(context->GetIsolate()))),
+      has_ua_visual_transition_(init->hasUAVisualTransition()),
+      source_element_(init->sourceElement()) {
   CHECK(IsA<LocalDOMWindow>(context));
   CHECK(!controller_ || controller_->signal() == signal_);
 }
@@ -202,6 +205,7 @@ void NavigateEvent::commit(ExceptionState& exception_state) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "commit() may only be used if { commit: "
                                       "'after-transition' } was specified.");
+    return;
   }
   if (IsBeingDispatched()) {
     exception_state.ThrowDOMException(
@@ -270,22 +274,22 @@ void NavigateEvent::CommitNow() {
 void NavigateEvent::React(ScriptState* script_state) {
   CHECK(navigation_action_handlers_list_.empty());
 
-  ScriptPromise promise;
+  ScriptPromiseUntyped promise;
   if (!navigation_action_promises_list_.empty()) {
-    promise =
-        ScriptPromise::All(script_state, navigation_action_promises_list_);
+    promise = ScriptPromiseUntyped::All(script_state,
+                                        navigation_action_promises_list_);
   } else {
     // There is a subtle timing difference between the fast-path for zero
     // promises and the path for 1+ promises, in both spec and implementation.
-    // In most uses of ScriptPromise::All / the Web IDL spec's "wait for all",
-    // this does not matter. However for us there are so many events and promise
-    // handlers firing around the same time (navigatesuccess, committed promise,
-    // finished promise, ...) that the difference is pretty easily observable by
-    // web developers and web platform tests. So, let's make sure we always go
-    // down the 1+ promises path.
-    promise = ScriptPromise::All(
-        script_state, HeapVector<ScriptPromise>(
-                          {ScriptPromise::CastUndefined(script_state)}));
+    // In most uses of ScriptPromiseUntyped::All / the Web IDL spec's "wait for
+    // all", this does not matter. However for us there are so many events and
+    // promise handlers firing around the same time (navigatesuccess, committed
+    // promise, finished promise, ...) that the difference is pretty easily
+    // observable by web developers and web platform tests. So, let's make sure
+    // we always go down the 1+ promises path.
+    promise = ScriptPromiseUntyped::All(
+        script_state, HeapVector<ScriptPromiseUntyped>(
+                          {ScriptPromiseUntyped::CastUndefined(script_state)}));
   }
 
   promise.Then(MakeGarbageCollected<ScriptFunction>(
@@ -373,7 +377,7 @@ void NavigateEvent::FinalizeNavigationActionPromisesList() {
   handlers_list.swap(navigation_action_handlers_list_);
 
   for (auto& function : handlers_list) {
-    ScriptPromise result;
+    ScriptPromiseUntyped result;
     if (function->Invoke(this).To(&result))
       navigation_action_promises_list_.push_back(result);
   }
@@ -400,7 +404,7 @@ void NavigateEvent::PotentiallyResetTheFocus() {
   }
 
   if (Element* focus_delegate = document->GetAutofocusDelegate()) {
-    focus_delegate->Focus();
+    focus_delegate->Focus(FocusParams(FocusTrigger::kUserGesture));
   } else {
     document->ClearFocusedElement();
     document->SetSequentialFocusNavigationStartingPoint(nullptr);
@@ -473,10 +477,10 @@ void NavigateEvent::ProcessScrollBehavior() {
   CHECK_EQ(intercept_state_, InterceptState::kCommitted);
   intercept_state_ = InterceptState::kScrolled;
 
-  absl::optional<HistoryItem::ViewState> view_state =
+  std::optional<HistoryItem::ViewState> view_state =
       dispatch_params_->destination_item
           ? dispatch_params_->destination_item->GetViewState()
-          : absl::nullopt;
+          : std::nullopt;
   // Use mojom::blink::ScrollRestorationType::kAuto unconditionally here
   // because we are certain that we want to actually scroll if we reach this
   // point. Using mojom::blink::ScrollRestorationType::kManual would block the
@@ -499,6 +503,7 @@ void NavigateEvent::Trace(Visitor* visitor) const {
   visitor->Trace(signal_);
   visitor->Trace(form_data_);
   visitor->Trace(info_);
+  visitor->Trace(source_element_);
   visitor->Trace(navigation_action_promises_list_);
   visitor->Trace(navigation_action_handlers_list_);
 }

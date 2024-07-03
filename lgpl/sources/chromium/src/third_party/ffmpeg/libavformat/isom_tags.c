@@ -118,6 +118,9 @@ const AVCodecTag ff_codec_movvideo_tags[] = {
 
     { AV_CODEC_ID_RAWVIDEO, MKTAG('W', 'R', 'A', 'W') },
 
+    { AV_CODEC_ID_VVC,  MKTAG('v', 'v', 'c', '1') },
+    { AV_CODEC_ID_VVC,  MKTAG('v', 'v', 'i', '1') },
+
     { AV_CODEC_ID_HEVC, MKTAG('h', 'e', 'v', '1') }, /* HEVC/H.265 which indicates parameter sets may be in ES */
     { AV_CODEC_ID_HEVC, MKTAG('h', 'v', 'c', '1') }, /* HEVC/H.265 which indicates parameter sets shall not be in ES */
     { AV_CODEC_ID_HEVC, MKTAG('d', 'v', 'h', 'e') }, /* HEVC-based Dolby Vision derived from hev1 */
@@ -260,6 +263,8 @@ const AVCodecTag ff_codec_movvideo_tags[] = {
     { AV_CODEC_ID_MAGICYUV, MKTAG('M', '8', 'Y', 'A') },
     { AV_CODEC_ID_MAGICYUV, MKTAG('M', '2', 'R', 'A') },
     { AV_CODEC_ID_MAGICYUV, MKTAG('M', '2', 'R', 'G') },
+    { AV_CODEC_ID_MAGICYUV, MKTAG('M', '4', 'R', 'A') },
+    { AV_CODEC_ID_MAGICYUV, MKTAG('M', '4', 'R', 'G') },
 
     { AV_CODEC_ID_SHEERVIDEO, MKTAG('S', 'h', 'r', '0') },
     { AV_CODEC_ID_SHEERVIDEO, MKTAG('S', 'h', 'r', '1') },
@@ -282,6 +287,8 @@ const AVCodecTag ff_codec_movvideo_tags[] = {
     { AV_CODEC_ID_MEDIA100, MKTAG('d', 't', 'N', 'T') },
     { AV_CODEC_ID_MEDIA100, MKTAG('d', 't', 'p', 'a') },
     { AV_CODEC_ID_MEDIA100, MKTAG('d', 't', 'P', 'A') },
+
+    { AV_CODEC_ID_CFHD, MKTAG('C', 'F', 'H', 'D') },
 
     { AV_CODEC_ID_NONE, 0 },
 };

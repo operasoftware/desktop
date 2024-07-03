@@ -56,6 +56,7 @@
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -66,6 +67,7 @@
 #include "third_party/blink/renderer/platform/animation/compositor_animation.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/graphics/platform_paint_worklet_layer_painter.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "ui/gfx/animation/keyframe/animation_curve.h"
 #include "ui/gfx/animation/keyframe/keyframed_animation_curve.h"
@@ -272,7 +274,18 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
     reasons |= kTargetHasInvalidCompositingState;
   }
 
-  PropertyHandleSet properties = keyframe_effect.Properties();
+  PropertyHandleSet properties = keyframe_effect.DynamicProperties();
+  if (RuntimeEnabledFeatures::StaticAnimationOptimizationEnabled()) {
+    // If all properties are static, we don't need to composite. The animation
+    // can only change at a phase boundary.
+    if (properties.empty()) {
+      reasons |= kAnimationHasNoVisibleChange;
+    }
+  }
+  if (keyframe_effect.HasStaticProperty()) {
+    UseCounter::Count(target_element.GetDocument(),
+                      WebFeature::kStaticPropertyInAnimation);
+  }
   for (const auto& property : properties) {
     if (!property.IsCSSProperty()) {
       // None of the below reasons make any sense if |property| isn't CSS, so we
@@ -454,7 +467,7 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
                  ElementAnimations::CompositedPaintStatus::kComposited);
     }
 #endif
-    reasons |= kCompositorPropertyAnimationsHaveNoEffect;
+    reasons |= kAnimationHasNoVisibleChange;
   }
 
   if (animation_to_add &&
@@ -501,19 +514,20 @@ bool CompositorAnimations::CompositorPropertyAnimationsHaveNoEffect(
       // Check that all filters has already loaded their resources.
       const auto& keyframes = groups.at(property)->Keyframes();
       for (const auto& keyframe : keyframes) {
-        const CompositorKeyframeValue* value =
-            keyframe->GetCompositorKeyframeValue();
-        const auto& operations = To<CompositorKeyframeFilterOperations>(value)
-                                     ->Operations()
-                                     .Operations();
-        for (const auto& operation : operations) {
-          if (operation->GetType() ==
-              FilterOperation::OperationType::kGpuShader) {
-            const auto* shader_operation =
-                To<GpuShaderFilterOperation>(operation.Get());
-            const auto* resource = shader_operation->Resource();
-            if (resource && !resource->IsLoaded()) {
-              return true;
+        if (const CompositorKeyframeValue* value =
+                keyframe->GetCompositorKeyframeValue()) {
+          const auto& operations = To<CompositorKeyframeFilterOperations>(value)
+                                       ->Operations()
+                                       .Operations();
+          for (const auto& operation : operations) {
+            if (operation->GetType() ==
+                FilterOperation::OperationType::kGpuShader) {
+              const auto* shader_operation =
+                  To<GpuShaderFilterOperation>(operation.Get());
+              const auto* resource = shader_operation->Resource();
+              if (resource && !resource->IsLoaded()) {
+                return true;
+              }
             }
           }
         }
@@ -587,7 +601,7 @@ CompositorAnimations::CheckCanStartElementOnCompositor(
     // DCHECK_GE(GetDocument().Lifecycle().GetState(),
     //           DocumentLifecycle::kPrePaintClean);
     bool has_direct_compositing_reasons = false;
-    if (layout_object->FirstFragment().NextFragment()) {
+    if (layout_object->IsFragmented()) {
       // Composited animation on multiple fragments is not supported.
       reasons |= kTargetHasInvalidCompositingState;
     } else if (const auto* paint_properties =
@@ -679,7 +693,7 @@ void CompositorAnimations::CancelIncompatibleAnimationsOnCompositor(
 void CompositorAnimations::StartAnimationOnCompositor(
     const Element& element,
     int group,
-    absl::optional<double> start_time,
+    std::optional<double> start_time,
     base::TimeDelta time_offset,
     const Timing& timing,
     const Timing::NormalizedTiming& normalized_timing,
@@ -897,7 +911,8 @@ void AddKeyframeToCurve(cc::KeyframedFilterAnimationCurve& curve,
                         const CompositorKeyframeValue* value,
                         const TimingFunction& keyframe_timing_function,
                         const gfx::RectF& reference_box) {
-  FilterEffectBuilder builder(reference_box, 1);
+  FilterEffectBuilder builder(reference_box, 1, Color::kBlack,
+                              mojom::blink::ColorScheme::kLight);
   CompositorFilterOperations operations = builder.BuildFilterOperations(
       To<CompositorKeyframeFilterOperations>(value)->Operations());
   std::unique_ptr<cc::FilterKeyframe> filter_keyframe =
@@ -988,7 +1003,7 @@ void CompositorAnimations::GetAnimationOnCompositor(
     const Timing& timing,
     const Timing::NormalizedTiming& normalized_timing,
     int group,
-    absl::optional<double> start_time,
+    std::optional<double> start_time,
     base::TimeDelta time_offset,
     const KeyframeEffectModelBase& effect,
     Vector<std::unique_ptr<cc::KeyframeModel>>& keyframe_models,
@@ -1001,7 +1016,7 @@ void CompositorAnimations::GetAnimationOnCompositor(
       timing, normalized_timing, time_offset, compositor_timing,
       animation_playback_rate, is_monotonic_timeline, is_boundary_aligned);
 
-  PropertyHandleSet properties = effect.Properties();
+  PropertyHandleSet properties = effect.DynamicProperties();
   DCHECK(!properties.empty());
   for (const auto& property : properties) {
     // If the animation duration is infinite, it doesn't make sense to scale
@@ -1016,8 +1031,8 @@ void CompositorAnimations::GetAnimationOnCompositor(
 
     std::unique_ptr<gfx::AnimationCurve> curve;
     DCHECK(timing.timing_function);
-    absl::optional<cc::KeyframeModel::TargetPropertyId> target_property_id =
-        absl::nullopt;
+    std::optional<cc::KeyframeModel::TargetPropertyId> target_property_id =
+        std::nullopt;
     CSSPropertyID css_property_id = property.GetCSSProperty().PropertyID();
     switch (css_property_id) {
       case CSSPropertyID::kOpacity: {
@@ -1169,35 +1184,31 @@ void CompositorAnimations::GetAnimationOnCompositor(
   DCHECK(!keyframe_models.empty());
 }
 
-bool CompositorAnimations::CheckUsesCompositedScrolling(Node* target) {
-  if (!target)
+bool CompositorAnimations::CanStartScrollTimelineOnCompositor(Node* target) {
+  if (!target) {
     return false;
-  DCHECK(target->GetDocument().Lifecycle().GetState() >=
-         DocumentLifecycle::kPrePaintClean);
-  auto* layout_box_model_object = target->GetLayoutBoxModelObject();
-  if (!layout_box_model_object)
-    return false;
-
-  if (RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()) {
-    if (RuntimeEnabledFeatures::CompositeBGColorAnimationEnabled() &&
-        target->GetDocument().Lifecycle().GetState() <
-            DocumentLifecycle::kPaintClean) {
-      // TODO(crbug.com/1434728): This happens when we paint a scroll-driven
-      // animating background.
-      return false;
-    }
-    const auto* properties =
-        layout_box_model_object->FirstFragment().PaintProperties();
-    if (!properties || !properties->Scroll()) {
-      return false;
-    }
-    const auto* paint_artifact_compositor =
-        layout_box_model_object->GetFrameView()->GetPaintArtifactCompositor();
-    return paint_artifact_compositor &&
-           paint_artifact_compositor->UsesCompositedScrolling(
-               *properties->Scroll());
   }
-  return layout_box_model_object->UsesCompositedScrolling();
+  if (!RuntimeEnabledFeatures::ScrollTimelineOnCompositorEnabled()) {
+    return false;
+  }
+  DCHECK_GE(target->GetDocument().Lifecycle().GetState(),
+            DocumentLifecycle::kPrePaintClean);
+  auto* layout_box = target->GetLayoutBox();
+  if (!layout_box) {
+    return false;
+  }
+  if (RuntimeEnabledFeatures::ScrollTimelineAlwaysOnCompositorEnabled()) {
+    return layout_box->FirstFragment().PaintProperties() &&
+           layout_box->FirstFragment().PaintProperties()->Scroll();
+  }
+  if (NativePaintImageGenerator::NativePaintWorkletAnimationsEnabled() &&
+      target->GetDocument().Lifecycle().GetState() <
+          DocumentLifecycle::kPaintClean) {
+    // TODO(crbug.com/1434728): This happens when we paint a scroll-driven
+    // animating background.
+    return false;
+  }
+  return layout_box->UsesCompositedScrolling();
 }
 
 CompositorAnimations::FailureReasons

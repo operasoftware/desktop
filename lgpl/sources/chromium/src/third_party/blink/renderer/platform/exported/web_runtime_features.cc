@@ -73,4 +73,7 @@ void WebRuntimeFeatures::EnableFluentScrollbars(bool enable) {
   ScrollbarThemeSettings::SetFluentScrollbarsEnabled(enable);
 }
 
+void WebRuntimeFeatures::EnableFluentOverlayScrollbars(bool enable) {
+  RuntimeEnabledFeatures::SetFluentOverlayScrollbarsEnabled(enable);
+}
 }  // namespace blink

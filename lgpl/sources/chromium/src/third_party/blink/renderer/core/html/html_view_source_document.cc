@@ -116,8 +116,7 @@ void HTMLViewSourceDocument::CreateContainingTable() {
   line_number_ = 0;
 
   // Create a checkbox to control line wrapping.
-  auto* checkbox =
-      MakeGarbageCollected<HTMLInputElement>(*this, CreateElementFlags());
+  auto* checkbox = MakeGarbageCollected<HTMLInputElement>(*this);
   checkbox->setAttribute(html_names::kTypeAttr, input_type_names::kCheckbox);
   checkbox->addEventListener(
       event_type_names::kChange,
@@ -167,6 +166,8 @@ void HTMLViewSourceDocument::AddSource(
       ProcessCommentToken(source, token);
       break;
     case HTMLToken::kCharacter:
+    case HTMLToken::kDOMPart:
+      // Process DOM Parts as character tokens.
       ProcessCharacterToken(source, token);
       break;
   }
@@ -260,7 +261,7 @@ Element* HTMLViewSourceDocument::AddSpanWithClassName(
     const AtomicString& class_name) {
   if (current_ == tbody_) {
     AddLine(class_name);
-    return current_;
+    return current_.Get();
   }
 
   auto* span = MakeGarbageCollected<HTMLSpanElement>(*this);

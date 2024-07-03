@@ -30,12 +30,16 @@
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
+namespace WTF {
+class String;
+}  // namespace WTF
+
 namespace blink {
 
 class ExceptionState;
+class ExecutionContext;
 class Node;
 class ScriptValue;
-class V8UnionNativeXPathNSResolverOrNode;
 class V8XPathNSResolver;
 class XPathExpression;
 class XPathResult;
@@ -50,11 +54,13 @@ class XPathEvaluator final : public ScriptWrappable {
 
   XPathEvaluator() = default;
 
-  XPathExpression* createExpression(const String& expression,
+  XPathExpression* createExpression(ExecutionContext* execution_context,
+                                    const WTF::String& expression,
                                     V8XPathNSResolver*,
                                     ExceptionState&);
-  V8UnionNativeXPathNSResolverOrNode* createNSResolver(Node* node_resolver);
-  XPathResult* evaluate(const String& expression,
+  Node* createNSResolver(Node* node_resolver);
+  XPathResult* evaluate(ExecutionContext* execustin_context,
+                        const WTF::String& expression,
                         Node* context_node,
                         V8XPathNSResolver*,
                         uint16_t type,

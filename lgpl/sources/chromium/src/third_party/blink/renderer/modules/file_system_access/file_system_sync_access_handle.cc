@@ -7,7 +7,6 @@
 #include "base/files/file_error_or.h"
 #include "base/numerics/checked_math.h"
 #include "base/types/expected_macros.h"
-#include "build/build_config.h"
 #include "third_party/blink/renderer/modules/file_system_access/file_system_access_file_delegate.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
@@ -17,8 +16,11 @@ FileSystemSyncAccessHandle::FileSystemSyncAccessHandle(
     ExecutionContext* context,
     FileSystemAccessFileDelegate* file_delegate,
     mojo::PendingRemote<mojom::blink::FileSystemAccessAccessHandleHost>
-        access_handle_remote)
-    : file_delegate_(file_delegate), access_handle_remote_(context) {
+        access_handle_remote,
+    V8FileSystemSyncAccessHandleMode lock_mode)
+    : file_delegate_(file_delegate),
+      access_handle_remote_(context),
+      lock_mode_(std::move(lock_mode)) {
   access_handle_remote_.Bind(std::move(access_handle_remote),
                              context->GetTaskRunner(TaskType::kStorage));
   DCHECK(access_handle_remote_.is_bound());
@@ -49,6 +51,14 @@ void FileSystemSyncAccessHandle::flush(ExceptionState& exception_state) {
   if (is_closed_) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "The file was already closed");
+    return;
+  }
+
+  if (lock_mode_.AsEnum() ==
+      V8FileSystemSyncAccessHandleMode::Enum::kReadOnly) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNoModificationAllowedError,
+        "Cannot write to access handle in 'read-only' mode");
     return;
   }
 
@@ -90,6 +100,14 @@ void FileSystemSyncAccessHandle::truncate(uint64_t size,
     return;
   }
 
+  if (lock_mode_.AsEnum() ==
+      V8FileSystemSyncAccessHandleMode::Enum::kReadOnly) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNoModificationAllowedError,
+        "Cannot write to access handle in 'read-only' mode");
+    return;
+  }
+
   DCHECK(file_delegate_->IsValid())
       << "file delgate invalidated before truncate";
 
@@ -112,10 +130,9 @@ void FileSystemSyncAccessHandle::truncate(uint64_t size,
   cursor_ = std::min(cursor_, size);
 }
 
-uint64_t FileSystemSyncAccessHandle::read(
-    MaybeShared<DOMArrayBufferView> buffer,
-    FileSystemReadWriteOptions* options,
-    ExceptionState& exception_state) {
+uint64_t FileSystemSyncAccessHandle::read(const AllowSharedBufferSource* buffer,
+                                          FileSystemReadWriteOptions* options,
+                                          ExceptionState& exception_state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (!file_delegate()->IsValid() || is_closed_) {
@@ -124,8 +141,6 @@ uint64_t FileSystemSyncAccessHandle::read(
     return 0;
   }
 
-  size_t read_size = buffer->byteLength();
-  uint8_t* read_data = static_cast<uint8_t*>(buffer->BaseAddressMaybeShared());
   uint64_t file_offset = options->hasAt() ? options->at() : cursor_;
   if (!base::CheckedNumeric<int64_t>(file_offset).IsValid()) {
     exception_state.ThrowTypeError("Cannot read at given offset");
@@ -133,7 +148,7 @@ uint64_t FileSystemSyncAccessHandle::read(
   }
 
   ASSIGN_OR_RETURN(
-      int result, file_delegate()->Read(file_offset, {read_data, read_size}),
+      int result, file_delegate()->Read(file_offset, AsSpan<uint8_t>(buffer)),
       [&](auto) {
         exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                           "Failed to read the content");
@@ -149,7 +164,7 @@ uint64_t FileSystemSyncAccessHandle::read(
 }
 
 uint64_t FileSystemSyncAccessHandle::write(
-    MaybeShared<DOMArrayBufferView> buffer,
+    const AllowSharedBufferSource* buffer,
     FileSystemReadWriteOptions* options,
     ExceptionState& exception_state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -160,18 +175,25 @@ uint64_t FileSystemSyncAccessHandle::write(
     return 0;
   }
 
+  if (lock_mode_.AsEnum() ==
+      V8FileSystemSyncAccessHandleMode::Enum::kReadOnly) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNoModificationAllowedError,
+        "Cannot write to access handle in 'read-only' mode");
+    return 0;
+  }
+
   uint64_t file_offset = options->hasAt() ? options->at() : cursor_;
   if (!base::CheckedNumeric<int64_t>(file_offset).IsValid()) {
     exception_state.ThrowTypeError("Cannot write at given offset");
     return 0;
   }
 
-  size_t write_size = buffer->byteLength();
+  auto buffer_span = AsSpan<uint8_t>(buffer);
+  size_t write_size = buffer_span.size();
   if (!base::CheckedNumeric<int>(write_size).IsValid()) {
     exception_state.ThrowTypeError("Cannot write more than 2GB");
   }
-
-  uint8_t* write_data = static_cast<uint8_t*>(buffer->BaseAddressMaybeShared());
 
   int64_t write_end_offset;
   if (!base::CheckAdd(file_offset, write_size)
@@ -184,7 +206,7 @@ uint64_t FileSystemSyncAccessHandle::write(
   DCHECK_GE(write_end_offset, 0);
 
   ASSIGN_OR_RETURN(
-      int result, file_delegate()->Write(file_offset, {write_data, write_size}),
+      int result, file_delegate()->Write(file_offset, buffer_span),
       [&](base::File::Error error) {
         DCHECK_NE(error, base::File::FILE_OK);
         if (error == base::File::FILE_ERROR_NO_SPACE) {
@@ -206,6 +228,10 @@ uint64_t FileSystemSyncAccessHandle::write(
       base::CheckAdd(file_offset, bytes_written).AssignIfValid(&cursor_);
   DCHECK(cursor_position_is_valid) << "cursor position could not be determined";
   return bytes_written;
+}
+
+const char* FileSystemSyncAccessHandle::mode() {
+  return lock_mode_.AsCStr();
 }
 
 }  // namespace blink

@@ -26,6 +26,7 @@
 #include "internal.h"
 #include "formats.h"
 #include "drawutils.h"
+#include "video.h"
 
 enum PadMode {
     MODE_ADD = 0,
@@ -57,10 +58,10 @@ typedef struct TPadContext {
 static const AVOption tpad_options[] = {
     { "start", "set the number of frames to delay input",              OFFSET(pad_start),  AV_OPT_TYPE_INT,   {.i64=0},        0,   INT_MAX, VF },
     { "stop",  "set the number of frames to add after input finished", OFFSET(pad_stop),   AV_OPT_TYPE_INT,   {.i64=0},       -1,   INT_MAX, VF },
-    { "start_mode", "set the mode of added frames to start",           OFFSET(start_mode), AV_OPT_TYPE_INT,   {.i64=MODE_ADD}, 0, NB_MODE-1, VF, "mode" },
-    { "add",   "add solid-color frames",                               0,                  AV_OPT_TYPE_CONST, {.i64=MODE_ADD},   0,         0, VF, "mode" },
-    { "clone", "clone first/last frame",                               0,                  AV_OPT_TYPE_CONST, {.i64=MODE_CLONE}, 0,         0, VF, "mode" },
-    { "stop_mode",  "set the mode of added frames to end",             OFFSET(stop_mode),  AV_OPT_TYPE_INT,   {.i64=MODE_ADD}, 0, NB_MODE-1, VF, "mode" },
+    { "start_mode", "set the mode of added frames to start",           OFFSET(start_mode), AV_OPT_TYPE_INT,   {.i64=MODE_ADD}, 0, NB_MODE-1, VF, .unit = "mode" },
+    { "add",   "add solid-color frames",                               0,                  AV_OPT_TYPE_CONST, {.i64=MODE_ADD},   0,         0, VF, .unit = "mode" },
+    { "clone", "clone first/last frame",                               0,                  AV_OPT_TYPE_CONST, {.i64=MODE_CLONE}, 0,         0, VF, .unit = "mode" },
+    { "stop_mode",  "set the mode of added frames to end",             OFFSET(stop_mode),  AV_OPT_TYPE_INT,   {.i64=MODE_ADD}, 0, NB_MODE-1, VF, .unit = "mode" },
     { "start_duration", "set the duration to delay input",             OFFSET(start_duration), AV_OPT_TYPE_DURATION, {.i64=0}, 0, INT64_MAX, VF },
     { "stop_duration",  "set the duration to pad input",               OFFSET(stop_duration),  AV_OPT_TYPE_DURATION, {.i64=0}, 0, INT64_MAX, VF },
     { "color", "set the color of the added frames",                    OFFSET(rgba_color), AV_OPT_TYPE_COLOR, {.str="black"},  0,         0, VF },
@@ -69,11 +70,17 @@ static const AVOption tpad_options[] = {
 
 AVFILTER_DEFINE_CLASS(tpad);
 
+static int needs_drawing(const TPadContext *s) {
+    return (
+        (s->stop_mode  == MODE_ADD && (s->pad_stop  != 0 || s->stop_duration  != 0)) ||
+        (s->start_mode == MODE_ADD && (s->pad_start != 0 || s->start_duration != 0))
+    );
+}
+
 static int query_formats(AVFilterContext *ctx)
 {
     TPadContext *s = ctx->priv;
-    if ((s->stop_mode == MODE_ADD && s->pad_stop != 0) ||
-        (s->start_mode == MODE_ADD && s->pad_start != 0))
+    if (needs_drawing(s))
         return ff_set_common_formats(ctx, ff_draw_supported_pixel_formats(0));
 
     return ff_set_common_formats(ctx, ff_all_formats(AVMEDIA_TYPE_VIDEO));
@@ -195,9 +202,8 @@ static int config_input(AVFilterLink *inlink)
     AVFilterContext *ctx = inlink->dst;
     TPadContext *s = ctx->priv;
 
-    if ((s->stop_mode == MODE_ADD && s->pad_stop != 0) ||
-        (s->start_mode == MODE_ADD && s->pad_start != 0)) {
-        ff_draw_init(&s->draw, inlink->format, 0);
+    if (needs_drawing(s)) {
+        ff_draw_init2(&s->draw, inlink->format, inlink->colorspace, inlink->color_range, 0);
         ff_draw_color(&s->draw, &s->color, s->rgba_color);
     }
 
@@ -224,13 +230,6 @@ static const AVFilterPad tpad_inputs[] = {
     },
 };
 
-static const AVFilterPad tpad_outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
 const AVFilter ff_vf_tpad = {
     .name          = "tpad",
     .description   = NULL_IF_CONFIG_SMALL("Temporarily pad video frames."),
@@ -239,6 +238,6 @@ const AVFilter ff_vf_tpad = {
     .activate      = activate,
     .uninit        = uninit,
     FILTER_INPUTS(tpad_inputs),
-    FILTER_OUTPUTS(tpad_outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     FILTER_QUERY_FUNC(query_formats),
 };

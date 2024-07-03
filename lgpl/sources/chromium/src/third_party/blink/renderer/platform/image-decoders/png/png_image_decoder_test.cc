@@ -1210,20 +1210,17 @@ static void TestHighBitDepthPNGDecoding(const PNGSample& png_sample,
       skcms_PixelFormat_RGBA_ffff, skcms_AlphaFormat_Unpremul, nullptr, 4));
 
   Vector<float> expected_pixels = png_sample.expected_pixels;
-  bool test_succeed = true;
   const float decoding_tolerance = 0.001;
   for (int i = 0; i < 16; i++) {
     if (fabs(decoded_pixels_float_32[i] - expected_pixels[i]) >
         decoding_tolerance) {
-      DLOG(DCHECK) << "Pixel comparison failed. File: " << png_sample.filename
-                   << ", component index: " << i
-                   << ", actual: " << decoded_pixels_float_32[i]
-                   << ", expected: " << expected_pixels[i]
-                   << ", tolerance: " << decoding_tolerance;
-      test_succeed = false;
+      FAIL() << "Pixel comparison failed. File: " << png_sample.filename
+             << ", component index: " << i
+             << ", actual: " << decoded_pixels_float_32[i]
+             << ", expected: " << expected_pixels[i]
+             << ", tolerance: " << decoding_tolerance;
     }
   }
-  ASSERT_TRUE(test_succeed);
 }
 
 static void FillPNGSamplesSourcePixels(Vector<PNGSample>& png_samples) {
@@ -1522,6 +1519,37 @@ TEST(PNGTests, cicp) {
 
   const skcms_ICCProfile* png_profile = transform->SrcProfile();
   EXPECT_TRUE(skcms_TransferFunction_isPQish(&png_profile->trc[0].parametric));
+}
+
+TEST(PNGTests, HDRMetadata) {
+  const char* png_file = "/images/resources/cicp_pq.png";
+  scoped_refptr<SharedBuffer> data = ReadFile(png_file);
+  ASSERT_TRUE(data);
+
+  auto decoder = CreatePNGDecoder();
+  decoder->SetData(data.get(), true);
+  auto* frame = decoder->DecodeFrameBufferAtIndex(0);
+  ASSERT_TRUE(frame);
+  ASSERT_FALSE(decoder->Failed());
+  const std::optional<gfx::HDRMetadata> hdr_metadata =
+      decoder->GetHDRMetadata();
+  ASSERT_TRUE(hdr_metadata);
+
+  ASSERT_TRUE(hdr_metadata->cta_861_3);
+  EXPECT_EQ(hdr_metadata->cta_861_3->max_content_light_level, 4000u);
+  EXPECT_EQ(hdr_metadata->cta_861_3->max_frame_average_light_level, 2627u);
+
+  ASSERT_TRUE(hdr_metadata->smpte_st_2086);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fRX, .680f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fRY, .320f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fGX, .265f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fGY, .690f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fBX, .150f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fBY, .060f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fWX, .3127f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->primaries.fWY, .3290f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->luminance_max, 5000.f);
+  EXPECT_FLOAT_EQ(hdr_metadata->smpte_st_2086->luminance_min, .01f);
 }
 
 TEST(AnimatedPNGTests, TrnsMeansAlpha) {

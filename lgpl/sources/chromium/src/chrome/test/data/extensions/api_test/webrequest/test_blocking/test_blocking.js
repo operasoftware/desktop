@@ -444,12 +444,12 @@ function modifyRequestHeaders() {
     {urls: ["<all_urls>"]}, ["blocking"]);
   // Check the page content for our modified User-Agent string.
   navigateAndWait(getURLEchoUserAgent(), function() {
-    chrome.test.listenOnce(chrome.extension.onRequest, function(request) {
+    chrome.test.listenOnce(chrome.runtime.onMessage, function(request) {
       chrome.test.assertTrue(request.pass, "Request header was not set.");
     });
     chrome.tabs.executeScript(tabId,
       {
-        code: "chrome.extension.sendRequest(" +
+        code: "chrome.runtime.sendMessage(" +
             "{pass: document.body.innerText.indexOf('FoobarUA') >= 0});"
       });
   });
@@ -526,12 +526,12 @@ function modifyBinaryRequestHeaders() {
     {urls: ["<all_urls>"]}, ["blocking"]);
   // Check the page content for our modified User-Agent string.
   navigateAndWait(getURLEchoUserAgent(), function() {
-    chrome.test.listenOnce(chrome.extension.onRequest, function(request) {
+    chrome.test.listenOnce(chrome.runtime.onMessage, function(request) {
       chrome.test.assertTrue(request.pass, "Request header was not set.");
     });
     chrome.tabs.executeScript(tabId,
       {
-        code: "chrome.extension.sendRequest(" +
+        code: "chrome.runtime.sendMessage(" +
             "{pass: document.body.innerText.indexOf('FoobarUA') >= 0});"
       });
   });
@@ -1058,7 +1058,7 @@ function syncXhrsFromOurselfAreInvisible() {
 
 // Checks that asynchronous XHR requests from ourself are visible to
 // blocking handlers.
-function asyncXhrsFromOurselfAreVisible() {
+async function asyncXhrsFromOurselfAreVisible() {
   expect(
     [  // events
       { label: "a-onBeforeRequest",
@@ -1207,12 +1207,10 @@ function asyncXhrsFromOurselfAreVisible() {
     ],
     {urls: ["<all_urls>"]}, ["blocking"]);
   // Check the page content for our modified User-Agent string.
-  navigateAndWait(getURL("simpleLoad/a.html"), function() {
-    fetch(getURLHttpXHRData()).catch((e) => {
-      chrome.test.fail();
-    });
-    navigateAndWait(getURL("complexLoad/b.jpg"));
-  });
+  await new Promise(resolve =>
+    { navigateAndWait(getURL("simpleLoad/a.html"), resolve); });
+  await fetch(getURLHttpXHRData());
+  navigateAndWait(getURL("complexLoad/b.jpg"));
 };
 
 // Checks that the script resource request redirection to data url. And also

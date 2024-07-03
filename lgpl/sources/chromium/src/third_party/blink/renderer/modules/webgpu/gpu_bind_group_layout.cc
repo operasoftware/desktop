@@ -8,11 +8,13 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_bind_group_layout_entry.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_buffer_binding_layout.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_external_texture_binding_layout.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_feature_name.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_sampler_binding_layout.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_storage_texture_binding_layout.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_texture_binding_layout.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_conversions.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
+#include "third_party/blink/renderer/modules/webgpu/gpu_supported_features.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
@@ -119,26 +121,26 @@ GPUBindGroupLayout* GPUBindGroupLayout::Create(
     return nullptr;
   }
 
-  std::string label;
   WGPUBindGroupLayoutDescriptor dawn_desc = {};
   dawn_desc.nextInChain = nullptr;
   dawn_desc.entryCount = entry_count;
   dawn_desc.entries = entries.get();
-  if (webgpu_desc->hasLabel()) {
-    label = webgpu_desc->label().Utf8();
+  std::string label = webgpu_desc->label().Utf8();
+  if (!label.empty()) {
     dawn_desc.label = label.c_str();
   }
 
   GPUBindGroupLayout* layout = MakeGarbageCollected<GPUBindGroupLayout>(
-      device, device->GetProcs().deviceCreateBindGroupLayout(
-                  device->GetHandle(), &dawn_desc));
-  if (webgpu_desc->hasLabel())
-    layout->setLabel(webgpu_desc->label());
+      device,
+      device->GetProcs().deviceCreateBindGroupLayout(device->GetHandle(),
+                                                     &dawn_desc),
+      webgpu_desc->label());
   return layout;
 }
 
 GPUBindGroupLayout::GPUBindGroupLayout(GPUDevice* device,
-                                       WGPUBindGroupLayout bind_group_layout)
-    : DawnObject<WGPUBindGroupLayout>(device, bind_group_layout) {}
+                                       WGPUBindGroupLayout bind_group_layout,
+                                       const String& label)
+    : DawnObject<WGPUBindGroupLayout>(device, bind_group_layout, label) {}
 
 }  // namespace blink

@@ -42,13 +42,15 @@ PaintWorkletProxyClient* PaintWorkletProxyClient::From(WorkerClients* clients) {
 // static
 PaintWorkletProxyClient* PaintWorkletProxyClient::Create(LocalDOMWindow* window,
                                                          int worklet_id) {
-  WebLocalFrameImpl* local_frame =
-      WebLocalFrameImpl::FromFrame(window->GetFrame());
   PaintWorklet* paint_worklet = PaintWorklet::From(*window);
   scoped_refptr<base::SingleThreadTaskRunner> compositor_host_queue;
-  base::WeakPtr<PaintWorkletPaintDispatcher> compositor_paint_dispatcher =
-      local_frame->LocalRootFrameWidget()->EnsureCompositorPaintDispatcher(
-          &compositor_host_queue);
+  base::WeakPtr<PaintWorkletPaintDispatcher> compositor_paint_dispatcher;
+  if (WebLocalFrameImpl* local_frame =
+          WebLocalFrameImpl::FromFrame(window->GetFrame())) {
+    compositor_paint_dispatcher =
+        local_frame->LocalRootFrameWidget()->EnsureCompositorPaintDispatcher(
+            &compositor_host_queue);
+  }
   return MakeGarbageCollected<PaintWorkletProxyClient>(
       worklet_id, paint_worklet,
       window->GetTaskRunner(TaskType::kInternalDefault),
@@ -67,7 +69,7 @@ PaintWorkletProxyClient::PaintWorkletProxyClient(
       worklet_id_(worklet_id),
       state_(RunState::kUninitialized),
       main_thread_runner_(std::move(main_thread_runner)),
-      paint_worklet_(paint_worklet) {
+      paint_worklet_(MakeCrossThreadWeakHandle<PaintWorklet>(paint_worklet)) {
   DCHECK(IsMainThread());
 }
 
@@ -144,7 +146,8 @@ void PaintWorkletProxyClient::RegisterCSSPaintDefinition(
         *main_thread_runner_, FROM_HERE,
         CrossThreadBindOnce(
             &PaintWorklet::RegisterMainThreadDocumentPaintDefinition,
-            paint_worklet_, name, definition->NativeInvalidationProperties(),
+            MakeUnwrappingCrossThreadWeakHandle(paint_worklet_), name,
+            definition->NativeInvalidationProperties(),
             std::move(passed_custom_properties),
             definition->InputArgumentTypes(),
             definition->GetPaintRenderingContext2DSettings()->alpha()));
@@ -222,19 +225,23 @@ void PaintWorkletProxyClient::RegisterForNativePaintWorklet(
   // compositor schedules the actual paint job (PaintWorkletPainter::Paint),
   // which is after commit, the |paint_dispatcher_| should have been registerted
   // and ready to use.
-  PostCrossThreadTask(
-      *compositor_host_queue_, FROM_HERE,
-      CrossThreadBindOnce(
-          &PaintWorkletPaintDispatcher::RegisterPaintWorkletPainter,
-          paint_dispatcher_, WrapCrossThreadPersistent(this), task_runner));
+  if (compositor_host_queue_) {
+    PostCrossThreadTask(
+        *compositor_host_queue_, FROM_HERE,
+        CrossThreadBindOnce(
+            &PaintWorkletPaintDispatcher::RegisterPaintWorkletPainter,
+            paint_dispatcher_, WrapCrossThreadPersistent(this), task_runner));
+  }
 }
 
 void PaintWorkletProxyClient::UnregisterForNativePaintWorklet() {
-  PostCrossThreadTask(
-      *compositor_host_queue_, FROM_HERE,
-      CrossThreadBindOnce(
-          &PaintWorkletPaintDispatcher::UnregisterPaintWorkletPainter,
-          paint_dispatcher_, worklet_id_));
+  if (compositor_host_queue_) {
+    PostCrossThreadTask(
+        *compositor_host_queue_, FROM_HERE,
+        CrossThreadBindOnce(
+            &PaintWorkletPaintDispatcher::UnregisterPaintWorkletPainter,
+            paint_dispatcher_, worklet_id_));
+  }
   paint_dispatcher_ = nullptr;
 }
 

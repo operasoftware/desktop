@@ -48,17 +48,16 @@
 #include <float.h>
 #include <libavutil/lfg.h>
 #include "libavutil/opt.h"
-#include "libavutil/imgutils.h"
 #include "libavutil/mem.h"
 #include "libavutil/fifo.h"
 #include "libavutil/common.h"
 #include "libavutil/avassert.h"
+#include "libavutil/pixdesc.h"
 #include "libavutil/pixfmt.h"
 #include "avfilter.h"
 #include "framequeue.h"
 #include "filters.h"
 #include "transform.h"
-#include "formats.h"
 #include "internal.h"
 #include "opencl.h"
 #include "opencl_source.h"
@@ -1413,13 +1412,6 @@ static int filter_frame(AVFilterLink *link, AVFrame *input_frame)
             &debug_matches, 1);
     }
 
-#if FF_API_PKT_DURATION
-FF_DISABLE_DEPRECATION_WARNINGS
-    if (input_frame->pkt_duration) {
-        duration = input_frame->pkt_duration;
-    } else
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     if (input_frame->duration) {
         duration = input_frame->duration;
     } else {

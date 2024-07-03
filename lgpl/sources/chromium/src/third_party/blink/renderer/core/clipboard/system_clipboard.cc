@@ -371,9 +371,9 @@ void SystemClipboard::WriteDataObject(DataObject* data_object) {
   // a type. This prevents stomping on clipboard contents that might have been
   // written by extension functions such as chrome.bookmarkManagerPrivate.copy.
   //
-  // TODO(slangley): Use a mojo struct to send web_drag_data and allow receiving
-  // side to extract the data required.
-  // TODO(dcheng): Properly support text/uri-list here.
+  // TODO(crbug.com/332555471): Use a mojo struct to send web_drag_data and
+  // allow receiving side to extract the data required.
+  // TODO(crbug.com/332571415): Properly support text/uri-list here.
   HashMap<String, String> custom_data;
   WebDragData data = data_object->ToWebDragData();
   for (const WebDragData::Item& item : data.Items()) {
@@ -419,12 +419,12 @@ void SystemClipboard::ReadAvailableCustomAndStandardFormats(
 void SystemClipboard::ReadUnsanitizedCustomFormat(
     const String& type,
     mojom::blink::ClipboardHost::ReadUnsanitizedCustomFormatCallback callback) {
-  // TODO(ansollan): Add test coverage for all functions with this check in
-  // |SystemClipboard| and consider if it's appropriate to throw exceptions or
-  // reject promises if the context is detached.
+  // TODO(crbug.com/332555472): Add test coverage for all functions with this
+  //  check in `SystemClipboard` and consider if it's appropriate to throw
+  // exceptions or reject promises if the context is detached.
   if (!clipboard_.is_bound())
     return;
-  // The format size restriction is added in `ClipboardWriter::IsValidType`.
+  // The format size restriction is added in `ClipboardItem::supports`.
   DCHECK_LT(type.length(), mojom::blink::ClipboardHost::kMaxFormatSize);
   clipboard_->ReadUnsanitizedCustomFormat(type, std::move(callback));
 }
@@ -437,7 +437,7 @@ void SystemClipboard::WriteUnsanitizedCustomFormat(const String& type,
       data.size() >= mojom::blink::ClipboardHost::kMaxDataSize) {
     return;
   }
-  // The format size restriction is added in `ClipboardWriter::IsValidType`.
+  // The format size restriction is added in `ClipboardItem::supports`.
   DCHECK_LT(type.length(), mojom::blink::ClipboardHost::kMaxFormatSize);
   clipboard_->WriteUnsanitizedCustomFormat(type, std::move(data));
 }
@@ -561,8 +561,7 @@ mojo_base::BigBuffer SystemClipboard::Snapshot::Png(
     mojom::blink::ClipboardBuffer buffer) const {
   DCHECK(HasPng(buffer));
   // Make an owning copy of the png to return to user.
-  base::span<const uint8_t> span =
-      base::make_span(png_.value().data(), png_.value().size());
+  base::span<const uint8_t> span = base::make_span(png_.value());
   return mojo_base::BigBuffer(span);
 }
 
@@ -571,7 +570,7 @@ void SystemClipboard::Snapshot::SetPng(mojom::blink::ClipboardBuffer buffer,
                                        const mojo_base::BigBuffer& png) {
   BindToBuffer(buffer);
   // Make an owning copy of the png to save locally.
-  base::span<const uint8_t> span = base::make_span(png.data(), png.size());
+  base::span<const uint8_t> span = base::make_span(png);
   png_ = mojo_base::BigBuffer(span);
 }
 
@@ -617,6 +616,10 @@ void SystemClipboard::Snapshot::SetCustomData(
 // static
 mojom::blink::ClipboardFilesPtr SystemClipboard::Snapshot::CloneFiles(
     mojom::blink::ClipboardFilesPtr& files) {
+  if (!files) {
+    return {};
+  }
+
   WTF::Vector<mojom::blink::DataTransferFilePtr> vec;
   for (auto& dtf : files->files) {
     auto clones = CloneFsaToken(std::move(dtf->file_system_access_token));

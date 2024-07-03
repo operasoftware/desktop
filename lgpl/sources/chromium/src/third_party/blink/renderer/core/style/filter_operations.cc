@@ -98,6 +98,12 @@ bool FilterOperations::HasReferenceFilter() const {
                         &FilterOperation::GetType);
 }
 
+bool FilterOperations::UsesCurrentColor() const {
+  return base::ranges::any_of(operations_, [](const auto& operation) {
+    return operation->UsesCurrentColor();
+  });
+}
+
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 bool FilterOperations::HasFilterThatNeedReferenceBox() const {
   return base::ranges::any_of(operations_, [](const auto& operation) {

@@ -68,15 +68,6 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
     // not deferred or has already been canceled.
     virtual void Resume() = 0;
 
-    virtual void SetPriority(net::RequestPriority priority);
-
-    // Updates the request headers which is deferred  to be sent. This method
-    // needs to be called when the response is deferred on WillStartRequest or
-    // WillRedirectRequest and before calling Delegate::Resume().
-    virtual void UpdateDeferredRequestHeaders(
-        const net::HttpRequestHeaders& modified_request_headers,
-        const net::HttpRequestHeaders& modified_cors_exempt_request_headers);
-
     // Updates the response head which is deferred to be sent. This method needs
     // to be called when the response is deferred on
     // URLLoaderThrottle::WillProcessResponse() and before calling
@@ -84,11 +75,6 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
     virtual void UpdateDeferredResponseHead(
         network::mojom::URLResponseHeadPtr new_response_head,
         mojo::ScopedDataPipeConsumerHandle body);
-
-    // Pauses/resumes reading response body if the resource is fetched from
-    // network.
-    virtual void PauseReadingBodyFromNet();
-    virtual void ResumeReadingBodyFromNet();
 
     // Replaces the URLLoader and URLLoaderClient endpoints held by the
     // ThrottlingURLLoader instance.
@@ -237,11 +223,6 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
   virtual void WillOnCompleteWithError(
       const network::URLLoaderCompletionStatus& status,
       bool* defer);
-
-  // Must return true if the throttle may make cross-scheme redirects
-  // (which is usually considered unsafe, so allowed only if the setting
-  // is made very explicitly).
-  virtual bool makes_unsafe_redirect();
 
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 

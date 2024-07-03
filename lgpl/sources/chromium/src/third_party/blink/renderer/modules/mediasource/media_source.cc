@@ -62,6 +62,42 @@ using blink::WebSourceBuffer;
 
 namespace blink {
 
+namespace {
+
+#if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
+
+bool IsMp2tCodecSupported(std::string_view codec_id) {
+  if (auto result =
+          media::ParseVideoCodecString("", codec_id,
+                                       /*allow_ambiguous_matches=*/false)) {
+    if (result->codec != media::VideoCodec::kH264) {
+      return false;
+    }
+    return true;
+  }
+
+  auto audio_codec = media::AudioCodec::kUnknown;
+  bool is_codec_ambiguous = false;
+  if (media::ParseAudioCodecString("", codec_id, &is_codec_ambiguous,
+                                   &audio_codec)) {
+    if (is_codec_ambiguous) {
+      return false;
+    }
+
+    if (audio_codec != media::AudioCodec::kAAC &&
+        audio_codec != media::AudioCodec::kMP3) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+#endif  // BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
+
+}  // namespace
+
 static AtomicString ReadyStateToString(MediaSource::ReadyState state) {
   AtomicString result;
   switch (state) {
@@ -251,7 +287,7 @@ SourceBuffer* MediaSource::AddSourceBufferUsingConfig(
       return nullptr;
     }
 
-    absl::optional<media::AudioDecoderConfig> out_audio_config =
+    std::optional<media::AudioDecoderConfig> out_audio_config =
         AudioDecoder::MakeMediaAudioDecoderConfig(*(config->audioConfig()),
                                                   &console_message /* out */);
 
@@ -273,7 +309,7 @@ SourceBuffer* MediaSource::AddSourceBufferUsingConfig(
     }
 
     bool converter_needed = false;
-    absl::optional<media::VideoDecoderConfig> out_video_config =
+    std::optional<media::VideoDecoderConfig> out_video_config =
         VideoDecoder::MakeMediaVideoDecoderConfig(*(config->videoConfig()),
                                                   &console_message /* out */,
                                                   &converter_needed /* out */);
@@ -281,7 +317,7 @@ SourceBuffer* MediaSource::AddSourceBufferUsingConfig(
     // TODO(crbug.com/1144908): Initial prototype does not support h264
     // buffering. See above.
     if (out_video_config && converter_needed) {
-      out_video_config = absl::nullopt;
+      out_video_config = std::nullopt;
       console_message =
           "H.264/H.265 EncodedVideoChunk buffering is not yet supported in "
           "MSE.See https://crbug.com/1144908.";
@@ -533,6 +569,23 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
   String codecs = content_type.Parameter("codecs");
   ContentType filtered_content_type = content_type;
 
+#if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
+  // Mime util doesn't include the mp2t container in order to prevent codec
+  // support leaking into HtmlMediaElement.canPlayType. If the stream parser
+  // is enabled, we should check that the codecs are valid using the mp4
+  // container, since it can support any of the codecs we support for mp2t.
+  if (mime_type == "video/mp2t") {
+    std::vector<std::string> parsed_codec_ids;
+    media::SplitCodecs(codecs.Ascii(), &parsed_codec_ids);
+    for (const auto& codec_id : parsed_codec_ids) {
+      if (!IsMp2tCodecSupported(codec_id)) {
+        return false;
+      }
+    }
+    return true;
+  }
+#endif
+
 #if BUILDFLAG(ENABLE_PLATFORM_ENCRYPTED_DOLBY_VISION)
   // When build flag ENABLE_PLATFORM_ENCRYPTED_DOLBY_VISION and feature
   // kPlatformEncryptedDolbyVision are both enabled, encrypted Dolby Vision is
@@ -557,17 +610,12 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
     media::SplitCodecs(codecs.Ascii(), &parsed_codec_ids);
     bool first = true;
     for (const auto& codec_id : parsed_codec_ids) {
-      bool is_codec_ambiguous;
-      media::VideoCodec video_codec = media::VideoCodec::kUnknown;
-      media::VideoCodecProfile profile;
-      uint8_t level = 0;
-      media::VideoColorSpace color_space;
-      if (media::ParseVideoCodecString(mime_type.Ascii(), codec_id,
-                                       &is_codec_ambiguous, &video_codec,
-                                       &profile, &level, &color_space) &&
-          !is_codec_ambiguous &&
-          video_codec == media::VideoCodec::kDolbyVision) {
-        continue;
+      if (auto result =
+              media::ParseVideoCodecString(mime_type.Ascii(), codec_id,
+                                           /*allow_ambiguous_matches=*/false)) {
+        if (result->codec == media::VideoCodec::kDolbyVision) {
+          continue;
+        }
       }
       if (first)
         first = false;
@@ -663,11 +711,10 @@ bool MediaSource::RunUnlessElementGoneOrClosingUs(
   DCHECK(IsMainThread() ||
          !tracer);  // Cross-thread attachments do not use a tracer.
 
-  // TODO(https://crbug.com/878133): Relax to DCHECK once clear that same-thread
-  // indeed always has attachment here and is not regressed by requiring one to
-  // run |cb|.
-  CHECK(attachment) << "Attempt to run operation requiring attachment, but "
-                       "without having one.";
+  if (!attachment) {
+    // Element's context destruction may be in flight.
+    return false;
+  }
 
   if (!attachment->RunExclusively(true /* abort if not fully attached */,
                                   std::move(cb))) {
@@ -1286,7 +1333,7 @@ void MediaSource::SetSourceBufferActive(SourceBuffer* source_buffer,
 std::pair<scoped_refptr<MediaSourceAttachmentSupplement>, MediaSourceTracer*>
 MediaSource::AttachmentAndTracer() const {
   base::AutoLock lock(attachment_link_lock_);
-  return std::make_pair(media_source_attachment_, attachment_tracer_);
+  return std::make_pair(media_source_attachment_, attachment_tracer_.Get());
 }
 
 void MediaSource::EndOfStreamAlgorithm(
@@ -1361,7 +1408,7 @@ MediaSourceTracer* MediaSource::StartAttachingToMediaElement(
   media_source_attachment_ = attachment;
   attachment_tracer_ =
       MakeGarbageCollected<SameThreadMediaSourceTracer>(element, this);
-  return attachment_tracer_;
+  return attachment_tracer_.Get();
 }
 
 bool MediaSource::StartWorkerAttachingToMainThreadMediaElement(

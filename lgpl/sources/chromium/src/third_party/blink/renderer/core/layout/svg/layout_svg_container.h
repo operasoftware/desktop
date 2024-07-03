@@ -95,13 +95,20 @@ class LayoutSVGContainer : public LayoutSVGModelObject {
     NOT_DESTROYED();
     return content_;
   }
-
-  bool IsOfType(LayoutObjectType type) const override {
+  const SVGContentContainer& Content() const {
     NOT_DESTROYED();
-    return type == kLayoutObjectSVGContainer ||
-           LayoutSVGModelObject::IsOfType(type);
+    return content_;
   }
-  void UpdateLayout() override;
+
+  bool IsSVGContainer() const final {
+    NOT_DESTROYED();
+    return true;
+  }
+  void UpdateSVGLayout() override;
+  // Update LayoutObject state after layout has completed. Returns true if
+  // boundaries needs to be propagated (because of a change to the transform).
+  bool UpdateAfterLayout(SVGTransformChange transform_change,
+                         bool bbox_changed);
 
   void SetTransformUsesReferenceBox(bool transform_uses_reference_box) {
     NOT_DESTROYED();

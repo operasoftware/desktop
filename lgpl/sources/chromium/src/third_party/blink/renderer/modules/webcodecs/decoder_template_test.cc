@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/features/scoped_test_feature_override.h"
-#include "base/features/submodule_features.h"
-#include "base/test/task_environment.h"
-#include "base/threading/thread_restrictions.h"
 #include "media/video/mock_gpu_video_accelerator_factories.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,6 +18,7 @@
 #include "third_party/blink/renderer/modules/webcodecs/codec_pressure_manager.h"
 #include "third_party/blink/renderer/modules/webcodecs/codec_pressure_manager_provider.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_decoder.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -38,16 +35,11 @@ class DecoderTemplateTest : public testing::Test {
   ~DecoderTemplateTest() override = default;
 
   typename T::ConfigType* CreateConfig();
-  typename T::InitType* CreateInit(v8::Local<v8::Function> output_callback,
-                                   v8::Local<v8::Function> error_callback);
+  typename T::InitType* CreateInit(ScriptFunction* output_callback,
+                                   ScriptFunction* error_callback);
 
   T* CreateDecoder(ScriptState*, const typename T::InitType*, ExceptionState&);
-
- private:
-  base::ScopedTestFeatureOverride gpu_audio_decoder_enabled{
-      base::kFeaturePlatformAacDecoderInGpu, true};
-  base::ScopedTestFeatureOverride gpu_video_decoder_enabled{
-      base::kFeaturePlatformH264DecoderInGpu, true};
+  test::TaskEnvironment task_environment_;
 };
 
 template <>
@@ -70,11 +62,13 @@ AudioDecoder* DecoderTemplateTest<AudioDecoder>::CreateDecoder(
 
 template <>
 AudioDecoderInit* DecoderTemplateTest<AudioDecoder>::CreateInit(
-    v8::Local<v8::Function> output_callback,
-    v8::Local<v8::Function> error_callback) {
+    ScriptFunction* output_callback,
+    ScriptFunction* error_callback) {
   auto* init = MakeGarbageCollected<AudioDecoderInit>();
-  init->setOutput(V8AudioDataOutputCallback::Create(output_callback));
-  init->setError(V8WebCodecsErrorCallback::Create(error_callback));
+  init->setOutput(
+      V8AudioDataOutputCallback::Create(output_callback->V8Function()));
+  init->setError(
+      V8WebCodecsErrorCallback::Create(error_callback->V8Function()));
   return init;
 }
 
@@ -87,11 +81,13 @@ VideoDecoderConfig* DecoderTemplateTest<VideoDecoder>::CreateConfig() {
 
 template <>
 VideoDecoderInit* DecoderTemplateTest<VideoDecoder>::CreateInit(
-    v8::Local<v8::Function> output_callback,
-    v8::Local<v8::Function> error_callback) {
+    ScriptFunction* output_callback,
+    ScriptFunction* error_callback) {
   auto* init = MakeGarbageCollected<VideoDecoderInit>();
-  init->setOutput(V8VideoFrameOutputCallback::Create(output_callback));
-  init->setError(V8WebCodecsErrorCallback::Create(error_callback));
+  init->setOutput(
+      V8VideoFrameOutputCallback::Create(output_callback->V8Function()));
+  init->setError(
+      V8WebCodecsErrorCallback::Create(error_callback->V8Function()));
   return init;
 }
 

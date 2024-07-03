@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_encoding_parameters.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_send_parameters.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_set_parameter_options.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -39,6 +40,7 @@ class RTCPeerConnection;
 class RTCRtpCapabilities;
 class RTCRtpTransceiver;
 class RTCInsertableStreams;
+class RTCStatsReport;
 
 webrtc::RtpEncodingParameters ToRtpEncodingParameters(
     ExecutionContext* context,
@@ -55,6 +57,14 @@ class RTCRtpSender final : public ScriptWrappable,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  // If |require_encoded_insertable_streams| is true, no received frames will be
+  // passed to the packetizer until |createEncodedStreams()| has been called and
+  // the frames have been transformed and passed back to the returned
+  // WritableStream. If it's false, during construction a task will be posted to
+  // |encoded_transform_shortcircuit_runner| to check if
+  // |createEncodedStreams()| has been called yet and if not will tell the
+  // underlying WebRTC sender to 'short circuit' the transform, so frames will
+  // flow directly to the packetizer.
   // TODO(hbos): Get rid of sender's reference to RTCPeerConnection?
   // https://github.com/w3c/webrtc-pc/issues/1712
   RTCRtpSender(RTCPeerConnection*,
@@ -62,25 +72,24 @@ class RTCRtpSender final : public ScriptWrappable,
                String kind,
                MediaStreamTrack*,
                MediaStreamVector streams,
-               bool encoded_insertable_streams);
+               bool require_encoded_insertable_streams,
+               scoped_refptr<base::SequencedTaskRunner>
+                   encoded_transform_shortcircuit_runner);
 
   MediaStreamTrack* track();
   RTCDtlsTransport* transport();
   RTCDtlsTransport* rtcpTransport();
-  ScriptPromise replaceTrack(ScriptState*, MediaStreamTrack*);
+  ScriptPromise<IDLUndefined> replaceTrack(ScriptState*, MediaStreamTrack*);
   RTCDTMFSender* dtmf();
   static RTCRtpCapabilities* getCapabilities(ScriptState* state,
                                              const String& kind);
   RTCRtpSendParameters* getParameters();
-  ScriptPromise setParameters(ScriptState*, const RTCRtpSendParameters*);
-  ScriptPromise getStats(ScriptState*);
+  ScriptPromise<IDLUndefined> setParameters(ScriptState*,
+                                            const RTCRtpSendParameters*,
+                                            const RTCSetParameterOptions*);
+  ScriptPromise<RTCStatsReport> getStats(ScriptState*);
   void setStreams(HeapVector<Member<MediaStream>> streams, ExceptionState&);
   RTCInsertableStreams* createEncodedStreams(ScriptState*, ExceptionState&);
-  // TODO(crbug.com/1069295): Make these methods private.
-  RTCInsertableStreams* createEncodedAudioStreams(ScriptState*,
-                                                  ExceptionState&);
-  RTCInsertableStreams* createEncodedVideoStreams(ScriptState*,
-                                                  ExceptionState&);
 
   RTCRtpSenderPlatform* web_sender();
   // Sets the track. This must be called when the |RTCRtpSenderPlatform| has its
@@ -99,28 +108,39 @@ class RTCRtpSender final : public ScriptWrappable,
   void Trace(Visitor*) const override;
 
  private:
+  // Insertable Streams audio support methods
+  RTCInsertableStreams* CreateEncodedAudioStreams(ScriptState*,
+                                                  ExceptionState&);
   void RegisterEncodedAudioStreamCallback();
   void UnregisterEncodedAudioStreamCallback();
   void InitializeEncodedAudioStreams(ScriptState*);
-  void OnAudioFrameFromEncoder(
-      std::unique_ptr<webrtc::TransformableAudioFrameInterface> frame);
-
-  void RegisterEncodedVideoStreamCallback();
-  void UnregisterEncodedVideoStreamCallback();
-  void InitializeEncodedVideoStreams(ScriptState*);
-  void OnVideoFrameFromEncoder(
-      std::unique_ptr<webrtc::TransformableVideoFrameInterface> frame);
   void SetAudioUnderlyingSource(
       RTCEncodedAudioUnderlyingSource* new_underlying_source,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   void SetAudioUnderlyingSink(
       RTCEncodedAudioUnderlyingSink* new_underlying_sink);
+  void OnAudioFrameFromEncoder(
+      std::unique_ptr<webrtc::TransformableAudioFrameInterface> frame);
+
+  // Insertable Streams video support methods
+  RTCInsertableStreams* CreateEncodedVideoStreams(ScriptState*,
+                                                  ExceptionState&);
+  void RegisterEncodedVideoStreamCallback();
+  void UnregisterEncodedVideoStreamCallback();
+  void InitializeEncodedVideoStreams(ScriptState*);
   void SetVideoUnderlyingSource(
       RTCEncodedVideoUnderlyingSource* new_underlying_source,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   void SetVideoUnderlyingSink(
       RTCEncodedVideoUnderlyingSink* new_underlying_sink);
+  void OnVideoFrameFromEncoder(
+      std::unique_ptr<webrtc::TransformableVideoFrameInterface> frame);
+
   void LogMessage(const std::string& message);
+
+  // If createEncodedStreams has not yet been called, instead tell the webrtc
+  // encoded transform to 'short circuit', skipping calling the transform.
+  void MaybeShortCircuitEncodedStreams();
 
   Member<RTCPeerConnection> pc_;
   std::unique_ptr<RTCRtpSenderPlatform> sender_;
@@ -131,10 +151,7 @@ class RTCRtpSender final : public ScriptWrappable,
   MediaStreamVector streams_;
   Member<RTCRtpSendParameters> last_returned_parameters_;
   Member<RTCRtpTransceiver> transceiver_;
-
-  // Insertable Streams flag, |True| if the sender has been configured to
-  // use Encoded Insertable Streams.
-  bool encoded_insertable_streams_;
+  bool transform_shortcircuited_ = false;
 
   // Insertable Streams audio support
   base::Lock audio_underlying_source_lock_;

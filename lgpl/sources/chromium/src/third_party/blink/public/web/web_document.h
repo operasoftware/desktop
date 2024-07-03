@@ -32,6 +32,7 @@
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_DOCUMENT_H_
 
 #include "net/cookies/site_for_cookies.h"
+#include "net/url_request/referrer_policy.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-shared.h"
@@ -88,7 +89,7 @@ class BLINK_EXPORT WebDocument : public WebNode {
   WebString Encoding() const;
   WebString ContentLanguage() const;
   WebString GetReferrer() const;
-  absl::optional<SkColor> ThemeColor();
+  std::optional<SkColor> ThemeColor();
   // The url of the OpenSearch Description Document (if any).
   WebURL OpenSearchDescriptionURL() const;
 
@@ -121,6 +122,11 @@ class BLINK_EXPORT WebDocument : public WebNode {
   WebString ContentAsTextForTesting() const;
   WebElementCollection All() const;
   WebVector<WebFormElement> Forms() const;
+
+  // Returns all form elements that have no shadow-tree including ancestor that
+  // is also a form element. This includes form elements inside shadow trees.
+  WebVector<WebFormElement> GetTopLevelForms() const;
+
   WebURL CompleteURL(const WebString&) const;
   WebElement GetElementById(const WebString&) const;
   WebElement FocusedElement() const;
@@ -159,8 +165,8 @@ class BLINK_EXPORT WebDocument : public WebNode {
   // Returns true if the document is in prerendering.
   bool IsPrerendering();
 
-  // Return true if  accessibility processing has been enabled.
-  bool IsAccessibilityEnabled();
+  // Returns true if the document has a Document Picture-in-Picture window.
+  bool HasDocumentPictureInPictureWindow() const;
 
   // Adds `callback` to the post-prerendering activation steps.
   // https://wicg.github.io/nav-speculation/prerendering.html#document-post-prerendering-activation-steps-list
@@ -170,6 +176,17 @@ class BLINK_EXPORT WebDocument : public WebNode {
   void SetCookieManager(
       CrossVariantMojoRemote<
           network::mojom::RestrictedCookieManagerInterfaceBase> cookie_manager);
+
+  // Returns the referrer policy for this document's referrer.
+  net::ReferrerPolicy GetReferrerPolicy() const;
+
+  // Returns the referrer for this document.
+  WebString OutgoingReferrer() const;
+
+  // (Experimental) Initiates Link Preview for `url`.
+  //
+  // It is intended to be used in WebLinkPreviewTriggerer.
+  void InitiatePreview(const WebURL& url);
 
 #if INSIDE_BLINK
   WebDocument(Document*);

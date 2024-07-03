@@ -5,22 +5,20 @@
 import 'chrome://os-settings/lazy_load.js';
 
 import {SettingsPasspointSubpageElement} from 'chrome://os-settings/lazy_load.js';
-import {Router, routes} from 'chrome://os-settings/os_settings.js';
+import {CrLinkRowElement, Router, routes} from 'chrome://os-settings/os_settings.js';
 import {assert} from 'chrome://resources/ash/common/assert.js';
 import {MojoConnectivityProvider} from 'chrome://resources/ash/common/connectivity/mojo_connectivity_provider.js';
 import {PasspointSubscription} from 'chrome://resources/ash/common/connectivity/passpoint.mojom-webui.js';
 import {MojoInterfaceProviderImpl} from 'chrome://resources/ash/common/network/mojo_interface_provider.js';
 import {OncMojo} from 'chrome://resources/ash/common/network/onc_mojo.js';
 import {AppType} from 'chrome://resources/cr_components/app_management/app_management.mojom-webui.js';
-import {CrLinkRowElement} from 'chrome://resources/cr_elements/cr_link_row/cr_link_row.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {CertificateType} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/cros_network_config.mojom-webui.js';
 import {NetworkType} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/network_types.mojom-webui.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertNull, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {FakeNetworkConfig} from 'chrome://webui-test/chromeos/fake_network_config_mojom.js';
 import {FakePasspointService} from 'chrome://webui-test/chromeos/fake_passpoint_service_mojom.js';
-import {waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
+import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
 import {eventToPromise} from 'chrome://webui-test/test_util.js';
 
 import {FakePageHandler} from '../app_management/fake_page_handler.js';
@@ -36,12 +34,6 @@ suite('PasspointSubpage', () => {
   const CA_PEM = 'test-pem';
   const CA_CN = 'Passpoint Example Certificate Authority';
 
-  function flushAsync() {
-    flush();
-    // Use setTimeout to wait for the next macrotask.
-    return new Promise(resolve => setTimeout(resolve));
-  }
-
   async function init(sub: PasspointSubscription) {
     const serverCas = [];
     serverCas.push({
@@ -56,12 +48,12 @@ suite('PasspointSubpage', () => {
     });
     networkConfigApi_.setCertificatesForTest(serverCas, []);
     passpointServiceApi_.addSubscription(sub);
-    await flushAsync();
+    await flushTasks();
 
     const params = new URLSearchParams();
     params.append('id', sub.id);
     Router.getInstance().navigateTo(routes.PASSPOINT_DETAIL, params);
-    return flushAsync();
+    await flushTasks();
   }
 
   function getListItems(id: string) {
@@ -105,7 +97,6 @@ suite('PasspointSubpage', () => {
 
   suiteSetup(() => {
     loadTimeData.overrideValues({
-      isPasspointEnabled: true,
       isPasspointSettingsEnabled: true,
     });
     networkConfigApi_ = new FakeNetworkConfig();
@@ -191,6 +182,7 @@ suite('PasspointSubpage', () => {
       friendlyName: 'Passpoint Example Ltd.',
       provisioningSource: 'app.passpoint.example.com',
       expirationEpochMs: 0n,
+      trustedCa: null,
     };
     await init(sub);
 
@@ -237,6 +229,7 @@ suite('PasspointSubpage', () => {
       friendlyName: 'Passpoint Example Ltd.',
       provisioningSource: 'app.passpoint.example.com',
       expirationEpochMs: 0n,
+      trustedCa: null,
     };
     await init(sub);
 

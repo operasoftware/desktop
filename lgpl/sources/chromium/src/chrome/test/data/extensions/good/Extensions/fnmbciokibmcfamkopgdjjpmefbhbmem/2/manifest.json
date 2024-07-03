@@ -1,0 +1,9 @@
+{
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9Wo58NTG+p3+nnSMq7S3bj6xF9ChN7J/D8/zjHaVIOLzWM0vF422JeWOmuupjC+4vlSFVVsxu8lEVZjmoeiTp2NzkdPUCe8PGacf5yyZfP18Iu/5c2/gMM8Htyky9WRLudiTwAhV5M/Tj9Pq2KuesimyOCI+x1blh2W57e1/5+g5HELWQTc/M1yJnlGJvKLh4eA5Zo+dG8ixzMfV2apJ6d/3nGdkW8hbrjAIEPh+mgnxsTLKkK8eHbwV/zhA1pfWDMQvIQj4SPQjNe70/S6xb0AR2u7yudmYbupdx1BKem2ZsvmHKkOkVXYwMxbYRit72gnY/fO/zrXrKVygVdcriwIDAQAB",
+  "version": "2",
+  "name": "Bluebird",
+  "manifest_version": 2,
+  "background": {
+    "page": "background.html"
+  }
+}

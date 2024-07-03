@@ -23,15 +23,17 @@ InterpolableShader::InterpolableShader(AtomicString relative_url,
                                        AtomicString absolute_url,
                                        const Referrer& referrer,
                                        GpuShaderResource* resource,
-                                       std::unique_ptr<InterpolableList> args,
+                                       InterpolableList* args,
                                        float animation_frame)
     : referrer_(referrer),
       relative_url_(relative_url),
       absolute_url_(absolute_url),
       resource_(resource),
-      args_(std::move(args)) {
-  animation_frame_ = std::make_unique<InterpolableNumber>(animation_frame);
-}
+      args_(std::move(args)),
+      animation_frame_(
+          MakeGarbageCollected<InterpolableNumber>(animation_frame)) {}
+
+InterpolableShader::~InterpolableShader() = default;
 
 CSSValueList* InterpolableShader::CreateArgsList() const {
   auto* list = CSSValueList::CreateSpaceSeparated();
@@ -45,48 +47,44 @@ CSSValueList* InterpolableShader::CreateArgsList() const {
 }
 
 // static
-std::unique_ptr<InterpolableShader> InterpolableShader::CreateNeutral() {
-  return std::make_unique<InterpolableShader>(
+InterpolableShader* InterpolableShader::CreateNeutral() {
+  return MakeGarbageCollected<InterpolableShader>(
       AtomicString(), AtomicString(), Referrer(), nullptr,
-      std::make_unique<InterpolableList>(0), 0);
+      MakeGarbageCollected<InterpolableList>(0), 0);
 }
 
 // static
-std::unique_ptr<InterpolableShader> InterpolableShader::MaybeConvertCSSValue(
+InterpolableShader* InterpolableShader::MaybeConvertCSSValue(
     const CSSValue& value) {
   const auto* shader = DynamicTo<CSSShaderValue>(value);
   if (!shader)
     return nullptr;
 
   const auto* args = shader->Args();
-  auto list = std::make_unique<InterpolableList>(args->length());
+  auto* list = MakeGarbageCollected<InterpolableList>(args->length());
 
   for (wtf_size_t i = 0; i < args->length(); i++) {
     const auto* arg_value = DynamicTo<CSSPrimitiveValue>(args->Item(i));
     DCHECK(arg_value && arg_value->IsNumber());
-    list->Set(
-        i, std::make_unique<InterpolableNumber>(arg_value->GetDoubleValue()));
+    list->Set(i, MakeGarbageCollected<InterpolableNumber>(
+                     arg_value->GetDoubleValue()));
   }
 
-  return std::make_unique<InterpolableShader>(
+  return MakeGarbageCollected<InterpolableShader>(
       shader->RelativeUrl(), shader->AbsoluteUrl(), shader->GetReferrer(),
       shader->Resource(), std::move(list), shader->AnimationFrame());
 }
 
 InterpolableShader* InterpolableShader::RawClone() const {
-  std::unique_ptr<InterpolableList> args(
-      DynamicTo<InterpolableList>(args_->Clone().release()));
-  return new InterpolableShader(
-      relative_url_, absolute_url_, referrer_, resource_, std::move(args),
-      To<InterpolableNumber>(*animation_frame_->Clone()).Value());
+  return MakeGarbageCollected<InterpolableShader>(
+      relative_url_, absolute_url_, referrer_, resource_, args_->Clone(),
+      animation_frame_->Value());
 }
 
 InterpolableShader* InterpolableShader::RawCloneAndZero() const {
-  std::unique_ptr<InterpolableList> args(
-      DynamicTo<InterpolableList>(args_->CloneAndZero().release()));
-  return new InterpolableShader(
-      relative_url_, absolute_url_, referrer_, resource_, std::move(args),
-      To<InterpolableNumber>(*animation_frame_->CloneAndZero()).Value());
+  return MakeGarbageCollected<InterpolableShader>(relative_url_, absolute_url_,
+                                                  referrer_, resource_,
+                                                  args_->CloneAndZero(), 0);
 }
 
 void InterpolableShader::Scale(double scale) {
@@ -105,6 +103,13 @@ void InterpolableShader::AssertCanInterpolateWith(
   const InterpolableShader& other_shader = To<InterpolableShader>(other);
   args_->AssertCanInterpolateWith(*other_shader.args_);
   animation_frame_->AssertCanInterpolateWith(*other_shader.animation_frame_);
+}
+
+void InterpolableShader::Trace(Visitor* v) const {
+  InterpolableValue::Trace(v);
+  v->Trace(resource_);
+  v->Trace(args_);
+  v->Trace(animation_frame_);
 }
 
 bool InterpolableShader::IsCompatibleWith(

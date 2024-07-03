@@ -19,24 +19,16 @@
 #ifndef AVCODEC_VULKAN_VIDEO_H
 #define AVCODEC_VULKAN_VIDEO_H
 
-#include "codec_id.h"
 #include "vulkan.h"
 
 #include <vk_video/vulkan_video_codecs_common.h>
-#include "vulkan_video_codec_av1std.h"
-#include "vulkan_video_codec_av1std_decode.h"
+#include "vulkan_video_codec_av1std_mesa.h"
+#include "vulkan_video_codec_av1std_decode_mesa.h"
 
 #define CODEC_VER_MAJ(ver) (ver >> 22)
 #define CODEC_VER_MIN(ver) ((ver >> 12) & ((1 << 10) - 1))
 #define CODEC_VER_PAT(ver) (ver & ((1 << 12) - 1))
 #define CODEC_VER(ver) CODEC_VER_MAJ(ver), CODEC_VER_MIN(ver), CODEC_VER_PAT(ver)
-
-typedef struct FFVkCodecMap {
-    FFVulkanExtensions               encode_extension;
-    VkVideoCodecOperationFlagBitsKHR encode_op;
-    FFVulkanExtensions               decode_extension;
-    VkVideoCodecOperationFlagBitsKHR decode_op;
-} FFVkCodecMap;
 
 typedef struct FFVkVideoSession {
     VkVideoSessionKHR session;
@@ -45,11 +37,6 @@ typedef struct FFVkVideoSession {
 
     AVBufferPool *buf_pool;
 } FFVkVideoCommon;
-
-/**
- * Index is codec_id.
- */
-extern const FFVkCodecMap ff_vk_codec_map[AV_CODEC_ID_FIRST_AUDIO];
 
 /**
  * Get pixfmt from a Vulkan format.
@@ -70,6 +57,13 @@ VkVideoChromaSubsamplingFlagBitsKHR ff_vk_subsampling_from_av_desc(const AVPixFm
  * Get Vulkan's bit depth from an [8:12] integer.
  */
 VkVideoComponentBitDepthFlagBitsKHR ff_vk_depth_from_av_depth(int depth);
+
+
+/**
+ * Convert level from Vulkan to AV.
+ */
+int ff_vk_h264_level_to_av(StdVideoH264LevelIdc level);
+int ff_vk_h265_level_to_av(StdVideoH265LevelIdc level);
 
 typedef struct FFVkVideoBuffer {
     FFVkBuffer buf;

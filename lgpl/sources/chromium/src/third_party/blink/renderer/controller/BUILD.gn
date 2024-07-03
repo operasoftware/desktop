@@ -35,6 +35,9 @@ component("controller") {
   if (use_blink_extensions_chromeos) {
     deps += [ "//third_party/blink/renderer/extensions/chromeos" ]
   }
+  if (use_blink_extensions_webview) {
+    deps += [ "//third_party/blink/renderer/extensions/webview" ]
+  }
 
   configs += [
     "//third_party/blink/renderer:config",
@@ -54,6 +57,8 @@ component("controller") {
     "controller_export.h",
     "dev_tools_frontend_impl.cc",
     "dev_tools_frontend_impl.h",
+    "javascript_call_stack_generator.cc",
+    "javascript_call_stack_generator.h",
     "memory_usage_monitor.cc",
     "memory_usage_monitor.h",
     "performance_manager/renderer_resource_coordinator_impl.cc",
@@ -203,7 +208,10 @@ source_set("blink_perf_tests_sources") {
   visibility = [ "*" ]
   testonly = true
 
-  sources = [ "tests/run_all_perftests.cc" ]
+  sources = [
+    "tests/run_all_perftests.cc",
+    "tests/thread_state_test_environment.h",
+  ]
 
   deps = [
     ":controller",
@@ -249,10 +257,13 @@ source_set("blink_unittests_sources") {
   testonly = true
 
   sources = [
+    "//third_party/blink/renderer/platform/testing/main_thread_isolate_unittest.cc",
+    "//third_party/blink/renderer/platform/testing/task_environment_unittest.cc",
     "performance_manager/renderer_resource_coordinator_impl_test.cc",
     "performance_manager/v8_detailed_memory_reporter_impl_test.cc",
     "performance_manager/v8_worker_memory_reporter_test.cc",
     "tests/run_all_tests.cc",
+    "tests/thread_state_test_environment.h",
   ]
   if (is_linux || is_chromeos) {
     sources += [ "memory_usage_monitor_posix_test.cc" ]

@@ -32,6 +32,7 @@
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_LOCAL_FRAME_CLIENT_H_
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "base/functional/function_ref.h"
@@ -43,7 +44,6 @@
 #include "media/mojo/mojom/audio_processing.mojom-shared.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/loader/loading_behavior_flag.h"
@@ -63,10 +63,12 @@
 #include "third_party/blink/public/mojom/frame/user_activation_update_types.mojom-shared.h"
 #include "third_party/blink/public/mojom/loader/same_document_navigation_type.mojom-shared.h"
 #include "third_party/blink/public/mojom/media/renderer_audio_input_stream_factory.mojom-shared.h"
-#include "third_party/blink/public/mojom/portal/portal.mojom-shared.h"
+#include "third_party/blink/public/platform/child_url_loader_factory_bundle.h"
 #include "third_party/blink/public/platform/cross_variant_mojo_util.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_provider.h"
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
+#include "third_party/blink/public/platform/url_loader_throttle_provider.h"
+#include "third_party/blink/public/platform/web_background_resource_fetch_assets.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_content_security_policy_struct.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
@@ -92,6 +94,7 @@
 #include "third_party/blink/public/web/web_navigation_type.h"
 #include "ui/accessibility/ax_enums.mojom-shared.h"
 #include "ui/accessibility/ax_event.h"
+#include "ui/accessibility/ax_tree_update.h"
 #include "ui/events/types/scroll_types.h"
 #include "v8/include/v8.h"
 
@@ -114,6 +117,7 @@ enum class TreeScopeType;
 
 class AssociatedInterfaceProvider;
 class BrowserInterfaceBrokerProxy;
+class WebBackgroundResourceFetchAssets;
 class WebComputedAXTree;
 class WebContentDecryptionModule;
 class WebDedicatedWorkerHostFactoryClient;
@@ -137,6 +141,7 @@ class URLLoader;
 class WebURLRequest;
 class WebURLResponse;
 class WebView;
+class WebLinkPreviewTriggerer;
 struct FramePolicy;
 struct Impression;
 struct JavaScriptFrameworkDetectionResult;
@@ -149,6 +154,18 @@ struct WebWindowFeatures;
 enum class SyncCondition {
   kNotForced,  // Sync only if the value has changed since the last call.
   kForced,     // Force a sync even if the value is unchanged.
+};
+
+// The reason a WebLocalFrame is being detached. See
+// `WebLocalFrameClient::WillDetach()` for more details.
+enum class DetachReason {
+  // The WebLocalFrame is detached because the browsing context that contains it
+  // is getting deleted (e.g. <iframe> element getting detached)
+  kFrameDeletion,
+  // The WebLocalFrame is detached because of a navigation, which will create a
+  // new WebLocalFrame (possibly in a different renderer process) that will
+  // replace the current one and takes its place in the same browsing context.
+  kNavigation,
 };
 
 class BLINK_EXPORT WebLocalFrameClient {
@@ -273,13 +290,16 @@ class BLINK_EXPORT WebLocalFrameClient {
   // from outside of the browsing instance.
   virtual WebFrame* FindFrame(const WebString& name) { return nullptr; }
 
-  // Notification that the frame will be swapped out and replaced by another
-  // frame.
-  virtual void WillSwap() {}
-
   // Notification that the frame is being detached and sends the current frame's
-  // navigation state to the browser.
-  virtual void WillDetach() {}
+  // navigation state to the browser. Note that WebLocalFrame lifetime is not
+  // identical to the lifetime of a "browsing context" in the HTML standard.
+  // A WebLocalFrame can be detached for two reasons:
+  // - a cross-document navigation, in which case, it will be replaced by a new
+  // local or remote frame. In this case, the "browsing context" itself remains.
+  // - destruction, e.g. the frame owner element is removed from the DOM, or
+  // the window is closed. In this case, the "browsing context" itself is
+  // gone.
+  virtual void WillDetach(DetachReason detach_reason) {}
 
   // This frame has been detached. Embedders should release any resources
   // associated with this frame.
@@ -450,7 +470,7 @@ class BLINK_EXPORT WebLocalFrameClient {
   virtual void DidOpenDocumentInputStream(const WebURL&) {}
 
   // Called when a frame's page lifecycle state gets updated.
-  virtual void DidSetPageLifecycleState() {}
+  virtual void DidSetPageLifecycleState(bool restoring_from_bfcache) {}
 
   // Immediately notifies the browser of a change in the current HistoryItem.
   // Prefer DidUpdateCurrentHistoryItem().
@@ -504,7 +524,7 @@ class BLINK_EXPORT WebLocalFrameClient {
   // Update a context menu data for testing.
   virtual void UpdateContextMenuDataForTesting(
       const ContextMenuData&,
-      const absl::optional<gfx::Point>&) {}
+      const std::optional<gfx::Point>&) {}
 
   // Called when a new element gets focused. |from_element| is the previously
   // focused element, |to_element| is the newly focused one. Either can be null.
@@ -558,13 +578,22 @@ class BLINK_EXPORT WebLocalFrameClient {
   // A performance timing event (e.g. first paint) occurred
   virtual void DidChangePerformanceTiming() {}
 
-  // An Input Event observed.
-  virtual void DidObserveInputDelay(base::TimeDelta input_delay) {}
-
-  // A user interaction is observed.
-  virtual void DidObserveUserInteraction(base::TimeDelta max_event_duration,
-                                         UserInteractionType interaction_type) {
-  }
+  // A user interaction is observed. A user interaction can be built up from
+  // multiple input events (e.g. keydown then keyup). Each of these events has
+  // an input to next frame latency. This reports the timings of the max
+  // input-to-frame latency for each interaction. `max_event_start` is when
+  // input was received, `max_event_end` is when the next frame was
+  // presented, `max_event_queued_main_thread` is when the input was queued and
+  // `max_event_commit_finish` is when the next commit finished after event has
+  // been processed. See https://web.dev/inp/#whats-in-an-interaction for more
+  // detailed motivation and explanation.
+  virtual void DidObserveUserInteraction(
+      base::TimeTicks max_event_start,
+      base::TimeTicks max_event_queued_main_thread,
+      base::TimeTicks max_event_commit_finish,
+      base::TimeTicks max_event_end,
+      UserInteractionType interaction_type,
+      uint64_t interaction_offset) {}
 
   // The first scroll delay, which measures the time between the user's first
   // scrolling and the resultant display update, has been observed.
@@ -624,9 +653,6 @@ class BLINK_EXPORT WebLocalFrameClient {
   // The main frame scrolled.
   virtual void DidChangeScrollOffset() {}
 
-  // Informs the browser that the draggable regions have been updated.
-  virtual void DraggableRegionsChanged() {}
-
   // MediaStream -----------------------------------------------------
 
   virtual WebMediaStreamDeviceObserver* MediaStreamDeviceObserver() {
@@ -647,8 +673,8 @@ class BLINK_EXPORT WebLocalFrameClient {
   // Asks the embedder what values to send for User Agent client hints
   // (or nullopt if none).  Used only when UserAgentOverride() is non-empty;
   // Platform::current()->UserAgentMetadata() is used otherwise.
-  virtual absl::optional<UserAgentMetadata> UserAgentMetadataOverride() {
-    return absl::nullopt;
+  virtual std::optional<UserAgentMetadata> UserAgentMetadataOverride() {
+    return std::nullopt;
   }
 
   //
@@ -658,12 +684,16 @@ class BLINK_EXPORT WebLocalFrameClient {
   // Notifies the embedder about an accessibility event on a WebAXObject.
   virtual void PostAccessibilityEvent(const ui::AXEvent& event) {}
 
-  // Notifies tests that a WebAXObject is dirty and its state needs
-  // to be serialized again.
-  virtual void NotifyWebAXObjectMarkedDirty(const WebAXObject&) {}
-
   // Called when accessibility is ready to serialize.
-  virtual void AXReadyCallback() {}
+  // Returns true if a serialization occurs.
+  virtual bool SendAccessibilitySerialization(
+      std::vector<ui::AXTreeUpdate> updates,
+      std::vector<ui::AXEvent> events,
+      bool had_load_complete_messages) {
+    return false;
+  }
+
+  virtual bool IsAccessibilityEnabled() const { return false; }
 
   // Audio Output Devices API --------------------------------------------
 
@@ -690,6 +720,20 @@ class BLINK_EXPORT WebLocalFrameClient {
     return nullptr;
   }
 
+  virtual blink::ChildURLLoaderFactoryBundle* GetLoaderFactoryBundle() {
+    NOTREACHED();
+    return nullptr;
+  }
+
+  virtual URLLoaderThrottleProvider* GetURLLoaderThrottleProvider() {
+    return nullptr;
+  }
+
+  virtual scoped_refptr<WebBackgroundResourceFetchAssets>
+  MaybeGetBackgroundResourceFetchAssets() {
+    return nullptr;
+  }
+
   virtual std::unique_ptr<URLLoader> CreateURLLoaderForTesting();
 
   virtual void OnStopLoading() {}
@@ -705,10 +749,6 @@ class BLINK_EXPORT WebLocalFrameClient {
   CreateWebSocketHandshakeThrottle() {
     return nullptr;
   }
-
-  // AppCache ------------------------------------------------------------
-  virtual void UpdateSubresourceFactory(
-      std::unique_ptr<blink::PendingURLLoaderFactoryBundle> pending_factory) {}
 
   // Misc ----------------------------------------------------------------
 
@@ -793,6 +833,26 @@ class BLINK_EXPORT WebLocalFrameClient {
   // a window.print() call.
   virtual void ScriptedPrint() {}
 
+  // This method is ONLY for web tests and is not supposed to be overridden in
+  // classes other than web_frame_test_proxy. It's called from accessibility and
+  // is used as a way to notify that an accessibility object has been destroyed.
+  virtual void HandleAXObjectDetachedForTest(unsigned axid) {}
+
+  // This method is ONLY for web tests and is not supposed to be overridden in
+  // classes other than web_frame_test_proxy. It's called from accessibility and
+  // is used as a way to tunnel events to the accessibility_controller in web
+  // tests.
+  virtual void HandleWebAccessibilityEventForTest(
+      const blink::WebAXObject& object,
+      const char* event_name,
+      const std::vector<ui::AXEventIntent>& event_intents) {}
+
+  // This method is ONLY for web tests and is not supposed to be overridden in
+  // classes other than web_frame_test_proxy. It's called from accessibility and
+  // is used as a way to tunnel events to the accessibility_controller in web
+  // tests.
+  virtual void HandleWebAccessibilityEventForTest(const ui::AXEvent& event) {}
+
   // Create a new related WebView.  This method must clone its session storage
   // so any subsequent calls to createSessionStorageNamespace conform to the
   // WebStorage specification.
@@ -808,11 +868,16 @@ class BLINK_EXPORT WebLocalFrameClient {
       network::mojom::WebSandboxFlags,
       const SessionStorageNamespaceId& session_storage_namespace_id,
       bool& consumed_user_gesture,
-      const absl::optional<Impression>&,
-      const absl::optional<WebPictureInPictureWindowOptions>& pip_options,
+      const std::optional<Impression>&,
+      const std::optional<WebPictureInPictureWindowOptions>& pip_options,
       const WebURL& base_url) {
     return nullptr;
   }
+
+  virtual std::unique_ptr<WebLinkPreviewTriggerer> CreateLinkPreviewTriggerer();
+
+  virtual void SetLinkPreviewTriggererForTesting(
+      std::unique_ptr<WebLinkPreviewTriggerer> trigger);
 };
 
 }  // namespace blink

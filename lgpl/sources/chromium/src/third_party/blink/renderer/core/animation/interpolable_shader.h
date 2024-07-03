@@ -36,20 +36,18 @@ class InterpolableShader : public InterpolableValue {
                      AtomicString absolute_url,
                      const Referrer& referrer,
                      GpuShaderResource* resource,
-                     std::unique_ptr<InterpolableList> args,
+                     InterpolableList* args,
                      float animation_frame);
-  static std::unique_ptr<InterpolableShader> CreateNeutral();
+  virtual ~InterpolableShader();
 
-  static std::unique_ptr<InterpolableShader> MaybeConvertCSSValue(
-      const CSSValue&);
+  static InterpolableShader* CreateNeutral();
+  static InterpolableShader* MaybeConvertCSSValue(const CSSValue&);
 
   const Referrer& referrer() const { return referrer_; }
   AtomicString relative_url() const { return relative_url_; }
   AtomicString absolute_url() const { return absolute_url_; }
   GpuShaderResource* resource() const { return resource_; }
-  float animation_frame() const {
-    return To<InterpolableNumber>(*animation_frame_).Value();
-  }
+  float animation_frame() const { return animation_frame_->Value(); }
   CSSValueList* CreateArgsList() const;
 
   // InterpolableValue implementation:
@@ -64,6 +62,8 @@ class InterpolableShader : public InterpolableValue {
   void Scale(double scale) final;
   void Add(const InterpolableValue& other) final;
   void AssertCanInterpolateWith(const InterpolableValue& other) const final;
+  void Trace(Visitor* v) const final;
+
   bool IsCompatibleWith(const InterpolableShader& other) const;
 
  private:
@@ -73,11 +73,11 @@ class InterpolableShader : public InterpolableValue {
   Referrer referrer_;
   AtomicString relative_url_;
   AtomicString absolute_url_;
-  Persistent<GpuShaderResource> resource_;
+  Member<GpuShaderResource> resource_;
 
   // The interpolable components of a shader. These should all be non-null.
-  std::unique_ptr<InterpolableList> args_;
-  std::unique_ptr<InterpolableValue> animation_frame_;
+  Member<InterpolableList> args_;
+  Member<InterpolableNumber> animation_frame_;
 };
 
 template <>

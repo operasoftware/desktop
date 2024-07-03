@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 #if BUILDFLAG(IS_WIN) || \
@@ -54,7 +55,8 @@ namespace blink {
 // Max size of buffers passed on to encoders.
 const int kMaxChunkedBufferDurationMs = 60;
 
-AudioTrackRecorder::CodecId AudioTrackRecorder::GetPreferredCodecId() {
+AudioTrackRecorder::CodecId AudioTrackRecorder::GetPreferredCodecId(
+    MediaTrackContainerType type) {
   return CodecId::kOpus;
 }
 
@@ -65,6 +67,7 @@ AudioTrackRecorder::AudioTrackRecorder(
     CallbackInterface* callback_interface,
     uint32_t bits_per_second,
     BitrateMode bitrate_mode,
+    std::optional<media::AudioEncoder::AacOptions> aac_options,
     scoped_refptr<base::SequencedTaskRunner> encoder_task_runner)
     : TrackRecorder(base::BindPostTask(
           main_thread_task_runner,
@@ -76,6 +79,7 @@ AudioTrackRecorder::AudioTrackRecorder(
           encoder_task_runner_,
           CreateAudioEncoder(
               codec,
+              std::move(aac_options),
               encoder_task_runner_,
               base::BindPostTask(
                   main_thread_task_runner,
@@ -100,23 +104,26 @@ AudioTrackRecorder::~AudioTrackRecorder() {
 // invalid.
 std::unique_ptr<AudioTrackEncoder> AudioTrackRecorder::CreateAudioEncoder(
     CodecId codec,
+    std::optional<media::AudioEncoder::AacOptions> aac_options,
     scoped_refptr<base::SequencedTaskRunner> encoder_task_runner,
     OnEncodedAudioCB on_encoded_audio_cb,
     uint32_t bits_per_second,
     BitrateMode bitrate_mode) {
-  std::unique_ptr<AudioTrackEncoder> encoder;
   switch (codec) {
     case CodecId::kPcm:
       return std::make_unique<AudioTrackPcmEncoder>(
           std::move(on_encoded_audio_cb));
-    case CodecId::kAac:
+    case CodecId::kAac: {
 #if HAS_AAC_ENCODER
-      return std::make_unique<AudioTrackMojoEncoder>(
+      auto encoder = std::make_unique<AudioTrackMojoEncoder>(
           encoder_task_runner, codec, std::move(on_encoded_audio_cb),
           bits_per_second);
+      encoder->set_aac_options(std::move(aac_options));
+      return encoder;
 #endif
       NOTREACHED() << "AAC encoder is not supported.";
       return nullptr;
+    }
     case CodecId::kOpus:
     default:
       return std::make_unique<AudioTrackOpusEncoder>(

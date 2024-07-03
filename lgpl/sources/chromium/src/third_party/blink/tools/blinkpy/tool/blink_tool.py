@@ -41,7 +41,6 @@ from concurrent.futures import ThreadPoolExecutor
 from blinkpy.common.host import Host
 from blinkpy.tool.commands.analyze_baselines import AnalyzeBaselines
 from blinkpy.tool.commands.command import HelpPrintingOptionParser
-from blinkpy.tool.commands.flaky_tests import FlakyTests
 from blinkpy.tool.commands.help_command import HelpCommand
 from blinkpy.tool.commands.optimize_baselines import OptimizeBaselines
 from blinkpy.tool.commands.pretty_diff import PrettyDiff
@@ -50,8 +49,6 @@ from blinkpy.tool.commands.queries import PrintBaselines
 from blinkpy.tool.commands.queries import PrintExpectations
 from blinkpy.tool.commands.rebaseline import Rebaseline
 from blinkpy.tool.commands.rebaseline_cl import RebaselineCL
-from blinkpy.tool.commands.update_metadata import UpdateMetadata
-from blinkpy.tool.commands.lint_wpt import LintWPT
 
 _log = logging.getLogger(__name__)
 
@@ -77,15 +74,12 @@ class BlinkTool(Host):
         self.commands = [
             AnalyzeBaselines(),
             CrashLog(),
-            FlakyTests(),
             OptimizeBaselines(),
             PrettyDiff(),
             PrintBaselines(),
             PrintExpectations(),
             Rebaseline(),
             RebaselineCL(self, io_pool),
-            UpdateMetadata(self, io_pool),
-            LintWPT(self),
         ]
         self.help_command = HelpCommand(tool=self)
         self.commands.append(self.help_command)

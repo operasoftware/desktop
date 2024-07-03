@@ -7,12 +7,15 @@
 #include <math.h>
 
 #include "build/build_config.h"
-#include "third_party/blink/renderer/core/layout/text_decoration_offset_base.h"
-#include "third_party/blink/renderer/core/paint/ng/ng_inline_paint_context.h"
+#include "third_party/blink/renderer/core/layout/text_decoration_offset.h"
+#include "third_party/blink/renderer/core/paint/decoration_line_painter.h"
+#include "third_party/blink/renderer/core/paint/inline_paint_context.h"
 #include "third_party/blink/renderer/core/paint/text_paint_style.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/geometry/length_functions.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
+#include "third_party/blink/renderer/platform/graphics/stroke_data.h"
+#include "third_party/blink/renderer/platform/graphics/styled_stroke_data.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
@@ -60,7 +63,7 @@ static ResolvedUnderlinePosition ResolveUnderlinePosition(
 
 inline bool ShouldUseDecoratingBox(const ComputedStyle& style) {
   // Disable the decorating box for styles not in the tree, because they can't
-  // find the decorating box. For example, |NGHighlightPainter| creates a
+  // find the decorating box. For example, |HighlightPainter| creates a
   // |kPseudoIdHighlight| pseudo style on the fly.
   const PseudoId pseudo_id = style.StyleType();
   if (IsHighlightPseudoElement(pseudo_id))
@@ -87,7 +90,7 @@ static float ComputeDecorationThickness(
     return auto_underline_thickness;
 
   if (text_decoration_thickness.IsFromFont()) {
-    absl::optional<float> font_underline_thickness =
+    std::optional<float> font_underline_thickness =
         font_data->GetFontMetrics().UnderlineThickness();
 
     if (!font_underline_thickness)
@@ -99,9 +102,8 @@ static float ComputeDecorationThickness(
   DCHECK(!text_decoration_thickness.IsFromFont());
 
   const Length& thickness_length = text_decoration_thickness.Thickness();
-  float font_size = font_data->PlatformData().size();
   float text_decoration_thickness_pixels =
-      FloatValueForLength(thickness_length, font_size);
+      FloatValueForLength(thickness_length, computed_font_size);
 
   return std::max(minimum_thickness, roundf(text_decoration_thickness_pixels));
 }
@@ -265,18 +267,20 @@ cc::PaintRecord PrepareWavyTileRecord(const WavyParams& params,
 }  // anonymous namespace
 
 TextDecorationInfo::TextDecorationInfo(
-    PhysicalOffset local_origin,
+    LineRelativeOffset local_origin,
     LayoutUnit width,
     const ComputedStyle& target_style,
-    const NGInlinePaintContext* inline_context,
-    const absl::optional<AppliedTextDecoration> selection_text_decoration,
+    const InlinePaintContext* inline_context,
+    const TextDecorationLine selection_decoration_line,
+    const Color selection_decoration_color,
     const AppliedTextDecoration* decoration_override,
     const Font* font_override,
     MinimumThickness1 minimum_thickness1,
     float scaling_factor)
     : target_style_(target_style),
       inline_context_(inline_context),
-      selection_text_decoration_(selection_text_decoration),
+      selection_decoration_line_(selection_decoration_line),
+      selection_decoration_color_(selection_decoration_color),
       decoration_override_(decoration_override),
       font_override_(font_override && font_override != &target_style.GetFont()
                          ? font_override
@@ -455,11 +459,11 @@ LayoutUnit TextDecorationInfo::OffsetFromDecoratingBox() const {
   const LayoutUnit decorating_box_paint_offset =
       decorating_box_->ContentOffsetInContainer().top +
       inline_context_->PaintOffset().top;
-  return decorating_box_paint_offset - local_origin_.top;
+  return decorating_box_paint_offset - local_origin_.line_over;
 }
 
 void TextDecorationInfo::SetUnderlineLineData(
-    const TextDecorationOffsetBase& decoration_offset) {
+    const TextDecorationOffset& decoration_offset) {
   DCHECK(HasUnderline());
   // Don't apply text-underline-offset to overlines. |line_offset| is zero.
   const Length line_offset = UNLIKELY(flip_underline_and_overline_)
@@ -476,7 +480,7 @@ void TextDecorationInfo::SetUnderlineLineData(
 }
 
 void TextDecorationInfo::SetOverlineLineData(
-    const TextDecorationOffsetBase& decoration_offset) {
+    const TextDecorationOffset& decoration_offset) {
   DCHECK(HasOverline());
   // Don't apply text-underline-offset to overline.
   const Length line_offset = UNLIKELY(flip_underline_and_overline_)
@@ -503,7 +507,7 @@ void TextDecorationInfo::SetLineThroughLineData() {
 }
 
 void TextDecorationInfo::SetSpellingOrGrammarErrorLineData(
-    const TextDecorationOffsetBase& decoration_offset) {
+    const TextDecorationOffset& decoration_offset) {
   DCHECK(HasSpellingOrGrammerError());
   DCHECK(!HasUnderline());
   DCHECK(!HasOverline());
@@ -511,14 +515,14 @@ void TextDecorationInfo::SetSpellingOrGrammarErrorLineData(
   DCHECK(applied_text_decoration_);
   const int paint_underline_offset = decoration_offset.ComputeUnderlineOffset(
       FlippedUnderlinePosition(), TargetStyle().ComputedFontSize(), FontData(),
-      applied_text_decoration_->UnderlineOffset(), ResolvedThickness());
+      Length(), ResolvedThickness());
   SetLineData(HasSpellingError() ? TextDecorationLine::kSpellingError
                                  : TextDecorationLine::kGrammarError,
               paint_underline_offset);
 }
 
 bool TextDecorationInfo::ShouldAntialias() const {
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
   if (line_data_.line == TextDecorationLine::kSpellingError ||
       line_data_.line == TextDecorationLine::kGrammarError) {
     return true;
@@ -529,7 +533,7 @@ bool TextDecorationInfo::ShouldAntialias() const {
 
 ETextDecorationStyle TextDecorationInfo::DecorationStyle() const {
   if (IsSpellingOrGrammarError()) {
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
     return ETextDecorationStyle::kDotted;
 #else
     return ETextDecorationStyle::kWavy;
@@ -541,16 +545,21 @@ ETextDecorationStyle TextDecorationInfo::DecorationStyle() const {
 }
 
 Color TextDecorationInfo::LineColor() const {
+  if (HasSpellingError()) {
+    return LayoutTheme::GetTheme().PlatformSpellingMarkerUnderlineColor();
+  }
+  if (HasGrammarError()) {
+    return LayoutTheme::GetTheme().PlatformGrammarMarkerUnderlineColor();
+  }
+
   if (highlight_override_)
     return *highlight_override_;
 
   // Find the matched normal and selection |AppliedTextDecoration|
   // and use the text-decoration-color from selection when it is.
   DCHECK(applied_text_decoration_);
-  if (selection_text_decoration_ &&
-      applied_text_decoration_->Lines() ==
-          selection_text_decoration_.value().Lines()) {
-    return selection_text_decoration_.value().GetColor();
+  if (applied_text_decoration_->Lines() == selection_decoration_line_) {
+    return selection_decoration_color_;
   }
 
   return applied_text_decoration_->GetColor();
@@ -572,7 +581,7 @@ float TextDecorationInfo::ComputeThickness() const {
   const AppliedTextDecoration& decoration = *applied_text_decoration_;
   if (HasSpellingOrGrammerError()) {
     // Spelling and grammar error thickness doesn't depend on the font size.
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
     return 2.f * decorating_box_style_->EffectiveZoom();
 #else
     return 1.f * decorating_box_style_->EffectiveZoom();
@@ -623,7 +632,7 @@ void TextDecorationInfo::ComputeWavyLineData(
     DISALLOW_NEW();
   };
 
-  DEFINE_STATIC_LOCAL(absl::optional<WavyCache>, wavy_cache, (absl::nullopt));
+  DEFINE_STATIC_LOCAL(std::optional<WavyCache>, wavy_cache, (std::nullopt));
 
   if (wavy_cache && wavy_cache->key.resolved_thickness == ResolvedThickness() &&
       wavy_cache->key.effective_zoom ==
@@ -669,10 +678,11 @@ gfx::RectF TextDecorationInfo::Bounds() const {
 }
 
 gfx::RectF TextDecorationInfo::BoundsForDottedOrDashed() const {
-  StrokeData stroke_data;
-  stroke_data.SetThickness(roundf(ResolvedThickness()));
-  stroke_data.SetStyle(TextDecorationStyleToStrokeStyle(DecorationStyle()));
-  return line_data_.stroke_path.value().StrokeBoundingRect(stroke_data);
+  StyledStrokeData styled_stroke;
+  styled_stroke.SetThickness(roundf(ResolvedThickness()));
+  styled_stroke.SetStyle(TextDecorationStyleToStrokeStyle(DecorationStyle()));
+  return line_data_.stroke_path.value().StrokeBoundingRect(
+      styled_stroke.ConvertToStrokeData({}));
 }
 
 // Returns the wavy bounds, which is the same size as the wavy paint rect but
@@ -714,7 +724,7 @@ cc::PaintRecord TextDecorationInfo::WavyTileRecord() const {
 }
 
 void TextDecorationInfo::SetHighlightOverrideColor(
-    const absl::optional<Color>& color) {
+    const std::optional<Color>& color) {
   highlight_override_ = color;
 }
 
@@ -722,7 +732,7 @@ Path TextDecorationInfo::PrepareDottedOrDashedStrokePath() const {
   // These coordinate transforms need to match what's happening in
   // GraphicsContext's drawLineForText and drawLine.
   gfx::PointF start_point = StartPoint();
-  return GraphicsContext::GetPathForTextLine(
+  return DecorationLinePainter::GetPathForTextLine(
       start_point, width_, ResolvedThickness(),
       TextDecorationStyleToStrokeStyle(DecorationStyle()));
 }

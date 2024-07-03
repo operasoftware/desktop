@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "base/containers/contains.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram.h"
 #include "base/numerics/safe_conversions.h"
@@ -288,8 +289,7 @@ bool ResourceLoadScheduler::IsPendingRequestEffectivelyEmpty(
     // the request is canceled, or Release() is called before firing its Run(),
     // the entry for the request remains in |pending_request_| until it is
     // popped in GetNextPendingRequest().
-    if (pending_request_map_.find(client.client_id) !=
-        pending_request_map_.end()) {
+    if (base::Contains(pending_request_map_, client.client_id)) {
       return false;
     }
   }
@@ -470,17 +470,17 @@ void ResourceLoadScheduler::SetClockForTesting(const base::Clock* clock) {
 
 void ResourceLoadScheduler::SetConnectionInfo(
     ClientId id,
-    net::HttpResponseInfo::ConnectionInfo connection_info) {
+    net::HttpConnectionInfo connection_info) {
   DCHECK_NE(kInvalidClientId, id);
 
   // `is_multiplexed` will be set false if the connection of the given client
   // doesn't support multiplexing (e.g., HTTP/1.x).
   bool is_multiplexed = true;
   switch (connection_info) {
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP0_9:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_0:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_1:
-    case net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN:
+    case net::HttpConnectionInfo::kHTTP0_9:
+    case net::HttpConnectionInfo::kHTTP1_0:
+    case net::HttpConnectionInfo::kHTTP1_1:
+    case net::HttpConnectionInfo::kUNKNOWN:
       is_multiplexed = false;
       break;
     default:

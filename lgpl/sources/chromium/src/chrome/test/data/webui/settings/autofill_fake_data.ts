@@ -3,23 +3,29 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {AutofillManagerProxy, PaymentsManagerProxy, PersonalDataChangedListener} from 'chrome://settings/lazy_load.js';
+import type {AutofillManagerProxy, PaymentsManagerProxy, PersonalDataChangedListener} from 'chrome://settings/lazy_load.js';
 import {assertEquals} from 'chrome://webui-test/chai_assert.js';
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
 // clang-format on
 
+const FieldType = chrome.autofillPrivate.FieldType;
+
 export const STUB_USER_ACCOUNT_INFO: chrome.autofillPrivate.AccountInfo = {
   email: 'stub-user@example.com',
   isSyncEnabledForAutofillProfiles: false,
   isEligibleForAddressAccountStorage: false,
+  isAutofillSyncToggleAvailable: false,
+  isAutofillSyncToggleEnabled: false,
 };
 
 /**
  * Creates a new fake address entry for testing.
  */
 export function createEmptyAddressEntry(): chrome.autofillPrivate.AddressEntry {
-  return {};
+  return {
+    fields: [],
+  };
 }
 
 /**
@@ -30,15 +36,29 @@ export function createAddressEntry(): chrome.autofillPrivate.AddressEntry {
   const addressLines = patternMaker('xxxx Main St', 10);
   return {
     guid: makeGuid(),
-    fullName: fullName,
-    companyName: 'Google',
-    addressLines: addressLines,
-    addressLevel1: 'CA',
-    addressLevel2: 'Venice',
-    postalCode: patternMaker('xxxxx', 10),
-    countryCode: 'US',
-    phoneNumber: patternMaker('(xxx) xxx-xxxx', 10),
-    emailAddress: patternMaker('userxxxx@gmail.com', 16),
+    fields: [
+      {type: FieldType.NAME_FULL, value: fullName},
+      {type: FieldType.COMPANY_NAME, value: 'Google'},
+      {
+        type: FieldType.ADDRESS_HOME_STREET_ADDRESS,
+        value: addressLines,
+      },
+      {type: FieldType.ADDRESS_HOME_STATE, value: 'CA'},
+      {type: FieldType.ADDRESS_HOME_CITY, value: 'Venice'},
+      {
+        type: FieldType.ADDRESS_HOME_ZIP,
+        value: patternMaker('xxxxx', 10),
+      },
+      {type: FieldType.ADDRESS_HOME_COUNTRY, value: 'US'},
+      {
+        type: FieldType.PHONE_HOME_WHOLE_NUMBER,
+        value: patternMaker('(xxx) xxx-xxxx', 10),
+      },
+      {
+        type: FieldType.EMAIL_ADDRESS,
+        value: patternMaker('userxxxx@gmail.com', 16),
+      },
+    ],
     languageCode: 'EN-US',
     metadata: {
       isLocal: true,
@@ -68,7 +88,7 @@ export function createCreditCardEntry():
     chrome.autofillPrivate.CreditCardEntry {
   const cards = ['Visa', 'Mastercard', 'Discover', 'Card'];
   const card = cards[Math.floor(Math.random() * cards.length)];
-  const cardNumber = patternMaker('xxxx xxxx xxxx xxxx', 10);
+  const cardNumber = patternMaker('xxxx', 10);
   return {
     guid: makeGuid(),
     name: 'Jane Doe',
@@ -175,6 +195,7 @@ export class TestAutofillManager extends TestBrowserProxy implements
       'removeAddress',
       'removePersonalDataManagerListener',
       'setPersonalDataManagerListener',
+      'setAutofillSyncToggleEnabled',
     ]);
 
     // Set these to have non-empty data.
@@ -184,6 +205,8 @@ export class TestAutofillManager extends TestBrowserProxy implements
         email: 'stub-user@example.com',
         isSyncEnabledForAutofillProfiles: true,
         isEligibleForAddressAccountStorage: false,
+        isAutofillSyncToggleAvailable: false,
+        isAutofillSyncToggleEnabled: false,
       },
     };
 
@@ -218,6 +241,10 @@ export class TestAutofillManager extends TestBrowserProxy implements
     this.methodCalled('removeAddress');
   }
 
+  setAutofillSyncToggleEnabled(_enabled: boolean) {
+    this.methodCalled('setAutofillSyncToggleEnabled');
+  }
+
   /**
    * Verifies expectations.
    */
@@ -236,15 +263,14 @@ export class TestAutofillManager extends TestBrowserProxy implements
 export class PaymentsManagerExpectations {
   requestedCreditCards: number = 0;
   listeningCreditCards: number = 0;
-  requestedUpiIds: number = 0;
   removedCreditCards: number = 0;
-  clearedCachedCreditCards: number = 0;
   addedVirtualCards: number = 0;
   requestedIbans: number = 0;
   removedIbans: number = 0;
   isValidIban: number = 0;
   authenticateUserAndFlipMandatoryAuthToggle: number = 0;
-  authenticateUserToEditLocalCard: number = 0;
+  getLocalCard: number = 0;
+  bulkDeleteAllCvcs: number = 0;
 }
 
 /**
@@ -260,7 +286,6 @@ export class TestPaymentsManager extends TestBrowserProxy implements
   data: {
     creditCards: chrome.autofillPrivate.CreditCardEntry[],
     ibans: chrome.autofillPrivate.IbanEntry[],
-    upiIds: string[],
   };
 
   lastCallback:
@@ -268,25 +293,23 @@ export class TestPaymentsManager extends TestBrowserProxy implements
 
   constructor() {
     super([
-      'setPersonalDataManagerListener',
-      'removePersonalDataManagerListener',
+      'addVirtualCard',
+      'authenticateUserAndFlipMandatoryAuthToggle',
+      'bulkDeleteAllCvcs',
       'getCreditCardList',
       'getIbanList',
-      'getUpiIdList',
-      'clearCachedCreditCard',
+      'getLocalCard',
+      'isValidIban',
       'removeCreditCard',
       'removeIban',
-      'addVirtualCard',
-      'isValidIban',
-      'authenticateUserAndFlipMandatoryAuthToggle',
-      'authenticateUserToEditLocalCard',
+      'removePersonalDataManagerListener',
+      'setPersonalDataManagerListener',
     ]);
 
     // Set these to have non-empty data.
     this.data = {
       creditCards: [],
       ibans: [],
-      upiIds: [],
     };
 
     // Holds the last callbacks so they can be called when needed.
@@ -309,16 +332,9 @@ export class TestPaymentsManager extends TestBrowserProxy implements
     return Promise.resolve(this.data.creditCards);
   }
 
-  getUpiIdList() {
-    this.methodCalled('getUpiIdList');
-    return Promise.resolve(this.data.upiIds);
-  }
-
-  clearCachedCreditCard(_guid: string) {
-    this.methodCalled('clearCachedCreditCard');
-  }
-
   logServerCardLinkClicked() {}
+
+  logServerIbanLinkClicked() {}
 
   migrateCreditCards() {}
 
@@ -364,9 +380,14 @@ export class TestPaymentsManager extends TestBrowserProxy implements
     this.methodCalled('authenticateUserAndFlipMandatoryAuthToggle');
   }
 
-  authenticateUserToEditLocalCard() {
-    this.methodCalled('authenticateUserToEditLocalCard');
-    return Promise.resolve(true);
+  getLocalCard(_guid: string) {
+    this.methodCalled('getLocalCard');
+    const card =
+        this.data.creditCards.find(creditCard => creditCard.guid === _guid);
+    if (card !== undefined) {
+      return Promise.resolve(card);
+    }
+    return Promise.resolve(null);
   }
 
   // <if expr="is_win or is_macosx">
@@ -378,6 +399,10 @@ export class TestPaymentsManager extends TestBrowserProxy implements
     return Promise.resolve(this.isDeviceAuthAvailable_);
   }
   // </if>
+
+  bulkDeleteAllCvcs() {
+    this.methodCalled('bulkDeleteAllCvcs');
+  }
 
   /**
    * Verifies expectations.
@@ -395,10 +420,6 @@ export class TestPaymentsManager extends TestBrowserProxy implements
         expected.removedCreditCards, this.getCallCount('removeCreditCard'),
         'removedCreditCards mismatch');
     assertEquals(
-        expected.clearedCachedCreditCards,
-        this.getCallCount('clearCachedCreditCard'),
-        'clearedCachedCreditCards mismatch');
-    assertEquals(
         expected.addedVirtualCards, this.getCallCount('addVirtualCard'),
         'addedVirtualCards mismatch');
     assertEquals(
@@ -412,8 +433,10 @@ export class TestPaymentsManager extends TestBrowserProxy implements
         this.getCallCount('authenticateUserAndFlipMandatoryAuthToggle'),
         'authenticateUserAndFlipMandatoryAuthToggle mismatch');
     assertEquals(
-        expected.authenticateUserToEditLocalCard,
-        this.getCallCount('authenticateUserToEditLocalCard'),
-        'authenticateUserToEditLocalCard mismatch');
+        expected.getLocalCard, this.getCallCount('getLocalCard'),
+        'getLocalCard mismatch');
+    assertEquals(
+        expected.bulkDeleteAllCvcs, this.getCallCount('bulkDeleteAllCvcs'),
+        'bulkDeleteAllCvcs mismatch');
   }
 }

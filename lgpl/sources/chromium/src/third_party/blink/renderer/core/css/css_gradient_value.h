@@ -28,6 +28,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_image_generator_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
@@ -49,7 +50,8 @@ enum CSSGradientType {
   kCSSPrefixedRadialGradient,
   kCSSLinearGradient,
   kCSSRadialGradient,
-  kCSSConicGradient
+  kCSSConicGradient,
+  kCSSConstantGradient,  // Internal.
 };
 enum CSSGradientRepeat { kNonRepeating, kRepeating };
 
@@ -115,7 +117,8 @@ class CSSGradientValue : public CSSImageGeneratorValue {
 
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const;
   CSSGradientValue* ComputedCSSValue(const ComputedStyle&,
-                                     bool allow_visited_style) const;
+                                     bool allow_visited_style,
+                                     CSSValuePhase value_phase) const;
 
   Vector<Color> GetStopColors(const Document&, const ComputedStyle&) const;
 
@@ -149,7 +152,8 @@ class CSSGradientValue : public CSSImageGeneratorValue {
                           const ComputedStyle&) const;
   void AddComputedStops(const ComputedStyle&,
                         bool allow_visited_style,
-                        const HeapVector<CSSGradientColorStop, 2>& stops);
+                        const HeapVector<CSSGradientColorStop, 2>& stops,
+                        CSSValuePhase value_phase);
 
   void AppendCSSTextForColorStops(StringBuilder&,
                                   bool requires_separator) const;
@@ -194,7 +198,8 @@ class CSSLinearGradientValue final : public CSSGradientValue {
   bool Equals(const CSSLinearGradientValue&) const;
 
   CSSLinearGradientValue* ComputedCSSValue(const ComputedStyle&,
-                                           bool allow_visited_style) const;
+                                           bool allow_visited_style,
+                                           CSSValuePhase value_phase) const;
 
   bool IsUsingCurrentColor() const;
   bool IsUsingContainerRelativeUnits() const;
@@ -295,7 +300,8 @@ class CORE_EXPORT CSSRadialGradientValue final : public CSSGradientValue {
   bool Equals(const CSSRadialGradientValue&) const;
 
   CSSRadialGradientValue* ComputedCSSValue(const ComputedStyle&,
-                                           bool allow_visited_style) const;
+                                           bool allow_visited_style,
+                                           CSSValuePhase value_phase) const;
 
   bool IsUsingCurrentColor() const;
   bool IsUsingContainerRelativeUnits() const;
@@ -344,7 +350,8 @@ class CSSConicGradientValue final : public CSSGradientValue {
   bool Equals(const CSSConicGradientValue&) const;
 
   CSSConicGradientValue* ComputedCSSValue(const ComputedStyle&,
-                                          bool allow_visited_style) const;
+                                          bool allow_visited_style,
+                                          CSSValuePhase value_phase) const;
 
   bool IsUsingCurrentColor() const;
   bool IsUsingContainerRelativeUnits() const;
@@ -356,6 +363,39 @@ class CSSConicGradientValue final : public CSSGradientValue {
   Member<const CSSValue> x_;
   Member<const CSSValue> y_;
   Member<const CSSPrimitiveValue> from_angle_;
+};
+
+// cross-fade() supports interpolating between not only images,
+// but also colors. This is a proxy class that takes in a ColorValue
+// and behaves otherwise like a one-color gradient, since gradients
+// have all the machinery needed to resolve colors and convert them
+// into images.
+class CSSConstantGradientValue final : public CSSGradientValue {
+ public:
+  explicit CSSConstantGradientValue(const CSSValue* color)
+      : CSSGradientValue(kConstantGradientClass,
+                         kNonRepeating,
+                         kCSSConstantGradient),
+        color_(color) {}
+
+  String CustomCSSText() const { return color_->CssText(); }
+
+  // Create the gradient for a given size.
+  scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
+                                         const gfx::SizeF&,
+                                         const Document&,
+                                         const ComputedStyle&) const;
+
+  bool KnownToBeOpaque(const Document&, const ComputedStyle&) const;
+  bool Equals(const CSSConstantGradientValue&) const;
+  CSSConstantGradientValue* ComputedCSSValue(const ComputedStyle&,
+                                             bool allow_visited_style,
+                                             CSSValuePhase value_phase) const;
+
+  void TraceAfterDispatch(blink::Visitor*) const;
+
+ protected:
+  Member<const CSSValue> color_;
 };
 
 }  // namespace cssvalue
@@ -385,6 +425,13 @@ template <>
 struct DowncastTraits<cssvalue::CSSConicGradientValue> {
   static bool AllowFrom(const CSSValue& value) {
     return value.IsConicGradientValue();
+  }
+};
+
+template <>
+struct DowncastTraits<cssvalue::CSSConstantGradientValue> {
+  static bool AllowFrom(const CSSValue& value) {
+    return value.IsConstantGradientValue();
   }
 };
 

@@ -39,7 +39,7 @@
 #include "libavutil/pixdesc.h"
 #include "libavfilter/avfilter.h"
 #include "libavfilter/buffersink.h"
-#include "libavformat/avio_internal.h"
+#include "libavformat/demux.h"
 #include "libavformat/internal.h"
 #include "avdevice.h"
 
@@ -366,7 +366,7 @@ static int lavfi_read_packet(AVFormatContext *avctx, AVPacket *pkt)
     LavfiContext *lavfi = avctx->priv_data;
     double min_pts = DBL_MAX;
     int stream_idx, min_pts_sink_idx = 0;
-    AVFrame *frame;
+    AVFrame *frame, *frame_to_free;
     AVDictionary *frame_metadata;
     int ret, i;
     AVStream *st;
@@ -379,6 +379,7 @@ static int lavfi_read_packet(AVFormatContext *avctx, AVPacket *pkt)
     frame = av_frame_alloc();
     if (!frame)
         return AVERROR(ENOMEM);
+    frame_to_free = frame;
 
     /* iterate through all the graph sinks. Select the sink with the
      * minimum PTS */
@@ -424,6 +425,7 @@ static int lavfi_read_packet(AVFormatContext *avctx, AVPacket *pkt)
             ret = AVERROR(ENOMEM);
             goto fail;
         }
+        frame_to_free = NULL;
 
         pkt->data   = pkt->buf->data;
         pkt->size   = pkt->buf->size;
@@ -464,12 +466,11 @@ FF_DISABLE_DEPRECATION_WARNINGS
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
-    if (st->codecpar->codec_type != AVMEDIA_TYPE_VIDEO)
-        av_frame_free(&frame);
+    av_frame_free(&frame_to_free);
 
     return pkt->size;
 fail:
-    av_frame_free(&frame);
+    av_frame_free(&frame_to_free);
     return ret;
 
 }
@@ -493,14 +494,14 @@ static const AVClass lavfi_class = {
     .category   = AV_CLASS_CATEGORY_DEVICE_INPUT,
 };
 
-const AVInputFormat ff_lavfi_demuxer = {
-    .name           = "lavfi",
-    .long_name      = NULL_IF_CONFIG_SMALL("Libavfilter virtual input device"),
+const FFInputFormat ff_lavfi_demuxer = {
+    .p.name         = "lavfi",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Libavfilter virtual input device"),
+    .p.flags        = AVFMT_NOFILE,
+    .p.priv_class   = &lavfi_class,
     .priv_data_size = sizeof(LavfiContext),
     .read_header    = lavfi_read_header,
     .read_packet    = lavfi_read_packet,
     .read_close     = lavfi_read_close,
-    .flags          = AVFMT_NOFILE,
-    .priv_class     = &lavfi_class,
     .flags_internal = FF_FMT_INIT_CLEANUP,
 };

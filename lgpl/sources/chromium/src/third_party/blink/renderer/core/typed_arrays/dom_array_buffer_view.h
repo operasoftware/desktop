@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TYPED_ARRAYS_DOM_ARRAY_BUFFER_VIEW_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TYPED_ARRAYS_DOM_ARRAY_BUFFER_VIEW_H_
 
+#include "base/containers/span.h"
 #include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
@@ -105,7 +106,14 @@ class CORE_EXPORT DOMArrayBufferView : public ScriptWrappable {
 
   size_t byteOffset() const { return !IsDetached() ? raw_byte_offset_ : 0; }
 
+  // Must return the number of valid bytes at `BaseAddress()`.
   virtual size_t byteLength() const = 0;
+
+  base::span<uint8_t> ByteSpan() const {
+    // SAFETY: `byteLength()` returns the number of bytes at `BaseAddress()`.
+    return UNSAFE_BUFFERS(
+        base::span(static_cast<uint8_t*>(BaseAddress()), byteLength()));
+  }
 
   virtual unsigned TypeSize() const = 0;
   bool IsShared() const { return dom_array_buffer_->IsShared(); }
@@ -114,8 +122,14 @@ class CORE_EXPORT DOMArrayBufferView : public ScriptWrappable {
     return !IsDetached() ? raw_base_address_ : nullptr;
   }
 
+  base::span<uint8_t> ByteSpanMaybeShared() const {
+    // SAFETY: `byteLength()` returns the number of bytes at `BaseAddress()`.
+    return UNSAFE_BUFFERS(base::span(
+        static_cast<uint8_t*>(BaseAddressMaybeShared()), byteLength()));
+  }
+
   // ScriptWrappable overrides:
-  v8::MaybeLocal<v8::Value> Wrap(ScriptState*) override {
+  v8::Local<v8::Value> Wrap(ScriptState*) override {
     NOTREACHED();
     return v8::Local<v8::Value>();
   }

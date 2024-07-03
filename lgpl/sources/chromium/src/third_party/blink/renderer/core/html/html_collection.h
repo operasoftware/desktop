@@ -93,6 +93,7 @@ class CORE_EXPORT HTMLCollection : public ScriptWrappable,
 
   // Non-DOM API
   void NamedItems(const AtomicString& name, HeapVector<Member<Element>>&) const;
+  bool HasNamedItems(const AtomicString& name) const;
   bool IsEmpty() const { return collection_items_cache_.IsEmpty(*this); }
   bool HasExactlyOneItem() const {
     return collection_items_cache_.HasExactlyOneNode(*this);
@@ -126,14 +127,14 @@ class CORE_EXPORT HTMLCollection : public ScriptWrappable,
       auto it = id_cache_.find(id);
       if (it == id_cache_.end())
         return nullptr;
-      return it->value;
+      return it->value.Get();
     }
     const HeapVector<Member<Element>>* GetElementsByName(
         const AtomicString& name) const {
       auto it = name_cache_.find(name);
       if (it == name_cache_.end())
         return nullptr;
-      return it->value;
+      return it->value.Get();
     }
     void AddElementWithId(const AtomicString& id, Element* element) {
       AddElementToMap(id_cache_, id, element);
@@ -155,7 +156,7 @@ class CORE_EXPORT HTMLCollection : public ScriptWrappable,
                                 Element* element) {
       HeapVector<Member<Element>>* vector =
           map.insert(key, MakeGarbageCollected<HeapVector<Member<Element>>>())
-              .stored_value->value;
+              .stored_value->value.Get();
       vector->push_back(element);
     }
 
@@ -171,7 +172,7 @@ class CORE_EXPORT HTMLCollection : public ScriptWrappable,
   virtual void SupportedPropertyNames(Vector<String>& names);
 
   virtual void UpdateIdNameCache() const;
-  bool HasValidIdNameCache() const { return named_item_cache_; }
+  bool HasValidIdNameCache() const { return named_item_cache_ != nullptr; }
 
   void SetNamedItemCache(NamedItemCache* cache) const {
     DCHECK(!named_item_cache_);

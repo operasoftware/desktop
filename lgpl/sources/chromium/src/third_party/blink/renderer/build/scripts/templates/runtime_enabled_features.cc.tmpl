@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/origin_trial_feature/origin_trial_feature.mojom-shared.h"
 #include "third_party/blink/renderer/platform/runtime_feature_state/runtime_feature_state_override_context.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -102,7 +103,7 @@ void RuntimeEnabledFeaturesBase::UpdateStatusFromBaseFeatures() {
   for (const auto& map : mappings) {
     const bool feature_enabled = base::FeatureList::IsEnabled(map.feature);
     const bool is_overridden =
-        base::FeatureList::GetInstance()->IsFeatureOverridden(map.feature.name);
+        base::FeatureList::GetStateIfOverridden(map.feature).has_value();
     if (map.if_overridden) {
       if (is_overridden)
         map.enabler(feature_enabled);
@@ -160,7 +161,7 @@ bool RuntimeEnabledFeaturesBase::{{feature.name}}Enabled(const FeatureContext* c
   // is not enabled.
   return false;
   {% else %}
-  return context && context->FeatureEnabled(OriginTrialFeature::k{{feature.name}});
+  return context && context->FeatureEnabled(mojom::blink::OriginTrialFeature::k{{feature.name}});
   {% endif %}
 }
 

@@ -7,7 +7,8 @@
 
 #include <stdint.h>
 
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -29,6 +30,12 @@ class MODULES_EXPORT RTCEncodedAudioFrame final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  static RTCEncodedAudioFrame* Create(RTCEncodedAudioFrame* original_frame,
+                                      ExceptionState& exception_state);
+  static RTCEncodedAudioFrame* Create(
+      RTCEncodedAudioFrame* original_frame,
+      RTCEncodedAudioFrameMetadata* new_metadata,
+      ExceptionState& exception_state);
   explicit RTCEncodedAudioFrame(
       std::unique_ptr<webrtc::TransformableAudioFrameInterface> webrtc_frame);
   explicit RTCEncodedAudioFrame(
@@ -37,13 +44,15 @@ class MODULES_EXPORT RTCEncodedAudioFrame final : public ScriptWrappable {
   // rtc_encoded_audio_frame.idl implementation.
   // Returns the RTP Packet Timestamp for this frame.
   uint32_t timestamp() const;
-  absl::optional<uint16_t> sequenceNumber() const;
+  std::optional<uint16_t> sequenceNumber() const;
   DOMArrayBuffer* data() const;
   RTCEncodedAudioFrameMetadata* getMetadata() const;
+  bool SetMetadata(const RTCEncodedAudioFrameMetadata* metadata,
+                   String& error_message);
+  void setMetadata(RTCEncodedAudioFrameMetadata* metadata,
+                   ExceptionState& exception_state);
   void setData(DOMArrayBuffer*);
-  void setTimestamp(uint32_t timestamp, ExceptionState& exception_state);
   String toString() const;
-  RTCEncodedAudioFrame* clone(ExceptionState& exception_state) const;
 
   scoped_refptr<RTCEncodedAudioFrameDelegate> Delegate() const;
   void SyncDelegate() const;

@@ -6,15 +6,15 @@
 import 'chrome://settings/lazy_load.js';
 
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {SettingsPersonalizationOptionsElement} from 'chrome://settings/lazy_load.js';
-import {loadTimeData, PrivacyPageVisibility, PrivacyPageBrowserProxyImpl, StatusAction, SyncBrowserProxyImpl} from 'chrome://settings/settings.js';
-import {assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
-// <if expr="_google_chrome and chromeos_ash">
-import {assertEquals} from 'chrome://webui-test/chai_assert.js';
-// </if>
-import {isChildVisible} from 'chrome://webui-test/test_util.js';
+import type {SettingsPersonalizationOptionsElement} from 'chrome://settings/lazy_load.js';
+import type {CrLinkRowElement, PrivacyPageVisibility, SettingsPrefsElement} from 'chrome://settings/settings.js';
+import {CrSettingsPrefs, loadTimeData, PrivacyPageBrowserProxyImpl, Router, routes, StatusAction, SyncBrowserProxyImpl} from 'chrome://settings/settings.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {isChildVisible, isVisible} from 'chrome://webui-test/test_util.js';
 // <if expr="not is_chromeos">
-import {eventToPromise, isVisible} from 'chrome://webui-test/test_util.js';
+import {eventToPromise} from 'chrome://webui-test/test_util.js';
+import {ChromeSigninUserChoice} from 'chrome://settings/settings.js';
+import {webUIListenerCallback} from 'chrome://resources/js/cr.js';
 
 // </if>
 
@@ -28,6 +28,7 @@ suite('AllBuilds', function() {
   let syncBrowserProxy: TestSyncBrowserProxy;
   let customPageVisibility: PrivacyPageVisibility;
   let testElement: SettingsPersonalizationOptionsElement;
+  let settingsPrefs: SettingsPrefsElement;
 
   suiteSetup(function() {
     loadTimeData.overrideValues({
@@ -39,21 +40,15 @@ suite('AllBuilds', function() {
       signinAvailable: true,
       changePriceEmailNotificationsEnabled: true,
     });
+    settingsPrefs = document.createElement('settings-prefs');
+    return CrSettingsPrefs.initialized;
   });
 
   function buildTestElement() {
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
     testElement = document.createElement('settings-personalization-options');
-    testElement.prefs = {
-      signin: {
-        allowed_on_next_startup:
-            {type: chrome.settingsPrivate.PrefType.BOOLEAN, value: true},
-      },
-      profile: {password_manager_leak_detection: {value: true}},
-      safebrowsing:
-          {enabled: {value: true}, scout_reporting_enabled: {value: true}},
-      price_tracking: {email_notifications_enabled: {value: false}},
-    };
+    testElement.prefs = settingsPrefs.prefs!;
+    testElement.set('prefs.page_content_collection.enabled.value', false);
     testElement.pageVisibility = customPageVisibility;
     document.body.appendChild(testElement);
     flush();
@@ -123,6 +118,78 @@ suite('AllBuilds', function() {
   });
 
   // <if expr="not is_chromeos">
+  test('chromeSigninUserChoiceAvailableInitialization', async function() {
+    assertFalse(isVisible(testElement.$.chromeSigninUserChoiceRadioGroup));
+
+    const infoResponse = {
+      shouldShowSettings: true,
+      choice: ChromeSigninUserChoice.NO_CHOICE,
+      signedInEmail: 'test@gmail.com',
+    };
+    syncBrowserProxy.setGetUserChromeSigninUserChoiceInfoResponse(infoResponse);
+
+    buildTestElement();  // Rebuild the element simulating a fresh start.
+    await syncBrowserProxy.whenCalled('getChromeSigninUserChoiceInfo');
+    assertTrue(isVisible(testElement.$.chromeSigninUserChoiceRadioGroup));
+    const descriptionText =
+        testElement.shadowRoot!.querySelector(
+                                   '#chromeSigninChoiceDescription')!.innerHTML;
+    assertTrue(descriptionText.includes(infoResponse.signedInEmail));
+  });
+
+  test('chromeSigninUserChoiceAvailabilityUpdate', async function() {
+    const infoResponse = {
+      shouldShowSettings: true,
+      choice: ChromeSigninUserChoice.NO_CHOICE,
+      signedInEmail: 'test@gmail.com',
+    };
+    syncBrowserProxy.setGetUserChromeSigninUserChoiceInfoResponse(infoResponse);
+
+    buildTestElement();  // Rebuild the element simulating a fresh start.
+    await syncBrowserProxy.whenCalled('getChromeSigninUserChoiceInfo');
+    assertTrue(isVisible(testElement.$.chromeSigninUserChoiceRadioGroup));
+
+    // New response to return should not show.
+    const infoResponse_hide = {
+      shouldShowSettings: false,
+      choice: ChromeSigninUserChoice.NO_CHOICE,
+      signedInEmail: '',
+    };
+
+    webUIListenerCallback(
+        'chrome-signin-user-choice-info-change', infoResponse_hide);
+    assertFalse(isVisible(testElement.$.chromeSigninUserChoiceRadioGroup));
+
+    // Original response to return should show again.
+    webUIListenerCallback(
+        'chrome-signin-user-choice-info-change', infoResponse);
+    assertTrue(isVisible(testElement.$.chromeSigninUserChoiceRadioGroup));
+  });
+
+  test('chromeSigninUserChoiceUpdatedExternally', async function() {
+    const infoResponse = {
+      shouldShowSettings: true,
+      choice: ChromeSigninUserChoice.NO_CHOICE,
+      signedInEmail: 'test@gmail.com',
+    };
+    syncBrowserProxy.setGetUserChromeSigninUserChoiceInfoResponse(infoResponse);
+
+    buildTestElement();  // Rebuild the element simulating a fresh start.
+    await syncBrowserProxy.whenCalled('getChromeSigninUserChoiceInfo');
+    assertTrue(isVisible(testElement.$.chromeSigninUserChoiceRadioGroup));
+
+    // `ChromeSigninUserChoice.NO_CHOICE` leads to no value set.
+    assertEquals(
+        testElement.$.chromeSigninUserChoiceRadioGroup.selected, undefined);
+
+    infoResponse.choice = ChromeSigninUserChoice.SIGNIN;
+    webUIListenerCallback(
+        'chrome-signin-user-choice-info-change', infoResponse);
+    assertEquals(
+        Number(testElement.$.chromeSigninUserChoiceRadioGroup.selected),
+        ChromeSigninUserChoice.SIGNIN);
+  });
+
   test('signinAllowedToggle', function() {
     const toggle = testElement.$.signinAllowedToggle;
     assertTrue(isVisible(toggle));
@@ -282,6 +349,55 @@ suite('AllBuilds', function() {
     assertFalse(!!testElement.shadowRoot!.querySelector(
         '#priceEmailNotificationsToggle'));
   });
+
+  test('pageContentRow', function() {
+    const pageContentRow =
+        testElement.shadowRoot!.querySelector<HTMLElement>('#pageContentRow')!;
+
+    // TODO(crbug/1476887): Remove visibility check once crbug/1476887 launched.
+    assertTrue(isVisible(pageContentRow));
+
+    // The sublabel is dynamic based on the setting state.
+    testElement.set('prefs.page_content_collection.enabled.value', true);
+    const row = testElement.shadowRoot!.querySelector<CrLinkRowElement>(
+        '#pageContentRow')!;
+    assertEquals(
+        loadTimeData.getString('pageContentLinkRowSublabelOn'), row.subLabel);
+    testElement.set('prefs.page_content_collection.enabled.value', false);
+    assertEquals(
+        loadTimeData.getString('pageContentLinkRowSublabelOff'), row.subLabel);
+
+    // A click on the row navigates to the page content page.
+    pageContentRow.click();
+    assertEquals(routes.PAGE_CONTENT, Router.getInstance().getCurrentRoute());
+  });
+});
+
+// TODO(crbug/1476887): Remove once crbug/1476887 launched.
+suite('PageContentSettingOff', function() {
+  let testElement: SettingsPersonalizationOptionsElement;
+
+  suiteSetup(function() {
+    loadTimeData.overrideValues({
+      enablePageContentSetting: false,
+    });
+  });
+
+  setup(function() {
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
+    testElement = document.createElement('settings-personalization-options');
+    document.body.appendChild(testElement);
+    flush();
+  });
+
+  teardown(function() {
+    testElement.remove();
+  });
+
+  test('pageContentRowNotVisible', function() {
+    assertFalse(
+        isVisible(testElement.shadowRoot!.querySelector('#pageContentRow')));
+  });
 });
 
 // <if expr="_google_chrome">
@@ -311,6 +427,7 @@ suite('OfficialBuild', function() {
       profile: {password_manager_leak_detection: {value: true}},
       safebrowsing:
           {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+      page_content_collection: {enabled: {value: true}},
       spellcheck: {dictionaries: {value: ['en-US']}},
     };
     flush();
@@ -322,6 +439,7 @@ suite('OfficialBuild', function() {
       profile: {password_manager_leak_detection: {value: true}},
       safebrowsing:
           {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+      page_content_collection: {enabled: {value: true}},
       spellcheck: {dictionaries: {value: []}},
     };
     flush();
@@ -332,6 +450,7 @@ suite('OfficialBuild', function() {
       profile: {password_manager_leak_detection: {value: true}},
       safebrowsing:
           {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+      page_content_collection: {enabled: {value: true}},
       browser: {enable_spellchecking: {value: false}},
       spellcheck: {
         dictionaries: {value: ['en-US']},
@@ -351,6 +470,7 @@ suite('OfficialBuild', function() {
       profile: {password_manager_leak_detection: {value: true}},
       safebrowsing:
           {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+      page_content_collection: {enabled: {value: true}},
       spellcheck: {dictionaries: {value: ['en-US']}},
     };
     flush();
@@ -362,6 +482,7 @@ suite('OfficialBuild', function() {
       profile: {password_manager_leak_detection: {value: true}},
       safebrowsing:
           {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+      page_content_collection: {enabled: {value: true}},
       spellcheck: {dictionaries: {value: []}},
     };
     flush();
@@ -372,41 +493,16 @@ suite('OfficialBuild', function() {
 
   // <if expr="chromeos_ash">
   test(
-      'Metrics toggle links to OS sync page with deprecate sync metrics off',
-      function() {
+      'Metrics row links to OS Settings Privacy Hub subpage', function() {
         let targetUrl: string = '';
         testElement['navigateTo_'] = (url: string) => {
           targetUrl = url;
         };
 
-        loadTimeData.overrideValues({
-          osDeprecateSyncMetricsToggle: false,
-        });
-
-        const syncSetupUrl = loadTimeData.getString('osSyncSetupSettingsUrl');
-
         testElement.$.metricsReportingLink.click();
-
-        assertEquals(syncSetupUrl, targetUrl);
-      });
-
-  test(
-      'Metrics toggle links to OS privacy page with deprecate sync metrics on',
-      function() {
-        let targetUrl: string = '';
-        testElement['navigateTo_'] = (url: string) => {
-          targetUrl = url;
-        };
-
-        loadTimeData.overrideValues({
-          osDeprecateSyncMetricsToggle: true,
-        });
-
-        const privacyUrl = loadTimeData.getString('osPrivacySettingsUrl');
-
-        testElement.$.metricsReportingLink.click();
-
-        assertEquals(privacyUrl, targetUrl);
+        const expectedUrl =
+            loadTimeData.getString('osSettingsPrivacyHubSubpageUrl');
+        assertEquals(expectedUrl, targetUrl);
       });
   // </if>
 });

@@ -43,6 +43,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/link_loader.h"
+#include "third_party/blink/renderer/core/loader/render_blocking_resource_manager.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -68,7 +69,14 @@ void HTMLLinkElement::ParseAttribute(
   const QualifiedName& name = params.name;
   const AtomicString& value = params.new_value;
   if (name == html_names::kRelAttr) {
+    // We're about to change the rel attribute. If it was "expect", first remove
+    // it from a render blocking list.
+    RemoveExpectRenderBlockingLink();
+
     rel_attribute_ = LinkRelAttribute(value);
+    // TODO(vmpstr): Add rel=expect to UseCounter.
+    AddExpectRenderBlockingLinkIfNeeded();
+
     if (rel_attribute_.IsMonetization() &&
         GetDocument().IsInOutermostMainFrame()) {
       // TODO(1031476): The Web Monetization specification is an unofficial
@@ -84,19 +92,25 @@ void HTMLLinkElement::ParseAttribute(
         GetDocument().IsInOutermostMainFrame()) {
       UseCounter::Count(&GetDocument(), WebFeature::kLinkRelCanonical);
     }
+    if (rel_attribute_.IsPrivacyPolicy()) {
+      UseCounter::Count(&GetDocument(), WebFeature::kLinkRelPrivacyPolicy);
+    }
+    if (rel_attribute_.IsTermsOfService()) {
+      UseCounter::Count(&GetDocument(), WebFeature::kLinkRelTermsOfService);
+    }
     rel_list_->DidUpdateAttributeValue(params.old_value, value);
     Process();
-  } else if (name == html_names::kBlockingAttr &&
-             RuntimeEnabledFeatures::BlockingAttributeEnabled()) {
-    blocking_attribute_->DidUpdateAttributeValue(params.old_value, value);
-    blocking_attribute_->CountTokenUsage();
+  } else if (name == html_names::kBlockingAttr) {
+    blocking_attribute_->OnAttributeValueChanged(params.old_value, value);
     if (!IsPotentiallyRenderBlocking()) {
       if (GetLinkStyle() && GetLinkStyle()->StyleSheetIsLoading())
         GetLinkStyle()->UnblockRenderingForPendingSheet();
     }
+    HandleExpectBlockingChanges();
   } else if (name == html_names::kHrefAttr) {
     // Log href attribute before logging resource fetching in process().
     LogUpdateAttributeIfIsolatedWorldAndInDocument("link", params);
+    HandleExpectHrefChanges(params.old_value, value);
     Process();
   } else if (name == html_names::kTypeAttr) {
     type_ = value;
@@ -121,6 +135,7 @@ void HTMLLinkElement::ParseAttribute(
     Process();
   } else if (name == html_names::kMediaAttr) {
     media_ = value.LowerASCII();
+    HandleExpectMediaChanges();
     Process(LinkLoadParameters::Reason::kMediaChange);
   } else if (name == html_names::kIntegrityAttr) {
     integrity_ = value;
@@ -162,6 +177,12 @@ bool HTMLLinkElement::ShouldLoadLink() {
       return false;
   }
 
+  // We don't load links for the rel=expect, since that's just an expectation of
+  // parsing of some other element on the page.
+  if (rel_attribute_.IsExpect()) {
+    return false;
+  }
+
   const KURL& href = GetNonEmptyURLAttribute(html_names::kHrefAttr);
   return !href.PotentiallyDanglingMarkup();
 }
@@ -192,7 +213,6 @@ LinkResource* HTMLLinkElement::LinkResourceToProcess() {
     // the sheet from the style engine and do style recalculation.
     if (GetLinkStyle() && GetLinkStyle()->HasSheet())
       return GetLinkStyle();
-    // TODO(yoav): Ideally, the element's error event would be fired here.
     return nullptr;
   }
 
@@ -219,8 +239,9 @@ LinkStyle* HTMLLinkElement::GetLinkStyle() const {
 }
 
 void HTMLLinkElement::Process(LinkLoadParameters::Reason reason) {
-  if (LinkResource* link = LinkResourceToProcess())
+  if (LinkResource* link = LinkResourceToProcess()) {
     link->Process(reason);
+  }
 }
 
 Node::InsertionNotificationRequest HTMLLinkElement::InsertedInto(
@@ -247,6 +268,7 @@ Node::InsertionNotificationRequest HTMLLinkElement::InsertedInto(
   if (link_)
     link_->OwnerInserted();
 
+  AddExpectRenderBlockingLinkIfNeeded();
   return kInsertionDone;
 }
 
@@ -268,6 +290,8 @@ void HTMLLinkElement::RemovedFrom(ContainerNode& insertion_point) {
                                                                insertion_point);
   if (link_)
     link_->OwnerRemoved();
+
+  RemoveExpectRenderBlockingLink();
 }
 
 void HTMLLinkElement::FinishParsingChildren() {
@@ -352,17 +376,6 @@ bool HTMLLinkElement::HasLegalLinkAttribute(const QualifiedName& name) const {
          HTMLElement::HasLegalLinkAttribute(name);
 }
 
-const QualifiedName& HTMLLinkElement::SubResourceAttributeName() const {
-  // If the link element is not css, ignore it.
-  if (EqualIgnoringASCIICase(FastGetAttribute(html_names::kTypeAttr),
-                             "text/css")) {
-    // FIXME: Add support for extracting links of sub-resources which
-    // are inside style-sheet such as @import, @font-face, url(), etc.
-    return html_names::kHrefAttr;
-  }
-  return HTMLElement::SubResourceAttributeName();
-}
-
 KURL HTMLLinkElement::Href() const {
   const String& url = FastGetAttribute(html_names::kHrefAttr);
   if (url.empty())
@@ -402,6 +415,100 @@ void HTMLLinkElement::Trace(Visitor* visitor) const {
   visitor->Trace(blocking_attribute_);
   HTMLElement::Trace(visitor);
   LinkLoaderClient::Trace(visitor);
+}
+
+void HTMLLinkElement::HandleExpectBlockingChanges() {
+  if (!rel_attribute_.IsExpect()) {
+    return;
+  }
+
+  if (blocking_attribute_->HasRenderToken()) {
+    AddExpectRenderBlockingLinkIfNeeded();
+  } else {
+    RemoveExpectRenderBlockingLink();
+  }
+}
+
+void HTMLLinkElement::HandleExpectHrefChanges(const String& old_value,
+                                              const String& new_value) {
+  if (!rel_attribute_.IsExpect()) {
+    return;
+  }
+
+  RemoveExpectRenderBlockingLink(old_value);
+  AddExpectRenderBlockingLinkIfNeeded(new_value);
+}
+
+bool HTMLLinkElement::MediaQueryMatches() const {
+  if (LocalFrame* frame = GetDocument().GetFrame(); frame && !media_.empty()) {
+    auto* media_queries =
+        MediaQuerySet::Create(media_, GetDocument().GetExecutionContext());
+    MediaQueryEvaluator evaluator(frame);
+    return evaluator.Eval(*media_queries);
+  }
+  return true;
+}
+
+void HTMLLinkElement::HandleExpectMediaChanges() {
+  if (!rel_attribute_.IsExpect()) {
+    return;
+  }
+
+  if (MediaQueryMatches()) {
+    AddExpectRenderBlockingLinkIfNeeded(String(),
+                                        /*media_known_to_match=*/true);
+  } else {
+    RemoveExpectRenderBlockingLink();
+  }
+}
+
+void HTMLLinkElement::RemoveExpectRenderBlockingLink(const String& href) {
+  if (!rel_attribute_.IsExpect()) {
+    return;
+  }
+
+  if (auto* render_blocking_resource_manager =
+          GetDocument().GetRenderBlockingResourceManager()) {
+    render_blocking_resource_manager->RemovePendingParsingElementLink(
+        ParseSameDocumentIdFromHref(href), this);
+  }
+}
+
+AtomicString HTMLLinkElement::ParseSameDocumentIdFromHref(const String& href) {
+  String actual_href =
+      href.IsNull() ? FastGetAttribute(html_names::kHrefAttr) : href;
+  if (actual_href.empty()) {
+    return WTF::g_null_atom;
+  }
+
+  KURL url = GetDocument().CompleteURL(actual_href);
+  if (!url.HasFragmentIdentifier()) {
+    return WTF::g_null_atom;
+  }
+
+  return EqualIgnoringFragmentIdentifier(url, GetDocument().Url())
+             ? AtomicString(url.FragmentIdentifier())
+             : g_null_atom;
+}
+
+void HTMLLinkElement::AddExpectRenderBlockingLinkIfNeeded(
+    const String& href,
+    bool media_known_to_match) {
+  if (!rel_attribute_.IsExpect()) {
+    return;
+  }
+
+  bool media_matches = media_known_to_match || MediaQueryMatches();
+  bool is_blocking_render = blocking_attribute_->HasRenderToken();
+  if (!media_matches || !is_blocking_render || !isConnected()) {
+    return;
+  }
+
+  if (auto* render_blocking_resource_manager =
+          GetDocument().GetRenderBlockingResourceManager()) {
+    render_blocking_resource_manager->AddPendingParsingElementLink(
+        ParseSameDocumentIdFromHref(href), this);
+  }
 }
 
 }  // namespace blink

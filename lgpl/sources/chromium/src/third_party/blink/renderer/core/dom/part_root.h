@@ -9,7 +9,6 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/part.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
@@ -18,7 +17,6 @@ namespace blink {
 
 class ContainerNode;
 class Document;
-class DocumentPartRoot;
 
 using PartRootUnion = V8UnionChildNodePartOrDocumentPartRoot;
 
@@ -35,10 +33,16 @@ class CORE_EXPORT PartRoot : public GarbageCollectedMixin {
   // Adds a new part to this PartRoot's collection of maintained parts.
   void AddPart(Part& new_part);
   void RemovePart(Part& part);
+  static void CloneParts(const Node& source_node,
+                         Node& destination_node,
+                         NodeCloningData& data);
   void MarkPartsDirty() { cached_parts_list_dirty_ = true; }
+  void SwapPartsList(PartRoot& other);
 
   virtual Document& GetDocument() const = 0;
   virtual bool IsDocumentPartRoot() const = 0;
+  virtual Node* FirstIncludedChildNode() const = 0;
+  virtual Node* LastIncludedChildNode() const = 0;
 
   // Utilities to convert to/from the IDL union.
   static PartRootUnion* GetUnionFromPartRoot(PartRoot* root);
@@ -48,26 +52,16 @@ class CORE_EXPORT PartRoot : public GarbageCollectedMixin {
   }
 
   // PartRoot API
-  HeapVector<Member<Part>> getParts();
+  const HeapVector<Member<Part>>& getParts();
+  Node* getPartNode(unsigned index);
   virtual ContainerNode* rootContainer() const = 0;
 
  protected:
   PartRoot() = default;
   virtual const PartRoot* GetParentPartRoot() const = 0;
 
-  // This function is only used directly after a Clone() operation, during
-  // which all parts are constructed in tree order, as they're walked.
-  // Therefore, the parts order in parts_unordered_ is actually the correct
-  // order. Further, only valid parts are cloned, so there's no need to check
-  // validity either.
-  void CachePartOrderAfterClone();
-
  private:
-  const DocumentPartRoot* GetDocumentPartRoot();
-  HeapVector<Member<Part>> RebuildPartsList();
-
-  // |parts_unordered_| will be in Part construction order.
-  HeapLinkedHashSet<WeakMember<Part>> parts_unordered_;
+  void RebuildPartsList();
   HeapVector<Member<Part>> cached_ordered_parts_;
   bool cached_parts_list_dirty_{false};
 };

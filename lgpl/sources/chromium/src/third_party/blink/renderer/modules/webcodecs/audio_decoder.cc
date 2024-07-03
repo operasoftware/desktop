@@ -22,9 +22,10 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_decoder_support.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_encoded_audio_chunk.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
-#include "third_party/blink/renderer/modules/webcodecs/allow_shared_buffer_source_util.h"
+#include "third_party/blink/renderer/modules/webcodecs/array_buffer_util.h"
 #include "third_party/blink/renderer/modules/webcodecs/audio_data.h"
 #include "third_party/blink/renderer/modules/webcodecs/audio_decoder_broker.h"
+#include "third_party/blink/renderer/modules/webcodecs/decrypt_config_util.h"
 #include "third_party/blink/renderer/modules/webcodecs/encoded_audio_chunk.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -107,29 +108,27 @@ AudioDecoder* AudioDecoder::Create(ScriptState* script_state,
 }
 
 // static
-ScriptPromise AudioDecoder::isConfigSupported(ScriptState* script_state,
-                                              const AudioDecoderConfig* config,
-                                              ExceptionState& exception_state) {
+ScriptPromise<AudioDecoderSupport> AudioDecoder::isConfigSupported(
+    ScriptState* script_state,
+    const AudioDecoderConfig* config,
+    ExceptionState& exception_state) {
   String js_error_message;
-  absl::optional<media::AudioType> audio_type =
+  std::optional<media::AudioType> audio_type =
       IsValidAudioDecoderConfig(*config, &js_error_message);
 
   if (!audio_type) {
     exception_state.ThrowTypeError(js_error_message);
-    return ScriptPromise();
+    return ScriptPromise<AudioDecoderSupport>();
   }
 
   AudioDecoderSupport* support = AudioDecoderSupport::Create();
   support->setSupported(media::IsSupportedAudioType(*audio_type));
   support->setConfig(CopyConfig(*config));
-
-  return ScriptPromise::Cast(
-      script_state, ToV8Traits<AudioDecoderSupport>::ToV8(script_state, support)
-                        .ToLocalChecked());
+  return ToResolvedPromise<AudioDecoderSupport>(script_state, support);
 }
 
 // static
-absl::optional<media::AudioType> AudioDecoder::IsValidAudioDecoderConfig(
+std::optional<media::AudioType> AudioDecoder::IsValidAudioDecoderConfig(
     const AudioDecoderConfig& config,
     String* js_error_message) {
   media::AudioType audio_type;
@@ -138,19 +137,19 @@ absl::optional<media::AudioType> AudioDecoder::IsValidAudioDecoderConfig(
     *js_error_message = String::Format(
         "Invalid channel count; channel count must be non-zero, received %d.",
         config.numberOfChannels());
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   if (config.sampleRate() == 0) {
     *js_error_message = String::Format(
         "Invalid sample rate; sample rate must be non-zero, received %d.",
         config.sampleRate());
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   if (config.codec().LengthWithStrippedWhiteSpace() == 0) {
     *js_error_message = "Invalid codec; codec is required.";
-    return absl::nullopt;
+    return std::nullopt;
   }
   // Match codec strings from the codec registry:
   // https://www.w3.org/TR/webcodecs-codec-registry/#audio-codec-registry
@@ -169,8 +168,17 @@ absl::optional<media::AudioType> AudioDecoder::IsValidAudioDecoderConfig(
     description_required = true;
 
   if (description_required && !config.hasDescription()) {
-    *js_error_message = "Description is required.";
-    return absl::nullopt;
+    *js_error_message = "Invalid config; description is required.";
+    return std::nullopt;
+  }
+
+  if (config.hasDescription()) {
+    auto desc_wrapper = AsSpan<const uint8_t>(config.description());
+
+    if (!desc_wrapper.data()) {
+      *js_error_message = "Invalid config; description is detached.";
+      return std::nullopt;
+    }
   }
 
   media::AudioCodec codec = media::AudioCodec::kUnknown;
@@ -189,24 +197,31 @@ absl::optional<media::AudioType> AudioDecoder::IsValidAudioDecoderConfig(
 }
 
 // static
-absl::optional<media::AudioDecoderConfig>
+std::optional<media::AudioDecoderConfig>
 AudioDecoder::MakeMediaAudioDecoderConfig(const ConfigType& config,
                                           String* js_error_message) {
-  absl::optional<media::AudioType> audio_type =
+  std::optional<media::AudioType> audio_type =
       IsValidAudioDecoderConfig(config, js_error_message);
   if (!audio_type) {
     // Checked by IsValidConfig().
     NOTREACHED();
-    return absl::nullopt;
+    return std::nullopt;
   }
   if (audio_type->codec == media::AudioCodec::kUnknown) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   std::vector<uint8_t> extra_data;
   if (config.hasDescription()) {
-    // TODO(crbug.com/1179970): This should throw if description is detached.
     auto desc_wrapper = AsSpan<const uint8_t>(config.description());
+
+    if (!desc_wrapper.data()) {
+      // We should never get here, since this should be caught in
+      // IsValidAudioDecoderConfig().
+      *js_error_message = "Invalid config; description is detached.";
+      return std::nullopt;
+    }
+
     if (!desc_wrapper.empty()) {
       const uint8_t* start = desc_wrapper.data();
       const size_t size = desc_wrapper.size();
@@ -220,15 +235,25 @@ AudioDecoder::MakeMediaAudioDecoderConfig(const ConfigType& config,
           ? media::CHANNEL_LAYOUT_DISCRETE
           : media::GuessChannelLayout(config.numberOfChannels());
 
+  auto encryption_scheme = media::EncryptionScheme::kUnencrypted;
+  if (config.hasEncryptionScheme()) {
+    auto scheme = ToMediaEncryptionScheme(config.encryptionScheme());
+    if (!scheme) {
+      *js_error_message = "Unsupported encryption scheme";
+      return std::nullopt;
+    }
+    encryption_scheme = scheme.value();
+  }
+
   // TODO(chcunningham): Add sample format to IDL.
   media::AudioDecoderConfig media_config;
   media_config.Initialize(
       audio_type->codec, media::kSampleFormatPlanarF32, channel_layout,
-      config.sampleRate(), extra_data, media::EncryptionScheme::kUnencrypted,
+      config.sampleRate(), extra_data, encryption_scheme,
       base::TimeDelta() /* seek preroll */, 0 /* codec delay */);
   if (!media_config.IsValidConfig()) {
     *js_error_message = "Unsupported config.";
-    return absl::nullopt;
+    return std::nullopt;
   }
   media_config.set_aac_extra_data(std::move(extra_data));
 
@@ -249,7 +274,7 @@ bool AudioDecoder::IsValidConfig(const ConfigType& config,
       .has_value();
 }
 
-absl::optional<media::AudioDecoderConfig> AudioDecoder::MakeMediaConfig(
+std::optional<media::AudioDecoderConfig> AudioDecoder::MakeMediaConfig(
     const ConfigType& config,
     String* js_error_message) {
   DCHECK(js_error_message);

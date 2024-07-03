@@ -4,7 +4,13 @@
 
 #include "third_party/blink/public/common/interest_group/auction_config.h"
 
+#include <cmath>
+#include <string_view>
 #include <tuple>
+
+#include "base/strings/to_string.h"
+#include "third_party/blink/public/common/interest_group/ad_display_size_utils.h"
+#include "third_party/blink/public/mojom/interest_group/ad_auction_service.mojom.h"
 
 namespace blink {
 
@@ -23,11 +29,8 @@ DirectFromSellerSignalsSubresource::operator=(
 DirectFromSellerSignalsSubresource&
 DirectFromSellerSignalsSubresource::operator=(
     DirectFromSellerSignalsSubresource&&) = default;
-
-bool operator==(const DirectFromSellerSignalsSubresource& a,
-                const DirectFromSellerSignalsSubresource& b) {
-  return std::tie(a.bundle_url, a.token) == std::tie(b.bundle_url, b.token);
-}
+bool operator==(const DirectFromSellerSignalsSubresource&,
+                const DirectFromSellerSignalsSubresource&) = default;
 
 DirectFromSellerSignals::DirectFromSellerSignals() = default;
 DirectFromSellerSignals::DirectFromSellerSignals(
@@ -40,6 +43,14 @@ DirectFromSellerSignals& DirectFromSellerSignals::operator=(
     const DirectFromSellerSignals&) = default;
 DirectFromSellerSignals& DirectFromSellerSignals::operator=(
     DirectFromSellerSignals&&) = default;
+bool operator==(const DirectFromSellerSignals&,
+                const DirectFromSellerSignals&) = default;
+
+bool operator==(const AuctionConfig::BuyerTimeouts&,
+                const AuctionConfig::BuyerTimeouts&) = default;
+
+bool operator==(const AuctionConfig::BuyerCurrencies&,
+                const AuctionConfig::BuyerCurrencies&) = default;
 
 AuctionConfig::NonSharedParams::NonSharedParams() = default;
 AuctionConfig::NonSharedParams::NonSharedParams(const NonSharedParams&) =
@@ -51,6 +62,17 @@ AuctionConfig::NonSharedParams& AuctionConfig::NonSharedParams::operator=(
     const NonSharedParams&) = default;
 AuctionConfig::NonSharedParams& AuctionConfig::NonSharedParams::operator=(
     NonSharedParams&&) = default;
+bool operator==(const AuctionConfig::NonSharedParams&,
+                const AuctionConfig::NonSharedParams&) = default;
+
+bool operator==(
+    const AuctionConfig::NonSharedParams::AuctionReportBuyersConfig&,
+    const AuctionConfig::NonSharedParams::AuctionReportBuyersConfig&) = default;
+
+bool operator==(
+    const AuctionConfig::NonSharedParams::AuctionReportBuyerDebugModeConfig&,
+    const AuctionConfig::NonSharedParams::AuctionReportBuyerDebugModeConfig&) =
+    default;
 
 AuctionConfig::ServerResponseConfig::ServerResponseConfig() = default;
 AuctionConfig::ServerResponseConfig::ServerResponseConfig(
@@ -67,6 +89,9 @@ AuctionConfig::ServerResponseConfig&
 AuctionConfig::ServerResponseConfig::operator=(ServerResponseConfig&&) =
     default;
 
+bool operator==(const AuctionConfig::ServerResponseConfig&,
+                const AuctionConfig::ServerResponseConfig&) = default;
+
 AuctionConfig::AuctionConfig() = default;
 AuctionConfig::AuctionConfig(const AuctionConfig&) = default;
 AuctionConfig::AuctionConfig(AuctionConfig&&) = default;
@@ -74,6 +99,8 @@ AuctionConfig::~AuctionConfig() = default;
 
 AuctionConfig& AuctionConfig::operator=(const AuctionConfig&) = default;
 AuctionConfig& AuctionConfig::operator=(AuctionConfig&&) = default;
+
+bool operator==(const AuctionConfig&, const AuctionConfig&) = default;
 
 int AuctionConfig::NumPromises() const {
   int total = 0;
@@ -93,6 +120,9 @@ int AuctionConfig::NumPromises() const {
     ++total;
   }
   if (non_shared_params.buyer_cumulative_timeouts.is_promise()) {
+    ++total;
+  }
+  if (non_shared_params.deprecated_render_url_replacements.is_promise()) {
     ++total;
   }
   if (direct_from_seller_signals.is_promise()) {
@@ -116,8 +146,17 @@ bool AuctionConfig::IsHttpsAndMatchesSellerOrigin(const GURL& url) const {
          url::Origin::Create(url) == seller;
 }
 
+bool AuctionConfig::IsValidTrustedScoringSignalsURL(const GURL& url) const {
+  if (url.has_query() || url.has_ref() || url.has_username() ||
+      url.has_password()) {
+    return false;
+  }
+
+  return IsHttpsAndMatchesSellerOrigin(url);
+}
+
 bool AuctionConfig::IsDirectFromSellerSignalsValid(
-    const absl::optional<blink::DirectFromSellerSignals>&
+    const std::optional<blink::DirectFromSellerSignals>&
         candidate_direct_from_seller_signals) const {
   if (!candidate_direct_from_seller_signals.has_value()) {
     return true;

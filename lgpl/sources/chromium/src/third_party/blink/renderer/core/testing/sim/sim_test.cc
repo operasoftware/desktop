@@ -10,6 +10,7 @@
 #include "third_party/blink/public/platform/web_cache.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
 #include "third_party/blink/public/web/web_view_client.h"
+#include "third_party/blink/renderer/core/css/css_default_style_sheets.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -20,7 +21,12 @@
 
 namespace blink {
 
-SimTest::SimTest() {
+SimTest::SimTest(
+    std::optional<base::test::TaskEnvironment::TimeSource> time_source)
+    : task_environment_(
+          time_source.has_value()
+              ? time_source.value()
+              : base::test::TaskEnvironment::TimeSource::DEFAULT) {
   Document::SetForceSynchronousParsingForTesting(true);
   // Threaded animations are usually enabled for blink. However these tests use
   // synchronous compositing, which can not run threaded animations.
@@ -32,6 +38,8 @@ SimTest::SimTest() {
 }
 
 SimTest::~SimTest() {
+  // Clear lazily loaded style sheets.
+  CSSDefaultStyleSheets::Instance().PrepareForLeakDetection();
   Document::SetForceSynchronousParsingForTesting(false);
   content::TestBlinkWebUnitTestSupport::SetThreadedAnimationEnabled(true);
   WebCache::Clear();
@@ -50,7 +58,7 @@ void SimTest::SetUp() {
   page_ = std::make_unique<SimPage>();
   web_view_helper_ =
       std::make_unique<frame_test_helpers::WebViewHelper>(WTF::BindRepeating(
-          &SimTest::CreateTestWebFrameWidget, base::Unretained(this)));
+          &SimTest::CreateWebFrameWidget, base::Unretained(this)));
   // These tests don't simulate a browser interface and hence fetching code
   // caching doesn't work in these tests. Currently tests that use this testing
   // set up don't test / need code caches. Disable code caches for these tests.
@@ -154,8 +162,9 @@ frame_test_helpers::TestWebFrameClient& SimTest::WebFrameClient() {
   return *web_frame_client_;
 }
 
-SimWebFrameWidget& SimTest::GetWebFrameWidget() {
-  return *static_cast<SimWebFrameWidget*>(local_frame_root_->FrameWidgetImpl());
+frame_test_helpers::TestWebFrameWidget& SimTest::GetWebFrameWidget() {
+  return *static_cast<frame_test_helpers::TestWebFrameWidget*>(
+      local_frame_root_->FrameWidgetImpl());
 }
 
 SimCompositor& SimTest::Compositor() {
@@ -170,32 +179,7 @@ void SimTest::ResizeView(const gfx::Size& size) {
   web_view_helper_->Resize(size);
 }
 
-SimWebFrameWidget* SimTest::CreateSimWebFrameWidget(
-    base::PassKey<WebLocalFrame> pass_key,
-    CrossVariantMojoAssociatedRemote<mojom::blink::FrameWidgetHostInterfaceBase>
-        frame_widget_host,
-    CrossVariantMojoAssociatedReceiver<mojom::blink::FrameWidgetInterfaceBase>
-        frame_widget,
-    CrossVariantMojoAssociatedRemote<mojom::blink::WidgetHostInterfaceBase>
-        widget_host,
-    CrossVariantMojoAssociatedReceiver<mojom::blink::WidgetInterfaceBase>
-        widget,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const viz::FrameSinkId& frame_sink_id,
-    bool hidden,
-    bool never_composited,
-    bool is_for_child_local_root,
-    bool is_for_nested_main_frame,
-    bool is_for_scalable_page,
-    SimCompositor* compositor) {
-  return MakeGarbageCollected<SimWebFrameWidget>(
-      compositor, std::move(pass_key), std::move(frame_widget_host),
-      std::move(frame_widget), std::move(widget_host), std::move(widget),
-      std::move(task_runner), frame_sink_id, hidden, never_composited,
-      is_for_child_local_root, is_for_nested_main_frame, is_for_scalable_page);
-}
-
-frame_test_helpers::TestWebFrameWidget* SimTest::CreateTestWebFrameWidget(
+frame_test_helpers::TestWebFrameWidget* SimTest::CreateWebFrameWidget(
     base::PassKey<WebLocalFrame> pass_key,
     CrossVariantMojoAssociatedRemote<mojom::blink::FrameWidgetHostInterfaceBase>
         frame_widget_host,
@@ -212,12 +196,11 @@ frame_test_helpers::TestWebFrameWidget* SimTest::CreateTestWebFrameWidget(
     bool is_for_child_local_root,
     bool is_for_nested_main_frame,
     bool is_for_scalable_page) {
-  return CreateSimWebFrameWidget(
+  return MakeGarbageCollected<frame_test_helpers::TestWebFrameWidget>(
       std::move(pass_key), std::move(frame_widget_host),
       std::move(frame_widget), std::move(widget_host), std::move(widget),
       std::move(task_runner), frame_sink_id, hidden, never_composited,
-      is_for_child_local_root, is_for_nested_main_frame, is_for_scalable_page,
-      compositor_.get());
+      is_for_child_local_root, is_for_nested_main_frame, is_for_scalable_page);
 }
 
 void SimTest::SetPreferCompositingToLCDText(bool enabled) {

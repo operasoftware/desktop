@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2022, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -27,10 +27,19 @@
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
+#ifdef HAVE_ARPA_INET_H
+#include <arpa/inet.h>
+#endif
+#ifdef HAVE_ARC4RANDOM
+/* Some platforms might have the prototype missing (ubuntu + libressl) */
+uint32_t arc4random(void);
+#endif
 
 #include <curl/curl.h>
+#include "urldata.h"
 #include "vtls/vtls.h"
 #include "sendf.h"
+#include "timeval.h"
 #include "rand.h"
 
 /* The last 3 #include files should be in this order */
@@ -139,6 +148,11 @@ static CURLcode randit(struct Curl_easy *data, unsigned int *rnd)
   }
 #endif
 
+#ifdef HAVE_ARC4RANDOM
+  *rnd = (unsigned int)arc4random();
+  return CURLE_OK;
+#endif
+
 #if defined(RANDOM_FILE) && !defined(WIN32)
   if(!seeded) {
     /* if there's a random file to read a seed from, use it */
@@ -170,11 +184,11 @@ static CURLcode randit(struct Curl_easy *data, unsigned int *rnd)
 }
 
 /*
- * Curl_rand() stores 'num' number of random unsigned integers in the buffer
- * 'rndptr' points to.
+ * Curl_rand() stores 'num' number of random unsigned characters in the buffer
+ * 'rnd' points to.
  *
  * If libcurl is built without TLS support or with a TLS backend that lacks a
- * proper random API (rustls, Gskit or mbedTLS), this function will use "weak"
+ * proper random API (rustls or mbedTLS), this function will use "weak"
  * random.
  *
  * When built *with* TLS support and a backend that offers strong random, it
@@ -212,7 +226,7 @@ CURLcode Curl_rand(struct Curl_easy *data, unsigned char *rnd, size_t num)
 
 /*
  * Curl_rand_hex() fills the 'rnd' buffer with a given 'num' size with random
- * hexadecimal digits PLUS a zero terminating byte. It must be an odd number
+ * hexadecimal digits PLUS a null-terminating byte. It must be an odd number
  * size.
  */
 
@@ -235,7 +249,7 @@ CURLcode Curl_rand_hex(struct Curl_easy *data, unsigned char *rnd,
     /* make sure it fits in the local buffer and that it is an odd number! */
     return CURLE_BAD_FUNCTION_ARGUMENT;
 
-  num--; /* save one for zero termination */
+  num--; /* save one for null-termination */
 
   result = Curl_rand(data, buffer, num/2);
   if(result)

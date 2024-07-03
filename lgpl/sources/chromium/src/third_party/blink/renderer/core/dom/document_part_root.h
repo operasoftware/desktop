@@ -7,11 +7,13 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/container_node.h"
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/part_root.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 
 namespace blink {
+
+class Document;
+class PartRootCloneOptions;
 
 // Implementation of the DocumentPartRoot class, which is part of the DOM Parts
 // API. A DocumentPartRoot holds the parts for a Document or DocumentFragment.
@@ -29,11 +31,23 @@ class CORE_EXPORT DocumentPartRoot : public ScriptWrappable, public PartRoot {
     return root_container_->GetDocument();
   }
   bool IsDocumentPartRoot() const override { return true; }
+  Node* FirstIncludedChildNode() const override {
+    return root_container_->firstChild();
+  }
+  Node* LastIncludedChildNode() const override {
+    return root_container_->lastChild();
+  }
+
   void Trace(Visitor*) const override;
 
   // PartRoot API
-  PartRootUnion* clone(ExceptionState&);
-  ContainerNode* rootContainer() const override { return root_container_; }
+  PartRootUnion* clone(ExceptionState& exception_state) {
+    return clone(nullptr, exception_state);
+  }
+  PartRootUnion* clone(PartRootCloneOptions*, ExceptionState&);
+  ContainerNode* rootContainer() const override {
+    return root_container_.Get();
+  }
 
  protected:
   const PartRoot* GetParentPartRoot() const override { return nullptr; }

@@ -1,12 +1,18 @@
 // Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// NOTICE: This file contains modifications made by Opera.
+// Copyright (C) 2024 Opera Norway AS. All rights reserved.
 
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 
+#include "base/features/scoped_test_feature_override.h"
+#include "base/features/submodule_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
+#include "third_party/blink/renderer/core/layout/hit_test_location.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page_animator.h"
@@ -46,14 +52,8 @@ TEST_P(PaintLayerTest, ChildWithoutPaintLayer) {
   EXPECT_NE(nullptr, root_layer);
 }
 
-#if BUILDFLAG(IS_FUCHSIA)
-// TODO(crbug.com/1313268): Fix this test on Fuchsia and re-enable.
-#define MAYBE_RootLayerScrollBounds DISABLED_RootLayerScrollBounds
-#else
-#define MAYBE_RootLayerScrollBounds RootLayerScrollBounds
-#endif
-TEST_P(PaintLayerTest, MAYBE_RootLayerScrollBounds) {
-  USE_NON_OVERLAY_SCROLLBARS();
+TEST_P(PaintLayerTest, RootLayerScrollBounds) {
+  USE_NON_OVERLAY_SCROLLBARS_OR_QUIT();
 
   SetBodyInnerHTML(
       "<style> body { width: 1000px; height: 1000px; margin: 0 } </style>");
@@ -117,12 +117,7 @@ TEST_P(PaintLayerTest, NonCompositedScrollingNeedsRepaint) {
 
   PaintLayer* content_layer = GetPaintLayerByElementId("content");
   const auto& fragment = content_layer->GetLayoutObject().FirstFragment();
-  if (RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()) {
-    EXPECT_EQ(gfx::Rect(0, 0, 2000, 2000),
-              fragment.GetContentsCullRect().Rect());
-  } else {
-    EXPECT_EQ(gfx::Rect(0, 0, 100, 100), fragment.GetContentsCullRect().Rect());
-  }
+  EXPECT_EQ(gfx::Rect(0, 0, 2000, 2000), fragment.GetContentsCullRect().Rect());
 
   scroll_layer->GetScrollableArea()->SetScrollOffset(
       ScrollOffset(1000, 1000), mojom::blink::ScrollType::kProgrammatic);
@@ -132,16 +127,8 @@ TEST_P(PaintLayerTest, NonCompositedScrollingNeedsRepaint) {
       content_layer->ContainingLayer()->PixelSnappedScrolledContentOffset());
 
   EXPECT_FALSE(scroll_layer->SelfNeedsRepaint());
-  if (RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()) {
-    EXPECT_EQ(gfx::Rect(0, 0, 2000, 2000),
-              fragment.GetContentsCullRect().Rect());
-    EXPECT_FALSE(content_layer->SelfNeedsRepaint());
-  } else {
-    // The content layer needs repaint because its cull rect changed.
-    EXPECT_EQ(gfx::Rect(1000, 1000, 100, 100),
-              fragment.GetContentsCullRect().Rect());
-    EXPECT_TRUE(content_layer->SelfNeedsRepaint());
-  }
+  EXPECT_EQ(gfx::Rect(0, 0, 2000, 2000), fragment.GetContentsCullRect().Rect());
+  EXPECT_FALSE(content_layer->SelfNeedsRepaint());
 
   UpdateAllLifecyclePhasesForTest();
 }
@@ -2086,15 +2073,13 @@ TEST_P(PaintLayerTest, HitTestOverlayResizer) {
   }
 }
 
-#if BUILDFLAG(IS_FUCHSIA)
-// TODO(crbug.com/1313268): Fix this test on Fuchsia and re-enable.
-#define MAYBE_HitTestScrollbarUnderClip DISABLED_HitTestScrollbarUnderClip
-#else
-#define MAYBE_HitTestScrollbarUnderClip HitTestScrollbarUnderClip
-#endif
+TEST_P(PaintLayerTest, HitTestScrollbarUnderClip) {
+  // Testing both flag states would be preferable, but adding this as a
+  // parameter to PaintLayerTest is unwieldy.
+  base::ScopedTestFeatureOverride enable_component_based_scrollbar{
+      base::kFeatureComponentBasedScrollbar, /*enabled=*/true};
 
-TEST_P(PaintLayerTest, MAYBE_HitTestScrollbarUnderClip) {
-  USE_NON_OVERLAY_SCROLLBARS();
+  USE_NON_OVERLAY_SCROLLBARS_OR_QUIT();
 
   SetBodyInnerHTML(R"HTML(
     <style>body { margin: 50px; }</style>

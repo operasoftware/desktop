@@ -5,11 +5,10 @@
 #include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 
 #include <utility>
-#include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
 #include "third_party/blink/renderer/core/css/css_syntax_component.h"
+#include "third_party/blink/renderer/core/css/css_unparsed_declaration_value.h"
 #include "third_party/blink/renderer/core/css/css_uri_value.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
-#include "third_party/blink/renderer/core/css/css_variable_reference_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_idioms.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
@@ -62,7 +61,7 @@ const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
       return css_parsing_utils::ConsumeIntegerOrNumberCalc(range, context);
     case CSSSyntaxType::kAngle:
       return css_parsing_utils::ConsumeAngle(range, context,
-                                             absl::optional<WebFeature>());
+                                             std::optional<WebFeature>());
     case CSSSyntaxType::kTime:
       return css_parsing_utils::ConsumeTime(
           range, context, CSSPrimitiveValue::ValueRange::kAll);
@@ -119,8 +118,8 @@ const CSSValue* CSSSyntaxDefinition::Parse(CSSTokenizedValue value,
                                            const CSSParserContext& context,
                                            bool is_animation_tainted) const {
   if (IsUniversal()) {
-    return CSSVariableParser::ParseVariableReferenceValue(value, context,
-                                                          is_animation_tainted);
+    return CSSVariableParser::ParseUniversalSyntaxValue(value, context,
+                                                        is_animation_tainted);
   }
   value.range.ConsumeWhitespace();
   for (const CSSSyntaxComponent& component : syntax_components_) {
@@ -140,11 +139,12 @@ CSSSyntaxDefinition CSSSyntaxDefinition::IsolatedCopy() const {
         syntax_component.GetType(), syntax_component.GetString(),
         syntax_component.GetRepeat()));
   }
-  return CSSSyntaxDefinition(std::move(syntax_components_copy));
+  return CSSSyntaxDefinition(std::move(syntax_components_copy), original_text_);
 }
 
-CSSSyntaxDefinition::CSSSyntaxDefinition(Vector<CSSSyntaxComponent> components)
-    : syntax_components_(std::move(components)) {
+CSSSyntaxDefinition::CSSSyntaxDefinition(Vector<CSSSyntaxComponent> components,
+                                         const String& original_text)
+    : syntax_components_(std::move(components)), original_text_(original_text) {
   DCHECK(syntax_components_.size());
 }
 
@@ -152,7 +152,11 @@ CSSSyntaxDefinition CSSSyntaxDefinition::CreateUniversal() {
   Vector<CSSSyntaxComponent> components;
   components.push_back(CSSSyntaxComponent(
       CSSSyntaxType::kTokenStream, g_empty_string, CSSSyntaxRepeat::kNone));
-  return CSSSyntaxDefinition(std::move(components));
+  return CSSSyntaxDefinition(std::move(components), {});
+}
+
+String CSSSyntaxDefinition::ToString() const {
+  return IsUniversal() ? String("*") : original_text_;
 }
 
 }  // namespace blink

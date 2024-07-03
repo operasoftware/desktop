@@ -37,6 +37,8 @@
 
 #include <algorithm>
 
+#include "base/synchronization/lock.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/character_property_data.h"
 #include "third_party/blink/renderer/platform/text/icu_error.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -45,7 +47,9 @@
 
 namespace blink {
 
-static UCPTrie* CreateTrie() {
+namespace {
+
+UCPTrie* CreateTrie() {
   // Create a Trie from the value array.
   ICUError error;
   UCPTrie* trie = ucptrie_openFromBinary(
@@ -55,10 +59,30 @@ static UCPTrie* CreateTrie() {
   return trie;
 }
 
-static bool HasProperty(UChar32 c, CharacterProperty property) {
+unsigned GetProperty(UChar32 c, CharacterProperty property) {
   static const UCPTrie* trie = CreateTrie();
   return UCPTRIE_FAST_GET(trie, UCPTRIE_16, c) &
          static_cast<CharacterPropertyType>(property);
+}
+
+base::Lock& GetFreezePatternLock() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(base::Lock, lock, ());
+  return lock;
+}
+
+}  // namespace
+
+void Character::ApplyPatternAndFreezeIfEmpty(icu::UnicodeSet* unicodeSet,
+                                             const char* pattern) {
+  base::AutoLock locker(GetFreezePatternLock());
+  if (!unicodeSet->isEmpty()) {
+    return;
+  }
+  blink::ICUError err;
+  // Use ICU's invariant-character initialization method.
+  unicodeSet->applyPattern(icu::UnicodeString(pattern, -1, US_INV), err);
+  unicodeSet->freeze();
+  DCHECK_EQ(err, U_ZERO_ERROR);
 }
 
 bool Character::IsUprightInMixedVertical(UChar32 character) {
@@ -68,20 +92,40 @@ bool Character::IsUprightInMixedVertical(UChar32 character) {
 }
 
 bool Character::IsCJKIdeographOrSymbolSlow(UChar32 c) {
-  return HasProperty(c, CharacterProperty::kIsCJKIdeographOrSymbol);
+  return GetProperty(c, CharacterProperty::kIsCJKIdeographOrSymbol);
 }
 
 bool Character::IsPotentialCustomElementNameChar(UChar32 character) {
-  return HasProperty(character,
+  return GetProperty(character,
                      CharacterProperty::kIsPotentialCustomElementNameChar);
 }
 
 bool Character::IsBidiControl(UChar32 character) {
-  return HasProperty(character, CharacterProperty::kIsBidiControl);
+  return GetProperty(character, CharacterProperty::kIsBidiControl);
 }
 
 bool Character::IsHangulSlow(UChar32 character) {
-  return HasProperty(character, CharacterProperty::kIsHangul);
+  return GetProperty(character, CharacterProperty::kIsHangul);
+}
+
+HanKerningCharType Character::GetHanKerningCharType(UChar32 character) {
+  return static_cast<HanKerningCharType>(
+      GetProperty(character, CharacterProperty::kHanKerningShiftedMask) >>
+      static_cast<unsigned>(CharacterProperty::kHanKerningShift));
+}
+
+bool Character::MaybeHanKerningOpenSlow(UChar32 ch) {
+  // See `HanKerning::GetCharType`.
+  const HanKerningCharType type = Character::GetHanKerningCharType(ch);
+  return type == HanKerningCharType::kOpen ||
+         type == HanKerningCharType::kOpenQuote;
+}
+
+bool Character::MaybeHanKerningCloseSlow(UChar32 ch) {
+  // See `HanKerning::GetCharType`.
+  const HanKerningCharType type = Character::GetHanKerningCharType(ch);
+  return type == HanKerningCharType::kClose ||
+         type == HanKerningCharType::kCloseQuote;
 }
 
 unsigned Character::ExpansionOpportunityCount(
@@ -136,8 +180,11 @@ unsigned Character::ExpansionOpportunityCount(
         count++;
         is_after_expansion = true;
         continue;
+      } else if (!RuntimeEnabledFeatures::
+                     TextAlignJustifyBidiIsolateEnabled() ||
+                 !IsDefaultIgnorable(character)) {
+        is_after_expansion = false;
       }
-      is_after_expansion = false;
     }
   } else {
     for (size_t i = characters.size(); i > 0; --i) {
@@ -157,8 +204,11 @@ unsigned Character::ExpansionOpportunityCount(
         count++;
         is_after_expansion = true;
         continue;
+      } else if (!RuntimeEnabledFeatures::
+                     TextAlignJustifyBidiIsolateEnabled() ||
+                 !IsDefaultIgnorable(character)) {
+        is_after_expansion = false;
       }
-      is_after_expansion = false;
     }
   }
   return count;
@@ -223,24 +273,12 @@ bool Character::IsEmojiComponent(UChar32 c) {
   return u_hasBinaryProperty(c, UCHAR_EMOJI_COMPONENT);
 }
 
-template <typename CharacterType>
-static inline String NormalizeSpacesInternal(const CharacterType* characters,
-                                             unsigned length) {
-  StringBuilder normalized;
-  normalized.ReserveCapacity(length);
-
-  for (unsigned i = 0; i < length; ++i)
-    normalized.Append(Character::NormalizeSpaces(characters[i]));
-
-  return normalized.ToString();
-}
-
-String Character::NormalizeSpaces(const LChar* characters, unsigned length) {
-  return NormalizeSpacesInternal(characters, length);
-}
-
-String Character::NormalizeSpaces(const UChar* characters, unsigned length) {
-  return NormalizeSpacesInternal(characters, length);
+bool Character::MaybeEmojiPresentation(UChar32 c) {
+  return c == kZeroWidthJoinerCharacter || c == 0x00A9 /* copyright sign */ ||
+         c == 0x00AE /* registered sign */ || IsEmojiKeycapBase(c) ||
+         IsInRange(c, 0x203C, 0x2B55) || c == kVariationSelector15Character ||
+         c == 0x3030 || c == 0x303D || c == 0x3297 || c == 0x3299 ||
+         c == kVariationSelector16Character || c >= 65536;
 }
 
 bool Character::IsCommonOrInheritedScript(UChar32 character) {

@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/timing/performance_long_animation_frame_timing.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/core/frame/dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -40,11 +42,6 @@ const AtomicString& PerformanceLongAnimationFrameTiming::entryType() const {
 
 DOMHighResTimeStamp PerformanceLongAnimationFrameTiming::renderStart() const {
   return ToMonotonicTime(info_->RenderStartTime());
-}
-
-DOMHighResTimeStamp PerformanceLongAnimationFrameTiming::desiredRenderStart()
-    const {
-  return ToMonotonicTime(info_->DesiredRenderStartTime());
 }
 
 DOMHighResTimeStamp PerformanceLongAnimationFrameTiming::ToMonotonicTime(
@@ -103,12 +100,11 @@ void PerformanceLongAnimationFrameTiming::BuildJSONValue(
   PerformanceEntry::BuildJSONValue(builder);
   builder.AddNumber("renderStart", renderStart());
   builder.AddNumber("styleAndLayoutStart", styleAndLayoutStart());
-  builder.AddNumber("desiredRenderStart", desiredRenderStart());
   builder.AddNumber("firstUIEventTimestamp", firstUIEventTimestamp());
   builder.AddNumber("blockingDuration", blockingDuration());
-  ScriptState* script_state = builder.GetScriptState();
-  builder.Add("scripts", FreezeV8Object(ToV8(scripts(), script_state),
-                                        script_state->GetIsolate()));
+  builder.AddV8Value("scripts",
+                     ToV8Traits<IDLArray<PerformanceScriptTiming>>::ToV8(
+                         builder.GetScriptState(), scripts()));
 }
 
 void PerformanceLongAnimationFrameTiming::Trace(Visitor* visitor) const {

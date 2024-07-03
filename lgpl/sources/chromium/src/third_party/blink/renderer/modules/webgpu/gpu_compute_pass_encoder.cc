@@ -15,8 +15,9 @@ namespace blink {
 
 GPUComputePassEncoder::GPUComputePassEncoder(
     GPUDevice* device,
-    WGPUComputePassEncoder compute_pass_encoder)
-    : DawnObject<WGPUComputePassEncoder>(device, compute_pass_encoder) {}
+    WGPUComputePassEncoder compute_pass_encoder,
+    const String& label)
+    : DawnObject<WGPUComputePassEncoder>(device, compute_pass_encoder, label) {}
 
 void GPUComputePassEncoder::setBindGroup(
     uint32_t index,
@@ -53,7 +54,7 @@ void GPUComputePassEncoder::writeTimestamp(
     uint32_t queryIndex,
     ExceptionState& exception_state) {
   V8GPUFeatureName::Enum requiredFeatureEnum =
-      V8GPUFeatureName::Enum::kTimestampQueryInsidePasses;
+      V8GPUFeatureName::Enum::kChromiumExperimentalTimestampQueryInsidePasses;
   if (!device_->features()->has(requiredFeatureEnum)) {
     exception_state.ThrowTypeError(String::Format(
         "Use of the writeTimestamp() method on compute pass requires the '%s' "

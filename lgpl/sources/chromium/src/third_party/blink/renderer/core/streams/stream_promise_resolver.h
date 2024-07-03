@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_STREAM_PROMISE_RESOLVER_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
@@ -13,14 +14,14 @@
 
 namespace blink {
 
-class ScriptPromise;
+class ScriptPromiseUntyped;
 class ScriptState;
 
 // A thin wrapper around v8::Promise::Resolver that matches the semantics used
 // for promises in the standard. StreamPromiseResolver is used for promises that
 // need to be stored somewhere: promises on the stack should generally use
-// v8::Local<v8::Promise>, or ScriptPromise if they are to be returned to the
-// bindings code.
+// v8::Local<v8::Promise>, or ScriptPromiseUntyped if they are to be returned to
+// the bindings code.
 class CORE_EXPORT StreamPromiseResolver final
     : public GarbageCollected<StreamPromiseResolver> {
  public:
@@ -54,6 +55,9 @@ class CORE_EXPORT StreamPromiseResolver final
   // Creates an initialised promise.
   explicit StreamPromiseResolver(ScriptState*);
 
+  // Creates an initialised promise with exception state, for tracing.
+  StreamPromiseResolver(ScriptState*, const ExceptionState&);
+
   // Resolves the promise with |value|. Does nothing if the promise is already
   // settled.
   void Resolve(ScriptState*, v8::Local<v8::Value> value);
@@ -65,8 +69,8 @@ class CORE_EXPORT StreamPromiseResolver final
   // resolved.
   void Reject(ScriptState*, v8::Local<v8::Value> reason);
 
-  // Returns the promise wrapped in a ScriptPromise.
-  ScriptPromise GetScriptPromise(ScriptState* script_state) const;
+  // Returns the promise wrapped in a ScriptPromiseUntyped.
+  ScriptPromiseUntyped GetScriptPromiseUntyped(ScriptState* script_state) const;
 
   // Returns the promise as a v8::Promise.
   v8::Local<v8::Promise> V8Promise(v8::Isolate* isolate) const;
@@ -90,6 +94,9 @@ class CORE_EXPORT StreamPromiseResolver final
  private:
   TraceWrapperV8Reference<v8::Promise::Resolver> resolver_;
   bool is_settled_ = false;
+  const char* class_like_name_ = "StreamPromise";
+  String property_like_name_;
+  String script_url_;
 };
 
 }  // namespace blink

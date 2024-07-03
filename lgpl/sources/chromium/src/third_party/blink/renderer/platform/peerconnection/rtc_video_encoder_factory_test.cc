@@ -4,13 +4,18 @@
 
 #include <stdint.h>
 
+#include "base/ranges/algorithm.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "media/base/svc_scalability_mode.h"
 #include "media/base/video_codecs.h"
+#include "media/mojo/clients/mojo_video_encoder_metrics_provider.h"
 #include "media/video/mock_gpu_video_accelerator_factories.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder_factory.h"
+#include "third_party/openh264/openh264_buildflags.h"
 #include "third_party/webrtc/api/video_codecs/sdp_video_format.h"
 #include "third_party/webrtc/api/video_codecs/video_encoder_factory.h"
 
@@ -19,6 +24,7 @@ using ::testing::Return;
 namespace blink {
 
 namespace {
+
 constexpr webrtc::VideoEncoderFactory::CodecSupport kSupportedPowerEfficient = {
     true, true};
 constexpr webrtc::VideoEncoderFactory::CodecSupport kUnsupported = {false,
@@ -42,9 +48,15 @@ class MockGpuVideoEncodeAcceleratorFactories
   MockGpuVideoEncodeAcceleratorFactories()
       : MockGpuVideoAcceleratorFactories(nullptr) {}
 
-  absl::optional<media::VideoEncodeAccelerator::SupportedProfiles>
+  std::optional<media::VideoEncodeAccelerator::SupportedProfiles>
   GetVideoEncodeAcceleratorSupportedProfiles() override {
     media::VideoEncodeAccelerator::SupportedProfiles profiles = {
+        {media::H264PROFILE_BASELINE, kMaxResolution, kMaxFramerateNumerator,
+         kMaxFramerateDenominator, media::VideoEncodeAccelerator::kConstantMode,
+         kScalabilityModes},
+        {media::H264PROFILE_BASELINE, kMaxResolution, kMaxFramerateNumerator,
+         kMaxFramerateDenominator, media::VideoEncodeAccelerator::kConstantMode,
+         kScalabilityModes},
         {media::VP8PROFILE_ANY, kMaxResolution, kMaxFramerateNumerator,
          kMaxFramerateDenominator, media::VideoEncodeAccelerator::kConstantMode,
          kScalabilityModes},
@@ -53,16 +65,19 @@ class MockGpuVideoEncodeAcceleratorFactories
          kScalabilityModes}};
     return profiles;
   }
+
+  scoped_refptr<base::SequencedTaskRunner> GetTaskRunner() override {
+    return base::SequencedTaskRunner::GetCurrentDefault();
+  }
 };
 
 }  // anonymous namespace
 
-typedef webrtc::SdpVideoFormat Sdp;
-typedef webrtc::SdpVideoFormat::Parameters Params;
-
 class RTCVideoEncoderFactoryTest : public ::testing::Test {
  public:
-  RTCVideoEncoderFactoryTest() : encoder_factory_(&mock_gpu_factories_) {
+  RTCVideoEncoderFactoryTest()
+      : encoder_factory_(&mock_gpu_factories_,
+                         /*encoder_metrics_provider_factory=*/nullptr) {
     // Ensure all the profiles in our mock GPU factory are allowed.
     encoder_factory_.clear_disabled_profiles_for_testing();
   }
@@ -73,49 +88,117 @@ class RTCVideoEncoderFactoryTest : public ::testing::Test {
   RTCVideoEncoderFactory encoder_factory_;
 };
 
-TEST_F(RTCVideoEncoderFactoryTest, QueryCodecSupportNoSvc) {
+TEST_F(RTCVideoEncoderFactoryTest, GetSupportedFormats) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitFromCommandLine("MediaFoundationH264CbpEncoding", "");
+
   EXPECT_CALL(mock_gpu_factories_, IsEncoderSupportKnown())
       .WillRepeatedly(Return(true));
-  // VP8 and VP9 profile 0 are supported.
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(
-                         Sdp("VP8"), /*scalability_mode=*/absl::nullopt),
-                     kSupportedPowerEfficient));
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(
-                         Sdp("VP9"), /*scalability_mode=*/absl::nullopt),
-                     kSupportedPowerEfficient));
+  const std::vector<webrtc::SdpVideoFormat> formats =
+      encoder_factory_.GetSupportedFormats();
 
-  // H264, VP9 profile 2 and AV1 are unsupported.
+  int expected_total_count = 2;
+  int expected_h264_count = 0;
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(RTC_USE_H264) || \
+    BUILDFLAG(ENABLE_EXTERNAL_OPENH264) ||              \
+    BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
+  expected_h264_count = 1;
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+  // Add the Constrained Baseline Profile.
+  expected_h264_count++;
+#endif
+#endif
+  expected_total_count += expected_h264_count;
+
+  EXPECT_EQ(formats.size(), static_cast<size_t>(expected_total_count));
+  EXPECT_EQ(base::ranges::count(formats, "H264", &webrtc::SdpVideoFormat::name),
+            expected_h264_count);
+  EXPECT_EQ(base::ranges::count(formats, "VP8", &webrtc::SdpVideoFormat::name),
+            1);
+  EXPECT_EQ(base::ranges::count(formats, "VP9", &webrtc::SdpVideoFormat::name),
+            1);
+  EXPECT_EQ(base::ranges::count_if(
+                formats,
+                [](const auto& scalability_modes) {
+                  return scalability_modes.size() == 3u;
+                },
+                &webrtc::SdpVideoFormat::scalability_modes),
+            expected_total_count);
+}
+
+TEST_F(RTCVideoEncoderFactoryTest, QueryCodecSupportNoSvc) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitFromCommandLine("MediaFoundationH264CbpEncoding", "");
+
+  EXPECT_CALL(mock_gpu_factories_, IsEncoderSupportKnown())
+      .WillRepeatedly(Return(true));
+  // H.264 BP/CBP, VP8 and VP9 profile 0 are supported.
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(webrtc::SdpVideoFormat("VP8"),
+                                         /*scalability_mode=*/std::nullopt),
+      kSupportedPowerEfficient));
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(webrtc::SdpVideoFormat("VP9"),
+                                         /*scalability_mode=*/std::nullopt),
+      kSupportedPowerEfficient));
+#if BUILDFLAG(RTC_USE_H264)
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(
+          webrtc::SdpVideoFormat("H264", {{"level-asymmetry-allowed", "1"},
+                                          {"packetization-mode", "1"},
+                                          {"profile-level-id", "42001f"}}),
+          /*scalability_mode=*/std::nullopt),
+      kSupportedPowerEfficient));
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(
+          webrtc::SdpVideoFormat("H264", {{"level-asymmetry-allowed", "1"},
+                                          {"packetization-mode", "1"},
+                                          {"profile-level-id", "42c01f"}}),
+          /*scalability_mode=*/std::nullopt),
+      kSupportedPowerEfficient));
+#endif
+#endif
+
+  // H264 > BP, VP9 profile 2 and AV1 are unsupported.
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(
+          webrtc::SdpVideoFormat("H264", {{"level-asymmetry-allowed", "1"},
+                                          {"packetization-mode", "1"},
+                                          {"profile-level-id", "4d001f"}}),
+          /*scalability_mode=*/std::nullopt),
+      kUnsupported));
   EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(
-                         Sdp("H264", Params{{"level-asymmetry-allowed", "1"},
-                                            {"packetization-mode", "1"},
-                                            {"profile-level-id", "42001f"}}),
-                         /*scalability_mode=*/absl::nullopt),
+                         webrtc::SdpVideoFormat("VP9", {{"profile-id", "2"}}),
+                         /*scalability_mode=*/std::nullopt),
                      kUnsupported));
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(
-                         Sdp("VP9", Params{{"profile-id", "2"}}),
-                         /*scalability_mode=*/absl::nullopt),
-                     kUnsupported));
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(
-                         Sdp("AV1"), /*scalability_mode=*/absl::nullopt),
-                     kUnsupported));
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(webrtc::SdpVideoFormat("AV1"),
+                                         /*scalability_mode=*/std::nullopt),
+      kUnsupported));
 }
 
 TEST_F(RTCVideoEncoderFactoryTest, QueryCodecSupportSvc) {
   EXPECT_CALL(mock_gpu_factories_, IsEncoderSupportKnown())
       .WillRepeatedly(Return(true));
   // Test supported modes.
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(Sdp("VP8"), "L1T2"),
-                     kSupportedPowerEfficient));
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(Sdp("VP9"), "L1T3"),
-                     kSupportedPowerEfficient));
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(webrtc::SdpVideoFormat("VP8"), "L1T2"),
+      kSupportedPowerEfficient));
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(webrtc::SdpVideoFormat("VP9"), "L1T3"),
+      kSupportedPowerEfficient));
 
   // Test unsupported modes.
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(Sdp("AV1"), "L2T1"),
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(webrtc::SdpVideoFormat("AV1"), "L2T1"),
+      kUnsupported));
+  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(
+                         webrtc::SdpVideoFormat("H264"), "L2T2"),
                      kUnsupported));
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(Sdp("H264"), "L1T2"),
-                     kUnsupported));
-  EXPECT_TRUE(Equals(encoder_factory_.QueryCodecSupport(Sdp("VP8"), "L3T3"),
-                     kUnsupported));
+  EXPECT_TRUE(Equals(
+      encoder_factory_.QueryCodecSupport(webrtc::SdpVideoFormat("VP8"), "L3T3"),
+      kUnsupported));
 }
 
 }  // namespace blink

@@ -13,66 +13,36 @@
 
 namespace blink {
 
-Part::Part(PartRoot& root, const Vector<String> metadata)
-    : root_(root), metadata_(metadata) {
-  root.AddPart(*this);
-}
-
-void Part::PartDisconnected() {
-  if (root()) {
-    root()->MarkPartsDirty();
-    if (root()->IsDocumentPartRoot()) {
-      // If this part's root is the DocumentPartRoot, then disconnect it.
-      MoveToRoot(nullptr);
-    }
-  }
-}
-
-void Part::PartConnected(ContainerNode& insertion_point) {
-  if (!root()) {
-    Node* root_container = &insertion_point.TreeRoot();  // Potentially slow!
-    PartRoot* new_root;
-    if (auto* document_fragment = DynamicTo<DocumentFragment>(root_container)) {
-      new_root = &document_fragment->getPartRoot();
-    } else if (auto* document = DynamicTo<Document>(root_container)) {
-      new_root = &document->getPartRoot();
-    } else {
-      // insertion_point is not located in a Document or DocumentFragment.
-      new_root = nullptr;
-    }
-    MoveToRoot(new_root);
-  }
-  if (root()) {
-    root()->MarkPartsDirty();
-  }
-}
-
-void Part::MoveToRoot(PartRoot* new_root) {
-  if (root_) {
-    root_->RemovePart(*this);
-  }
-  root_ = new_root;
-  if (new_root) {
-    new_root->AddPart(*this);
-  }
-}
-
 void Part::Trace(Visitor* visitor) const {
   visitor->Trace(root_);
+  visitor->Trace(metadata_);
   ScriptWrappable::Trace(visitor);
 }
 
 void Part::disconnect() {
-  CHECK(!disconnected_) << "disconnect should be overridden";
+  CHECK(connected_) << "disconnect should be overridden";
   if (root_) {
-    root_->RemovePart(*this);
+    root_->MarkPartsDirty();
     root_ = nullptr;
   }
-  disconnected_ = true;
+  connected_ = false;
+  is_valid_ = false;
 }
 
 PartRootUnion* Part::rootForBindings() const {
-  return PartRoot::GetUnionFromPartRoot(root_);
+  return PartRoot::GetUnionFromPartRoot(root_.Get());
+}
+
+// static
+bool Part::IsAcceptableNodeType(Node& node) {
+  if (Element* element = DynamicTo<Element>(node)) {
+    if (element->IsDocumentElement()) {
+      return false;
+    }
+  }
+  auto type = node.getNodeType();
+  return type == Node::kElementNode || type == Node::kTextNode ||
+         type == Node::kCommentNode;
 }
 
 }  // namespace blink

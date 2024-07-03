@@ -25,11 +25,12 @@
 namespace blink {
 
 class ExceptionState;
+class V8PermissionState;
 
 class MODULES_EXPORT IdleDetector final
     : public EventTarget,
       public ActiveScriptWrappable<IdleDetector>,
-      public ExecutionContextClient,
+      public ExecutionContextLifecycleObserver,
       public mojom::blink::IdleMonitor {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -46,14 +47,20 @@ class MODULES_EXPORT IdleDetector final
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
+  // ExecutionContextLifecycleObserver implementation.
+  void ContextDestroyed() override;
+
   // ActiveScriptWrappable implementation.
   bool HasPendingActivity() const final;
 
   // IdleDetector IDL interface.
   String userState() const;
   String screenState() const;
-  static ScriptPromise requestPermission(ScriptState*, ExceptionState&);
-  ScriptPromise start(ScriptState*, const IdleOptions*, ExceptionState&);
+  static ScriptPromise<V8PermissionState> requestPermission(ScriptState*,
+                                                            ExceptionState&);
+  ScriptPromise<IDLUndefined> start(ScriptState*,
+                                    const IdleOptions*,
+                                    ExceptionState&);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(change, kChange)
 
   void Trace(Visitor*) const override;
@@ -73,9 +80,10 @@ class MODULES_EXPORT IdleDetector final
   void DispatchUserIdleEvent(TimerBase*);
   void Abort();
   void OnMonitorDisconnected();
-  void OnAddMonitor(ScriptPromiseResolver*,
+  void OnAddMonitor(ScriptPromiseResolver<IDLUndefined>*,
                     mojom::blink::IdleManagerError,
                     mojom::blink::IdleStatePtr);
+  void Clear();
 
   // State currently visible to script.
   bool has_state_ = false;
@@ -95,7 +103,7 @@ class MODULES_EXPORT IdleDetector final
   // The handle is valid from the time start() is called until the detector is
   // stopped, if an AbortSignal is passed to start().
   Member<AbortSignal::AlgorithmHandle> abort_handle_;
-  Member<ScriptPromiseResolver> resolver_;
+  Member<ScriptPromiseResolver<IDLUndefined>> resolver_;
 
   // Holds a pipe which the service uses to notify this object
   // when the idle state has changed.

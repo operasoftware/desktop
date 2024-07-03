@@ -6,11 +6,14 @@
 
 #include <stddef.h>
 
+#include "base/containers/contains.h"
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_rtc_peer_connection_handler_platform.h"
 #include "third_party/webrtc/api/media_stream_interface.h"
+#include "third_party/webrtc/api/metronome/metronome.h"
 #include "third_party/webrtc/api/scoped_refptr.h"
+#include "third_party/webrtc/api/units/time_delta.h"
 
 using webrtc::AudioSourceInterface;
 using webrtc::AudioTrackInterface;
@@ -25,6 +28,21 @@ using webrtc::VideoTrackSourceInterface;
 using webrtc::VideoTrackVector;
 
 namespace blink {
+
+namespace {
+// TODO(crbug.com/1502070): Migrate to webrtc::FakeMetronome once it's
+// exported.
+class FakeMetronome : public webrtc::Metronome {
+ public:
+  void RequestCallOnNextTick(absl::AnyInvocable<void() &&> callback) override {
+    std::move(callback)();
+  }
+  webrtc::TimeDelta TickPeriod() const override {
+    return webrtc::TimeDelta::Seconds(0);
+  }
+};
+
+}  // namespace
 
 template <class V>
 static typename V::iterator FindTrack(V* vector, const std::string& track_id) {
@@ -109,7 +127,7 @@ rtc::scoped_refptr<VideoTrackInterface> MockMediaStream::FindVideoTrack(
 }
 
 void MockMediaStream::RegisterObserver(ObserverInterface* observer) {
-  DCHECK(observers_.find(observer) == observers_.end());
+  DCHECK(!base::Contains(observers_, observer));
   observers_.insert(observer);
 }
 
@@ -166,12 +184,12 @@ bool MockWebRtcAudioTrack::set_enabled(bool enable) {
 }
 
 void MockWebRtcAudioTrack::RegisterObserver(ObserverInterface* observer) {
-  DCHECK(observers_.find(observer) == observers_.end());
+  DCHECK(!base::Contains(observers_, observer));
   observers_.insert(observer);
 }
 
 void MockWebRtcAudioTrack::UnregisterObserver(ObserverInterface* observer) {
-  DCHECK(observers_.find(observer) != observers_.end());
+  DCHECK(base::Contains(observers_, observer));
   observers_.erase(observer);
 }
 
@@ -238,12 +256,12 @@ bool MockWebRtcVideoTrack::set_enabled(bool enable) {
 }
 
 void MockWebRtcVideoTrack::RegisterObserver(ObserverInterface* observer) {
-  DCHECK(observers_.find(observer) == observers_.end());
+  DCHECK(!base::Contains(observers_, observer));
   observers_.insert(observer);
 }
 
 void MockWebRtcVideoTrack::UnregisterObserver(ObserverInterface* observer) {
-  DCHECK(observers_.find(observer) != observers_.end());
+  DCHECK(base::Contains(observers_, observer));
   observers_.erase(observer);
 }
 
@@ -268,8 +286,8 @@ bool MockWebRtcVideoTrackSource::is_screencast() const {
   return false;
 }
 
-absl::optional<bool> MockWebRtcVideoTrackSource::needs_denoising() const {
-  return absl::nullopt;
+std::optional<bool> MockWebRtcVideoTrackSource::needs_denoising() const {
+  return std::nullopt;
 }
 
 bool MockWebRtcVideoTrackSource::GetStats(Stats* stats) {
@@ -389,6 +407,11 @@ MockPeerConnectionDependencyFactory::GetWebRtcSignalingTaskRunner() {
 scoped_refptr<base::SingleThreadTaskRunner>
 MockPeerConnectionDependencyFactory::GetWebRtcNetworkTaskRunner() {
   return thread_.task_runner();
+}
+
+std::unique_ptr<webrtc::Metronome>
+MockPeerConnectionDependencyFactory::CreateDecodeMetronome() {
+  return std::make_unique<FakeMetronome>();
 }
 
 void MockPeerConnectionDependencyFactory::SetFailToCreateSessionDescription(

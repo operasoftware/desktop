@@ -5,24 +5,26 @@
 #include "third_party/blink/renderer/modules/scheduler/task_attribution_tracker_impl.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/typed_macros.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/scheduler/script_wrappable_task_state.h"
+#include "third_party/blink/renderer/modules/scheduler/task_attribution_info_impl.h"
+#include "third_party/blink/renderer/modules/scheduler/web_scheduling_task_state.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_info.h"
 #include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_priority.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value.h"
 
 namespace blink::scheduler {
 
 namespace {
-
-static unsigned Hash(TaskAttributionId id) {
-  return id.value() % TaskAttributionTrackerImpl::kVectorSize;
-}
 
 perfetto::protos::pbzero::BlinkTaskScope::TaskScopeType ToProtoEnum(
     TaskAttributionTracker::TaskScopeType type) {
@@ -42,198 +44,149 @@ perfetto::protos::pbzero::BlinkTaskScope::TaskScopeType ToProtoEnum(
       return ProtoType::TASK_SCOPE_SCHEDULER_POST_TASK;
     case TaskAttributionTracker::TaskScopeType::kRequestIdleCallback:
       return ProtoType::TASK_SCOPE_REQUEST_IDLE_CALLBACK;
+    case TaskAttributionTracker::TaskScopeType::kXMLHttpRequest:
+      return ProtoType::TASK_SCOPE_XML_HTTP_REQUEST;
   }
-}
-
-int64_t TaskAttributionIdToInt(absl::optional<TaskAttributionId> id) {
-  return id ? static_cast<int64_t>(id.value().value()) : -1;
 }
 
 }  // namespace
 
-TaskAttributionTrackerImpl::TaskAttributionTrackerImpl() : next_task_id_(0) {}
-
-absl::optional<TaskAttributionId>
-TaskAttributionTrackerImpl::RunningTaskAttributionId(
-    ScriptState* script_state) const {
-  ScriptWrappableTaskState* task_state =
-      GetCurrentTaskContinuationData(script_state);
-  // V8 embedder state may have no value in the case of a JSPromise that wasn't
-  // yet resolved.
-  return task_state ? task_state->GetTaskAttributionId() : running_task_id_;
+// static
+std::unique_ptr<TaskAttributionTracker> TaskAttributionTrackerImpl::Create(
+    v8::Isolate* isolate) {
+  return base::WrapUnique(new TaskAttributionTrackerImpl(isolate));
 }
 
-void TaskAttributionTrackerImpl::InsertTaskAttributionIdPair(
-    TaskAttributionId task_id,
-    absl::optional<TaskAttributionId> parent_task_id) {
-  unsigned task_id_hash = Hash(task_id);
-  task_container_[task_id_hash] =
-      TaskAttributionIdPair(parent_task_id, task_id);
+TaskAttributionTrackerImpl::TaskAttributionTrackerImpl(v8::Isolate* isolate)
+    : next_task_id_(0), isolate_(isolate) {
+  CHECK(isolate_);
 }
 
-TaskAttributionTrackerImpl::TaskAttributionIdPair&
-TaskAttributionTrackerImpl::GetTaskAttributionIdPairFromTaskContainer(
-    TaskAttributionId id) {
-  unsigned slot = Hash(id);
-  DCHECK_LT(slot, task_container_.size());
-  return (task_container_[slot]);
+scheduler::TaskAttributionInfo* TaskAttributionTrackerImpl::RunningTask()
+    const {
+  if (ScriptWrappableTaskState* task_state =
+          ScriptWrappableTaskState::GetCurrent(isolate_)) {
+    return task_state->GetTaskAttributionInfo();
+  }
+  // There won't be a running task outside of a `TaskScope` or microtask
+  // checkpoint.
+  return nullptr;
 }
 
-template <typename F>
-TaskAttributionTracker::AncestorStatus
-TaskAttributionTrackerImpl::IsAncestorInternal(ScriptState* script_state,
-                                               F is_ancestor) {
-  DCHECK(script_state);
-  if (!script_state->World().IsMainWorld()) {
-    // As RunningTaskAttributionId will not return a TaskAttributionId for
-    // non-main-world tasks, there's no point in testing their ancestry.
-    return AncestorStatus::kNotAncestor;
-  }
-
-  absl::optional<TaskAttributionId> current_task_id =
-      RunningTaskAttributionId(script_state);
-  if (!current_task_id) {
-    // TODO(yoav): This should not happen, but does. See crbug.com/1326872.
-    return AncestorStatus::kNotAncestor;
-  }
-  if (is_ancestor(current_task_id.value())) {
-    return AncestorStatus::kAncestor;
-  }
-
-  // Each slot in the `task_container_` contains a struct with a parent and
-  // current task ID optionals. The loop "climbs" up that task dependency tree
-  // until it either reaches the "root" task (which has no parent), or until it
-  // finds a parent, which current task ID doesn't match the one its child
-  // pointed at, indicating that the parent's slot in the array was overwritten.
-  // In that case, it's returning the kUnknown value.
-  const TaskAttributionIdPair& current_pair =
-      GetTaskAttributionIdPairFromTaskContainer(current_task_id.value());
-  absl::optional<TaskAttributionId> parent_id = current_pair.parent;
-  DCHECK(current_pair.current);
-  while (parent_id) {
-    const TaskAttributionIdPair& parent_pair =
-        GetTaskAttributionIdPairFromTaskContainer(parent_id.value());
-    if (parent_pair.current && parent_pair.current != parent_id) {
-      // Found a parent slot, but its ID doesn't match what we thought it would
-      // be. That means we circled around the circular array, and we can no
-      // longer know the ancestry.
-      return AncestorStatus::kUnknown;
-    }
-    if (is_ancestor(parent_id.value())) {
-      return AncestorStatus::kAncestor;
-    }
-    DCHECK(parent_pair.current.value() != current_task_id.value());
-    DCHECK(!parent_pair.parent || parent_pair.parent < parent_id);
-    parent_id = parent_pair.parent;
-  }
-  return AncestorStatus::kNotAncestor;
-}
-
-TaskAttributionTracker::AncestorStatus TaskAttributionTrackerImpl::IsAncestor(
+TaskAttributionTracker::TaskScope TaskAttributionTrackerImpl::CreateTaskScope(
     ScriptState* script_state,
-    TaskAttributionId ancestor_id) {
-  return IsAncestorInternal(
-      script_state,
-      [&](const TaskAttributionId& task_id) { return task_id == ancestor_id; });
+    TaskAttributionInfo* task_state,
+    TaskScopeType type) {
+  return CreateTaskScope(script_state, task_state, type,
+                         /*abort_source=*/nullptr, /*priority_source=*/nullptr);
 }
 
-TaskAttributionTracker::AncestorStatus
-TaskAttributionTrackerImpl::HasAncestorInSet(
+TaskAttributionTracker::TaskScope TaskAttributionTrackerImpl::CreateTaskScope(
     ScriptState* script_state,
-    const WTF::HashSet<scheduler::TaskAttributionIdType>& set) {
-  return IsAncestorInternal(script_state,
-                            [&](const TaskAttributionId& task_id) {
-                              return set.Contains(task_id.value());
-                            });
-}
-
-std::unique_ptr<TaskAttributionTracker::TaskScope>
-TaskAttributionTrackerImpl::CreateTaskScope(
-    ScriptState* script_state,
-    absl::optional<TaskAttributionId> parent_task_id,
+    TaskAttributionInfo* task_state,
     TaskScopeType type,
-    DOMTaskSignal* signal) {
-  absl::optional<TaskAttributionId> running_task_id_to_be_restored =
-      running_task_id_;
-  ScriptWrappableTaskState* continuation_task_state_to_be_restored =
-      GetCurrentTaskContinuationData(script_state);
+    AbortSignal* abort_source,
+    DOMTaskSignal* priority_source) {
+  CHECK(script_state);
+  CHECK_EQ(script_state->GetIsolate(), isolate_);
+  ScriptWrappableTaskState* previous_task_state =
+      ScriptWrappableTaskState::GetCurrent(isolate_);
 
-  next_task_id_ = next_task_id_.NextId();
-  running_task_id_ = next_task_id_;
-
-  InsertTaskAttributionIdPair(next_task_id_, parent_task_id);
-  ExecutionContext* execution_context = ExecutionContext::From(script_state);
-  for (Observer* observer : observers_) {
-    if (observer->GetExecutionContext() == execution_context) {
-      observer->OnCreateTaskScope(next_task_id_);
-    }
+  // Always propagate the current `task_state` when given. Otherwise create new
+  // state to begin propagating.
+  if (!task_state) {
+    next_task_id_ = next_task_id_.NextId();
+    task_state = MakeGarbageCollected<TaskAttributionInfoImpl>(next_task_id_);
   }
 
-  SetCurrentTaskContinuationData(
-      script_state,
-      MakeGarbageCollected<ScriptWrappableTaskState>(next_task_id_, signal));
+  ScriptWrappableTaskState* running_task_state = nullptr;
+  if (abort_source || priority_source) {
+    running_task_state = MakeGarbageCollected<WebSchedulingTaskState>(
+        task_state, abort_source, priority_source);
+  } else {
+    // If there's no scheduling state to propagate, we can just propagate the
+    // same object.
+    running_task_state = To<TaskAttributionInfoImpl>(task_state);
+  }
 
-  return std::make_unique<TaskScopeImpl>(
-      script_state, this, next_task_id_, running_task_id_to_be_restored,
-      continuation_task_state_to_be_restored, type, parent_task_id);
-}
+  ScriptWrappableTaskState::SetCurrent(script_state, running_task_state);
 
-void TaskAttributionTrackerImpl::TaskScopeCompleted(
-    const TaskScopeImpl& task_scope) {
-  DCHECK(running_task_id_ == task_scope.GetTaskId());
-  running_task_id_ = task_scope.RunningTaskIdToBeRestored();
-  SetCurrentTaskContinuationData(
-      task_scope.GetScriptState(),
-      task_scope.ContinuationTaskStateToBeRestored());
-}
+  TaskAttributionInfo* current = running_task_state->GetTaskAttributionInfo();
+  TaskAttributionInfo* previous =
+      previous_task_state ? previous_task_state->GetTaskAttributionInfo()
+                          : nullptr;
 
-void TaskAttributionTrackerImpl::SetCurrentTaskContinuationData(
-    ScriptState* script_state,
-    ScriptWrappableTaskState* task_state) {
-  ScriptWrappableTaskState::SetCurrent(script_state, task_state);
-}
+  // Fire observer callbacks after updating the CPED to keep `RunningTask()` in
+  // sync with what is passed to the observer.
+  if (observer_) {
+    observer_->OnCreateTaskScope(*current);
+  }
 
-ScriptWrappableTaskState*
-TaskAttributionTrackerImpl::GetCurrentTaskContinuationData(
-    ScriptState* script_state) const {
-  return ScriptWrappableTaskState::GetCurrent(script_state);
-}
-
-// TaskScope's implementation
-//////////////////////////////////////
-TaskAttributionTrackerImpl::TaskScopeImpl::TaskScopeImpl(
-    ScriptState* script_state,
-    TaskAttributionTrackerImpl* task_tracker,
-    TaskAttributionId scope_task_id,
-    absl::optional<TaskAttributionId> running_task_id,
-    ScriptWrappableTaskState* continuation_task_state,
-    TaskScopeType type,
-    absl::optional<TaskAttributionId> parent_task_id)
-    : task_tracker_(task_tracker),
-      scope_task_id_(scope_task_id),
-      running_task_id_to_be_restored_(running_task_id),
-      continuation_state_to_be_restored_(continuation_task_state),
-      script_state_(script_state) {
   TRACE_EVENT_BEGIN(
       "scheduler", "BlinkTaskScope", [&](perfetto::EventContext ctx) {
         auto* event = ctx.event<perfetto::protos::pbzero::ChromeTrackEvent>();
         auto* data = event->set_blink_task_scope();
         data->set_type(ToProtoEnum(type));
-        data->set_scope_task_id(scope_task_id_.value());
+        data->set_scope_task_id(current ? current->Id().value() : 0);
         data->set_running_task_id_to_be_restored(
-            TaskAttributionIdToInt(running_task_id_to_be_restored_));
-        data->set_continuation_task_id_to_be_restored(TaskAttributionIdToInt(
-            continuation_state_to_be_restored_
-                ? absl::make_optional(continuation_state_to_be_restored_
-                                          ->GetTaskAttributionId())
-                : absl::nullopt));
-        data->set_parent_task_id(TaskAttributionIdToInt(parent_task_id));
+            previous ? previous->Id().value() : 0);
       });
+
+  return TaskScope(this, script_state, previous_task_state);
 }
 
-TaskAttributionTrackerImpl::TaskScopeImpl::~TaskScopeImpl() {
-  task_tracker_->TaskScopeCompleted(*this);
+void TaskAttributionTrackerImpl::OnTaskScopeDestroyed(
+    const TaskScope& task_scope) {
+  ScriptWrappableTaskState::SetCurrent(task_scope.script_state_,
+                                       task_scope.previous_task_state_);
   TRACE_EVENT_END("scheduler");
+}
+
+TaskAttributionTracker::ObserverScope
+TaskAttributionTrackerImpl::RegisterObserver(Observer* observer) {
+  CHECK(observer);
+  Observer* previous_observer = observer_.Get();
+  observer_ = observer;
+  return ObserverScope(this, observer, previous_observer);
+}
+
+void TaskAttributionTrackerImpl::OnObserverScopeDestroyed(
+    const ObserverScope& observer_scope) {
+  observer_ = observer_scope.PreviousObserver();
+}
+
+void TaskAttributionTrackerImpl::AddSameDocumentNavigationTask(
+    TaskAttributionInfo* task) {
+  same_document_navigation_tasks_.push_back(task);
+}
+
+void TaskAttributionTrackerImpl::ResetSameDocumentNavigationTasks() {
+  same_document_navigation_tasks_.clear();
+}
+
+TaskAttributionInfo* TaskAttributionTrackerImpl::CommitSameDocumentNavigation(
+    TaskAttributionId task_id) {
+  // TODO(https://crbug.com/1464504): This may not handle cases where we have
+  // multiple same document navigations that happen in the same process at the
+  // same time.
+  //
+  // This pops all the same document navigation tasks that preceded the current
+  // one, enabling them to be garbage collected.
+  while (!same_document_navigation_tasks_.empty()) {
+    auto task = same_document_navigation_tasks_.front();
+    same_document_navigation_tasks_.pop_front();
+    // TODO(https://crbug.com/1486774) - Investigate when |task| can be nullptr.
+    if (task && task->Id() == task_id) {
+      return task;
+    }
+  }
+  return nullptr;
+}
+
+TaskAttributionInfo*
+TaskAttributionTrackerImpl::CreateTaskAttributionInfoForTest(
+    TaskAttributionId id) {
+  return MakeGarbageCollected<TaskAttributionInfoImpl>(id);
 }
 
 }  // namespace blink::scheduler

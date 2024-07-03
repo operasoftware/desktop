@@ -37,7 +37,6 @@
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
-#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -49,6 +48,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/agent_group_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/main_thread_scheduler.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 
 namespace blink {
@@ -67,6 +67,27 @@ class DummyLocalFrameClient : public EmptyLocalFrameClient {
 
 }  // namespace
 
+// static
+std::unique_ptr<DummyPageHolder> DummyPageHolder::CreateAndCommitNavigation(
+    const KURL& url,
+    const gfx::Size& initial_view_size,
+    ChromeClient* chrome_client,
+    LocalFrameClient* local_frame_client,
+    base::OnceCallback<void(Settings&)> setting_overrider,
+    const base::TickClock* clock) {
+  std::unique_ptr<DummyPageHolder> holder = std::make_unique<DummyPageHolder>(
+      initial_view_size, chrome_client, local_frame_client,
+      std::move(setting_overrider), clock);
+  if (url.IsValid()) {
+    holder->GetFrame().Loader().CommitNavigation(
+        WebNavigationParams::CreateWithHTMLBufferForTesting(
+            SharedBuffer::Create(), url),
+        /*extra_data=*/nullptr);
+    blink::test::RunPendingTasks();
+  }
+  return holder;
+}
+
 DummyPageHolder::DummyPageHolder(
     const gfx::Size& initial_view_size,
     ChromeClient* chrome_client,
@@ -84,6 +105,10 @@ DummyPageHolder::DummyPageHolder(
   Settings& settings = page_->GetSettings();
   if (setting_overrider)
     std::move(setting_overrider).Run(settings);
+
+  // Color providers are required for painting, so we ensure they are not null
+  // even in unittests.
+  page_->UpdateColorProvidersForTest();
 
   // DummyPageHolder doesn't provide a browser interface, so code caches cannot
   // be fetched. If testing for code caches provide a mock code cache host.
@@ -108,8 +133,7 @@ DummyPageHolder::DummyPageHolder(
                /*document_ukm_source_id=*/ukm::kInvalidSourceId,
                /*creator_base_url=*/KURL());
 
-  CoreInitializer::GetInstance().ProvideModulesToPage(GetPage(),
-                                                      base::EmptyString());
+  CoreInitializer::GetInstance().ProvideModulesToPage(GetPage(), std::string());
 }
 
 DummyPageHolder::~DummyPageHolder() {
@@ -119,19 +143,23 @@ DummyPageHolder::~DummyPageHolder() {
 }
 
 Page& DummyPageHolder::GetPage() const {
+  CHECK(IsMainThread());
   return *page_;
 }
 
 LocalFrame& DummyPageHolder::GetFrame() const {
+  CHECK(IsMainThread());
   DCHECK(frame_);
   return *frame_;
 }
 
 LocalFrameView& DummyPageHolder::GetFrameView() const {
+  CHECK(IsMainThread());
   return *frame_->View();
 }
 
 Document& DummyPageHolder::GetDocument() const {
+  CHECK(IsMainThread());
   return *frame_->DomWindow()->document();
 }
 

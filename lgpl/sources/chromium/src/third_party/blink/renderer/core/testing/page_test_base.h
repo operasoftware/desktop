@@ -12,7 +12,8 @@
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/core/testing/mock_clipboard_host.h"
 #include "third_party/blink/renderer/core/testing/scoped_mock_overlay_scrollbars.h"
-#include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
+#include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace base {
@@ -57,6 +58,7 @@ class PageTestBase : public testing::Test, public ScopedMockOverlayScrollbars {
   };
 
   PageTestBase();
+  PageTestBase(base::test::TaskEnvironment::TimeSource time_source);
   ~PageTestBase() override;
 
   void EnableCompositing();
@@ -127,16 +129,22 @@ class PageTestBase : public testing::Test, public ScopedMockOverlayScrollbars {
   // the source file).
   virtual const base::TickClock* GetTickClock();
 
-  ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>&
-  platform() {
-    return *platform_;
+  TestingPlatformSupport* platform() {
+    DCHECK(platform_);
+    return platform_->GetTestingPlatformSupport();
   }
 
+  test::TaskEnvironment& task_environment() { return task_environment_; }
+
+  void FastForwardBy(base::TimeDelta);
+  void FastForwardUntilNoTasksRemain();
+  void AdvanceClock(base::TimeDelta);
+
  private:
+  test::TaskEnvironment task_environment_;
   // The order is important: |platform_| must be destroyed after
   // |dummy_page_holder_| is destroyed.
-  std::unique_ptr<
-      ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>>
+  std::unique_ptr<ScopedTestingPlatformSupport<TestingPlatformSupport>>
       platform_;
   std::unique_ptr<DummyPageHolder> dummy_page_holder_;
   bool enable_compositing_ = false;

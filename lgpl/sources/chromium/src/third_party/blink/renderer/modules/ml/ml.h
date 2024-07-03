@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_ML_ML_H_
 
 #include "components/ml/mojom/ml_service.mojom-blink.h"
-#include "services/webnn/public/mojom/webnn_service.mojom-blink.h"
+#include "services/webnn/public/mojom/webnn_context_provider.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -20,7 +20,6 @@
 namespace blink {
 
 class MLContextOptions;
-class ScriptPromise;
 class ScriptState;
 
 // This class represents the "Machine Learning" object "navigator.ml" and will
@@ -51,12 +50,9 @@ class MODULES_EXPORT ML final : public ScriptWrappable,
   void Trace(blink::Visitor*) const override;
 
   // IDL interface:
-  ScriptPromise createContext(ScriptState* state,
-                              MLContextOptions* option,
-                              ExceptionState& exception_state);
-  MLContext* createContextSync(ScriptState* script_state,
-                               MLContextOptions* options,
-                               ExceptionState& exception_state);
+  ScriptPromise<MLContext> createContext(ScriptState* state,
+                                         MLContextOptions* option,
+                                         ExceptionState& exception_state);
 
  private:
   // Binds the ModelLoader Mojo connection to browser process if needed.

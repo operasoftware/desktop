@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/forms/select_type.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
@@ -54,7 +55,7 @@ class HTMLSelectElementTest : public PageTestBase {
 
   String MenuListLabel() const {
     auto* select = To<HTMLSelectElement>(GetDocument().body()->firstChild());
-    return select->InnerElement().textContent();
+    return select->InnerElementForAppearanceAuto().textContent();
   }
 
  private:
@@ -83,11 +84,11 @@ TEST_F(HTMLSelectElementTest, SetAutofillValuePreservesEditedState) {
       "<option value='222'>222</option></select>");
   HTMLSelectElement* select = To<HTMLSelectElement>(GetElementById("sel"));
 
-  select->SetUserHasEditedTheField(false);
+  select->ClearUserHasEditedTheField();
   select->SetAutofillValue("222", WebAutofillState::kAutofilled);
   EXPECT_EQ(select->UserHasEditedTheField(), false);
 
-  select->SetUserHasEditedTheField(true);
+  select->SetUserHasEditedTheField();
   select->SetAutofillValue("111", WebAutofillState::kAutofilled);
   EXPECT_EQ(select->UserHasEditedTheField(), true);
 }
@@ -121,8 +122,9 @@ TEST_F(HTMLSelectElementTest, SaveRestoreSelectSingleFormControlState) {
   EXPECT_EQ(2, To<HTMLSelectElement>(element)->selectedIndex());
   EXPECT_FALSE(opt0->Selected());
   EXPECT_TRUE(opt2->Selected());
-  EXPECT_EQ("!666",
-            To<HTMLSelectElement>(element)->InnerElement().textContent());
+  EXPECT_EQ("!666", To<HTMLSelectElement>(element)
+                        ->InnerElementForAppearanceAuto()
+                        .textContent());
 }
 
 TEST_F(HTMLSelectElementTest, SaveRestoreSelectMultipleFormControlState) {
@@ -675,7 +677,7 @@ TEST_F(HTMLSelectElementTest, ChangeRenderingCrash3) {
   auto* green = GetDocument().getElementById(AtomicString("green"));
 
   // Make sure the select is outside the flat tree.
-  host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
   // Changing the select rendering should not clear the style recalc root set by

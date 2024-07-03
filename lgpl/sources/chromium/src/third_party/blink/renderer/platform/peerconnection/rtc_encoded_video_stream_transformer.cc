@@ -22,6 +22,8 @@ namespace blink {
 
 namespace {
 
+using webrtc::Metronome;
+
 // This delegate class exists to work around the fact that
 // RTCEncodedVideoStreamTransformer cannot derive from rtc::RefCountedObject
 // and post tasks referencing itself as an rtc::scoped_refptr. Instead,
@@ -34,10 +36,13 @@ class RTCEncodedVideoStreamTransformerDelegate
   RTCEncodedVideoStreamTransformerDelegate(
       scoped_refptr<base::SingleThreadTaskRunner> realm_task_runner,
       scoped_refptr<RTCEncodedVideoStreamTransformer::Broker>
-          transformer_broker)
+          transformer_broker,
+      std::unique_ptr<Metronome> metronome)
       : source_task_runner_(realm_task_runner),
-        transformer_broker_(std::move(transformer_broker)) {
+        transformer_broker_(std::move(transformer_broker)),
+        metronome_(std::move(metronome)) {
     DCHECK(source_task_runner_->BelongsToCurrentThread());
+    DETACH_FROM_SEQUENCE(metronome_sequence_checker_);
   }
 
   void SetSourceTaskRunner(
@@ -47,19 +52,6 @@ class RTCEncodedVideoStreamTransformerDelegate
   }
 
   // webrtc::FrameTransformerInterface
-  // TODO(crbug.com/1065838): Remove the non-ssrc version of the registration
-  // and unregistration methods once WebRTC uses the ssrc version in all cases.
-  void RegisterTransformedFrameCallback(
-      rtc::scoped_refptr<webrtc::TransformedFrameCallback>
-          send_frame_to_sink_callback) override {
-    transformer_broker_->RegisterTransformedFrameSinkCallback(
-        std::move(send_frame_to_sink_callback), 0);
-  }
-
-  void UnregisterTransformedFrameCallback() override {
-    transformer_broker_->UnregisterTransformedFrameSinkCallback(0);
-  }
-
   void RegisterTransformedFrameSinkCallback(
       rtc::scoped_refptr<webrtc::TransformedFrameCallback>
           send_frame_to_sink_callback,
@@ -74,22 +66,62 @@ class RTCEncodedVideoStreamTransformerDelegate
 
   void Transform(
       std::unique_ptr<webrtc::TransformableFrameInterface> frame) override {
-    base::AutoLock locker(source_task_runner_lock_);
     auto video_frame =
         base::WrapUnique(static_cast<webrtc::TransformableVideoFrameInterface*>(
             frame.release()));
-    PostCrossThreadTask(
-        *source_task_runner_, FROM_HERE,
-        CrossThreadBindOnce(&RTCEncodedVideoStreamTransformer::Broker::
-                                TransformFrameOnSourceTaskRunner,
-                            transformer_broker_, std::move(video_frame)));
+    if (metronome_) {
+      DCHECK_CALLED_ON_VALID_SEQUENCE(metronome_sequence_checker_);
+      queued_frames_.emplace_back(std::move(video_frame));
+      if (!tick_scheduled_) {
+        // Using a lambda here instead of a OnceClosure as
+        // RequestCallOnNextTick() requires an absl::AnyInvocable.
+        metronome_->RequestCallOnNextTick(
+            [delegate = weak_factory_.GetWeakPtr()] {
+              if (delegate) {
+                delegate->InvokeQueuedTransforms();
+              }
+            });
+        tick_scheduled_ = true;
+      }
+    } else {
+      base::AutoLock locker(source_task_runner_lock_);
+      PostCrossThreadTask(
+          *source_task_runner_, FROM_HERE,
+          CrossThreadBindOnce(&RTCEncodedVideoStreamTransformer::Broker::
+                                  TransformFrameOnSourceTaskRunner,
+                              transformer_broker_, std::move(video_frame)));
+    }
   }
 
  private:
+  void InvokeQueuedTransforms() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(metronome_sequence_checker_);
+    base::AutoLock locker(source_task_runner_lock_);
+    tick_scheduled_ = false;
+    for (std::unique_ptr<webrtc::TransformableVideoFrameInterface>& frame :
+         queued_frames_) {
+      PostCrossThreadTask(
+          *source_task_runner_, FROM_HERE,
+          CrossThreadBindOnce(&RTCEncodedVideoStreamTransformer::Broker::
+                                  TransformFrameOnSourceTaskRunner,
+                              transformer_broker_, std::move(frame)));
+    }
+    queued_frames_.clear();
+  }
+
   base::Lock source_task_runner_lock_;
   scoped_refptr<base::SingleThreadTaskRunner> source_task_runner_
       GUARDED_BY(source_task_runner_lock_);
   scoped_refptr<RTCEncodedVideoStreamTransformer::Broker> transformer_broker_;
+
+  std::unique_ptr<Metronome> metronome_;
+  SEQUENCE_CHECKER(metronome_sequence_checker_);
+  bool tick_scheduled_ GUARDED_BY_CONTEXT(metronome_sequence_checker_) = false;
+  Vector<std::unique_ptr<webrtc::TransformableVideoFrameInterface>>
+      queued_frames_ GUARDED_BY_CONTEXT(metronome_sequence_checker_);
+
+  base::WeakPtrFactory<RTCEncodedVideoStreamTransformerDelegate> weak_factory_{
+      this};
 };
 
 }  // namespace
@@ -97,16 +129,6 @@ class RTCEncodedVideoStreamTransformerDelegate
 RTCEncodedVideoStreamTransformer::Broker::Broker(
     RTCEncodedVideoStreamTransformer* transformer_)
     : transformer_(transformer_) {}
-
-void RTCEncodedVideoStreamTransformer::Broker::RegisterTransformedFrameCallback(
-    rtc::scoped_refptr<webrtc::TransformedFrameCallback>
-        send_frame_to_sink_callback) {
-  base::AutoLock locker(transformer_lock_);
-  if (transformer_) {
-    transformer_->RegisterTransformedFrameCallback(
-        std::move(send_frame_to_sink_callback));
-  }
-}
 
 void RTCEncodedVideoStreamTransformer::Broker::
     RegisterTransformedFrameSinkCallback(
@@ -117,14 +139,6 @@ void RTCEncodedVideoStreamTransformer::Broker::
   if (transformer_) {
     transformer_->RegisterTransformedFrameSinkCallback(
         std::move(send_frame_to_sink_callback), ssrc);
-  }
-}
-
-void RTCEncodedVideoStreamTransformer::Broker::
-    UnregisterTransformedFrameCallback() {
-  base::AutoLock locker(transformer_lock_);
-  if (transformer_) {
-    transformer_->UnregisterTransformedFrameCallback();
   }
 }
 
@@ -180,31 +194,35 @@ void RTCEncodedVideoStreamTransformer::Broker::SendFrameToSink(
   }
 }
 
+void RTCEncodedVideoStreamTransformer::Broker::StartShortCircuiting() {
+  base::AutoLock locker(transformer_lock_);
+  if (transformer_) {
+    transformer_->StartShortCircuiting();
+  }
+}
+
 RTCEncodedVideoStreamTransformer::RTCEncodedVideoStreamTransformer(
-    scoped_refptr<base::SingleThreadTaskRunner> realm_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> realm_task_runner,
+    std::unique_ptr<Metronome> metronome)
     : broker_(base::AdoptRef(new Broker(this))),
       delegate_(
           new rtc::RefCountedObject<RTCEncodedVideoStreamTransformerDelegate>(
               std::move(realm_task_runner),
-              broker_)) {}
+              broker_,
+              std::move(metronome))) {}
 
 RTCEncodedVideoStreamTransformer::~RTCEncodedVideoStreamTransformer() {
   broker_->ClearTransformer();
-}
-
-void RTCEncodedVideoStreamTransformer::RegisterTransformedFrameCallback(
-    rtc::scoped_refptr<webrtc::TransformedFrameCallback> callback) {
-  RegisterTransformedFrameSinkCallback(callback, 0);
-}
-
-void RTCEncodedVideoStreamTransformer::UnregisterTransformedFrameCallback() {
-  UnregisterTransformedFrameSinkCallback(0);
 }
 
 void RTCEncodedVideoStreamTransformer::RegisterTransformedFrameSinkCallback(
     rtc::scoped_refptr<webrtc::TransformedFrameCallback> callback,
     uint32_t ssrc) {
   base::AutoLock locker(sink_lock_);
+
+  if (short_circuit_) {
+    callback->StartShortCircuiting();
+  }
   for (auto& sink_callback : send_frame_to_sink_callbacks_) {
     if (sink_callback.first == ssrc) {
       sink_callback.second = std::move(callback);
@@ -250,6 +268,14 @@ void RTCEncodedVideoStreamTransformer::SendFrameToSink(
       sink_callback.second->OnTransformedFrame(std::move(frame));
       return;
     }
+  }
+}
+
+void RTCEncodedVideoStreamTransformer::StartShortCircuiting() {
+  base::AutoLock locker(sink_lock_);
+  short_circuit_ = true;
+  for (const auto& sink_callback : send_frame_to_sink_callbacks_) {
+    sink_callback.second->StartShortCircuiting();
   }
 }
 

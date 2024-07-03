@@ -168,10 +168,12 @@ class CORE_EXPORT MessageEvent final : public Event {
   EventTarget* source() const { return source_.Get(); }
   MessagePortArray ports();
   bool isPortsDirty() const { return is_ports_dirty_; }
-  UserActivation* userActivation() const { return user_activation_; }
+  UserActivation* userActivation() const { return user_activation_.Get(); }
   mojom::blink::DelegatedCapability delegatedCapability() const {
     return delegated_capability_;
   }
+  uint64_t GetTraceId() const { return trace_id_; }
+  void SetTraceId(uint64_t trace_id) { trace_id_ = trace_id; }
 
   Vector<MessagePortChannel> ReleaseChannels() { return std::move(channels_); }
 
@@ -247,6 +249,7 @@ class CORE_EXPORT MessageEvent final : public Event {
   // information of whether the actual original SerializedScriptValue was locked
   // to the agent cluster.
   bool locked_to_agent_cluster_ = false;
+  uint64_t trace_id_;
 };
 
 }  // namespace blink

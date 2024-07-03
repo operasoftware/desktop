@@ -6,9 +6,11 @@ import 'chrome://welcome/ntp_background/nux_ntp_background.js';
 
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {microtasksFinished} from 'chrome://webui-test/test_util.js';
 import {NtpBackgroundMetricsProxyImpl} from 'chrome://welcome/ntp_background/ntp_background_metrics_proxy.js';
-import {NtpBackgroundData, NtpBackgroundProxyImpl} from 'chrome://welcome/ntp_background/ntp_background_proxy.js';
-import {NuxNtpBackgroundElement} from 'chrome://welcome/ntp_background/nux_ntp_background.js';
+import type {NtpBackgroundData} from 'chrome://welcome/ntp_background/ntp_background_proxy.js';
+import {NtpBackgroundProxyImpl} from 'chrome://welcome/ntp_background/ntp_background_proxy.js';
+import type {NuxNtpBackgroundElement} from 'chrome://welcome/ntp_background/nux_ntp_background.js';
 
 import {TestMetricsProxy} from './test_metrics_proxy.js';
 import {TestNtpBackgroundProxy} from './test_ntp_background_proxy.js';
@@ -86,7 +88,10 @@ suite('NuxNtpBackgroundTest', function() {
                 '.option');
 
         options[1]!.click();
-        await testNtpBackgroundProxy.whenCalled('preloadImage');
+        await Promise.all([
+          microtasksFinished(),
+          testNtpBackgroundProxy.whenCalled('preloadImage'),
+        ]);
         assertEquals(
             testElement.$.backgroundPreview.style.backgroundImage,
             `url("${backgrounds[0]!.imageUrl}")`);
@@ -96,6 +101,7 @@ suite('NuxNtpBackgroundTest', function() {
         // go back to the default option, and pretend all CSS transitions
         // have completed
         options[0]!.click();
+        await microtasksFinished();
         testElement.$.backgroundPreview.dispatchEvent(
             new Event('transitionend'));
         assertEquals(testElement.$.backgroundPreview.style.backgroundImage, '');
@@ -103,11 +109,12 @@ suite('NuxNtpBackgroundTest', function() {
             testElement.$.backgroundPreview.classList.contains('active'));
       });
 
-  test('test activating a background', function() {
+  test('test activating a background', async function() {
     const options =
         testElement.shadowRoot!.querySelectorAll<HTMLButtonElement>('.option');
 
     options[1]!.click();
+    await microtasksFinished();
     assertFalse(options[0]!.hasAttribute('active'));
     assertTrue(options[1]!.hasAttribute('active'));
     assertFalse(options[2]!.hasAttribute('active'));
@@ -161,14 +168,6 @@ suite('NuxNtpBackgroundTest', function() {
             testNtpBackgroundProxy.getCallCount(
                 'recordBackgroundImageFailedToLoad'));
       });
-
-  test('test metrics for load times of background images', function() {
-    testNtpBackgroundProxy.setPreloadImageSuccess(true);
-    const options =
-        testElement.shadowRoot!.querySelectorAll<HTMLButtonElement>('.option');
-    options[1]!.click();
-    return testNtpBackgroundProxy.whenCalled('recordBackgroundImageLoadTime');
-  });
 
   test('test metrics for doing nothing and navigating away', function() {
     testElement.onRouteUnload();

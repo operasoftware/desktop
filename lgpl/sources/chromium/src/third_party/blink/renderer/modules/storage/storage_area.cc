@@ -47,6 +47,18 @@
 
 namespace blink {
 
+// static
+const char StorageArea::kAccessDataMessage[] =
+    "Storage is disabled inside 'data:' URLs.";
+
+// static
+const char StorageArea::kAccessDeniedMessage[] =
+    "Access is denied for this document.";
+
+// static
+const char StorageArea::kAccessSandboxedMessage[] =
+    "The document is sandboxed and lacks the 'allow-same-origin' flag.";
+
 StorageArea* StorageArea::Create(LocalDOMWindow* window,
                                  scoped_refptr<CachedStorageArea> storage_area,
                                  StorageType storage_type) {
@@ -84,7 +96,7 @@ StorageArea::StorageArea(LocalDOMWindow* window,
 
 unsigned StorageArea::length(ExceptionState& exception_state) const {
   if (!CanAccessStorage()) {
-    exception_state.ThrowSecurityError("access is denied for this document.");
+    exception_state.ThrowSecurityError(StorageArea::kAccessDeniedMessage);
     return 0;
   }
   return cached_area_->GetLength();
@@ -92,7 +104,7 @@ unsigned StorageArea::length(ExceptionState& exception_state) const {
 
 String StorageArea::key(unsigned index, ExceptionState& exception_state) const {
   if (!CanAccessStorage()) {
-    exception_state.ThrowSecurityError("access is denied for this document.");
+    exception_state.ThrowSecurityError(StorageArea::kAccessDeniedMessage);
     return String();
   }
   return cached_area_->GetKey(index);
@@ -101,7 +113,7 @@ String StorageArea::key(unsigned index, ExceptionState& exception_state) const {
 String StorageArea::getItem(const String& key,
                             ExceptionState& exception_state) const {
   if (!CanAccessStorage()) {
-    exception_state.ThrowSecurityError("access is denied for this document.");
+    exception_state.ThrowSecurityError(StorageArea::kAccessDeniedMessage);
     return String();
   }
   return cached_area_->GetItem(key);
@@ -112,7 +124,7 @@ NamedPropertySetterResult StorageArea::setItem(
     const String& value,
     ExceptionState& exception_state) {
   if (!CanAccessStorage()) {
-    exception_state.ThrowSecurityError("access is denied for this document.");
+    exception_state.ThrowSecurityError(StorageArea::kAccessDeniedMessage);
     return NamedPropertySetterResult::kIntercepted;
   }
   if (!cached_area_->SetItem(key, value, this)) {
@@ -128,7 +140,7 @@ NamedPropertyDeleterResult StorageArea::removeItem(
     const String& key,
     ExceptionState& exception_state) {
   if (!CanAccessStorage()) {
-    exception_state.ThrowSecurityError("access is denied for this document.");
+    exception_state.ThrowSecurityError(StorageArea::kAccessDeniedMessage);
     return NamedPropertyDeleterResult::kDidNotDelete;
   }
   cached_area_->RemoveItem(key, this);
@@ -137,7 +149,7 @@ NamedPropertyDeleterResult StorageArea::removeItem(
 
 void StorageArea::clear(ExceptionState& exception_state) {
   if (!CanAccessStorage()) {
-    exception_state.ThrowSecurityError("access is denied for this document.");
+    exception_state.ThrowSecurityError(StorageArea::kAccessDeniedMessage);
     return;
   }
   cached_area_->Clear(this);
@@ -146,7 +158,7 @@ void StorageArea::clear(ExceptionState& exception_state) {
 bool StorageArea::Contains(const String& key,
                            ExceptionState& exception_state) const {
   if (!CanAccessStorage()) {
-    exception_state.ThrowSecurityError("access is denied for this document.");
+    exception_state.ThrowSecurityError(StorageArea::kAccessDeniedMessage);
     return false;
   }
   return !cached_area_->GetItem(key).IsNull();

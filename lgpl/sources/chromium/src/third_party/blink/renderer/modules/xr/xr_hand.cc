@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/memory/raw_ref.h"
 #include "third_party/blink/renderer/modules/xr/xr_input_source.h"
 #include "third_party/blink/renderer/modules/xr/xr_joint_space.h"
 #include "third_party/blink/renderer/modules/xr/xr_utils.h"
@@ -16,9 +17,9 @@ namespace blink {
 class XRHandIterationSource final
     : public PairSyncIterable<XRHand>::IterationSource {
  public:
-  explicit XRHandIterationSource(HeapVector<Member<XRJointSpace>>& joints,
+  explicit XRHandIterationSource(const HeapVector<Member<XRJointSpace>>& joints,
                                  XRHand* xr_hand)
-      : index_(0), joints_(joints), xr_hand_(xr_hand) {}
+      : joints_(&joints), xr_hand_(xr_hand) {}
 
   bool FetchNextItem(ScriptState*,
                      V8XRHandJoint& key,
@@ -28,19 +29,20 @@ class XRHandIterationSource final
       return false;
 
     key = V8XRHandJoint(static_cast<V8XRHandJoint::Enum>(index_));
-    value = joints_.at(index_);
+    value = joints_->at(index_);
     index_++;
     return true;
   }
 
   void Trace(Visitor* visitor) const override {
+    visitor->Trace(joints_);
     visitor->Trace(xr_hand_);
     PairSyncIterable<XRHand>::IterationSource::Trace(visitor);
   }
 
  private:
-  wtf_size_t index_;
-  const HeapVector<Member<XRJointSpace>>& joints_;
+  wtf_size_t index_ = 0;
+  const Member<const HeapVector<Member<XRJointSpace>>> joints_;
   Member<XRHand> xr_hand_;  // Owner object of `joints_`
 };
 
@@ -63,7 +65,7 @@ XRHand::XRHand(const device::mojom::blink::XRHandTrackingData* state,
 
 XRJointSpace* XRHand::get(const V8XRHandJoint& key) const {
   wtf_size_t index = static_cast<wtf_size_t>(key.AsEnum());
-  return joints_[index];
+  return joints_[index].Get();
 }
 
 void XRHand::updateFromHandTrackingData(

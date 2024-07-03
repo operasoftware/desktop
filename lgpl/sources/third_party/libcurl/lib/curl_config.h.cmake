@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2022, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -23,9 +23,6 @@
  ***************************************************************************/
 /* lib/curl_config.h.in.  Generated somehow by cmake.  */
 
-/* when building libcurl itself */
-#cmakedefine BUILDING_LIBCURL 1
-
 /* Location of default ca bundle */
 #cmakedefine CURL_CA_BUNDLE "${CURL_CA_BUNDLE}"
 
@@ -35,14 +32,32 @@
 /* Location of default ca path */
 #cmakedefine CURL_CA_PATH "${CURL_CA_PATH}"
 
+/* Default SSL backend */
+#cmakedefine CURL_DEFAULT_SSL_BACKEND "${CURL_DEFAULT_SSL_BACKEND}"
+
 /* disables alt-svc */
 #cmakedefine CURL_DISABLE_ALTSVC 1
 
 /* disables cookies support */
 #cmakedefine CURL_DISABLE_COOKIES 1
 
-/* disables cryptographic authentication */
-#cmakedefine CURL_DISABLE_CRYPTO_AUTH 1
+/* disables Basic authentication */
+#cmakedefine CURL_DISABLE_BASIC_AUTH 1
+
+/* disables Bearer authentication */
+#cmakedefine CURL_DISABLE_BEARER_AUTH 1
+
+/* disables Digest authentication */
+#cmakedefine CURL_DISABLE_DIGEST_AUTH 1
+
+/* disables Kerberos authentication */
+#cmakedefine CURL_DISABLE_KERBEROS_AUTH 1
+
+/* disables negotiate authentication */
+#cmakedefine CURL_DISABLE_NEGOTIATE_AUTH 1
+
+/* disables AWS-SIG4 */
+#cmakedefine CURL_DISABLE_AWS 1
 
 /* disables DICT */
 #cmakedefine CURL_DISABLE_DICT 1
@@ -52,6 +67,9 @@
 
 /* disables FILE */
 #cmakedefine CURL_DISABLE_FILE 1
+
+/* disables form api */
+#cmakedefine CURL_DISABLE_FORM_API 1
 
 /* disables FTP */
 #cmakedefine CURL_DISABLE_FTP 1
@@ -135,12 +153,6 @@
 /* Use Windows LDAP implementation */
 #cmakedefine USE_WIN32_LDAP 1
 
-/* when not building a shared library */
-#cmakedefine CURL_STATICLIB 1
-
-/* your Entropy Gathering Daemon socket pathname */
-#cmakedefine EGD_SOCKET ${EGD_SOCKET}
-
 /* Define if you want to enable IPv6 support */
 #cmakedefine ENABLE_IPV6 1
 
@@ -152,9 +164,6 @@
 
 /* Define to 1 if you have the <arpa/tftp.h> header file. */
 #cmakedefine HAVE_ARPA_TFTP_H 1
-
-/* Define to 1 if you have the <assert.h> header file. */
-#cmakedefine HAVE_ASSERT_H 1
 
 /* Define to 1 if you have _Atomic support. */
 #cmakedefine HAVE_ATOMIC 1
@@ -177,9 +186,6 @@
 /* Define to 1 if you have the `closesocket' function. */
 #cmakedefine HAVE_CLOSESOCKET 1
 
-/* Define to 1 if you have the <errno.h> header file. */
-#cmakedefine HAVE_ERRNO_H 1
-
 /* Define to 1 if you have the fcntl function. */
 #cmakedefine HAVE_FCNTL 1
 
@@ -197,6 +203,9 @@
 
 /* Define to 1 if you have a working getaddrinfo function. */
 #cmakedefine HAVE_GETADDRINFO 1
+
+/* Define to 1 if the getaddrinfo function is threadsafe. */
+#cmakedefine HAVE_GETADDRINFO_THREADSAFE 1
 
 /* Define to 1 if you have the `geteuid' function. */
 #cmakedefine HAVE_GETEUID 1
@@ -346,20 +355,8 @@
 /* Define to 1 if you have the `socket' library (-lsocket). */
 #cmakedefine HAVE_LIBSOCKET 1
 
-/* Define to 1 if you have the `psl' library (-lpsl). */
-#cmakedefine HAVE_LIBPSL 1
-
-/* Define to 1 if you have the <libpsl.h> header file. */
-#cmakedefine HAVE_LIBPSL_H 1
-
 /* Define to 1 if you have the `ssh2' library (-lssh2). */
 #cmakedefine HAVE_LIBSSH2 1
-
-/* Define to 1 if you have the <libssh2.h> header file. */
-#cmakedefine HAVE_LIBSSH2_H 1
-
-/* Define to 1 if you have the <libssh/libssh.h> header file. */
-#cmakedefine HAVE_LIBSSH_LIBSSH_H 1
 
 /* if zlib is available */
 #cmakedefine HAVE_LIBZ 1
@@ -415,8 +412,8 @@
 /* Define to 1 if you have the <pwd.h> header file. */
 #cmakedefine HAVE_PWD_H 1
 
-/* Define to 1 if you have the `RAND_egd' function. */
-#cmakedefine HAVE_RAND_EGD 1
+/* Define to 1 if OpenSSL has the `SSL_set0_wbio` function. */
+#cmakedefine HAVE_SSL_SET0_WBIO 1
 
 /* Define to 1 if you have the recv function. */
 #cmakedefine HAVE_RECV 1
@@ -466,14 +463,17 @@
 /* Define to 1 if you have the sigsetjmp function or macro. */
 #cmakedefine HAVE_SIGSETJMP 1
 
+/* Define to 1 if you have the `snprintf' function. */
+#cmakedefine HAVE_SNPRINTF
+
 /* Define to 1 if struct sockaddr_in6 has the sin6_scope_id member */
 #cmakedefine HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID 1
 
 /* Define to 1 if you have the `socket' function. */
 #cmakedefine HAVE_SOCKET 1
 
-/* Define to 1 if you have the <ssl.h> header file. */
-#cmakedefine HAVE_SSL_H 1
+/* Define to 1 if you have the socketpair function. */
+#cmakedefine HAVE_SOCKETPAIR 1
 
 /* Define to 1 if you have the <stdatomic.h> header file. */
 #cmakedefine HAVE_STDATOMIC_H 1
@@ -592,9 +592,6 @@
 /* Define to 1 if you have the windows.h header file. */
 #cmakedefine HAVE_WINDOWS_H 1
 
-/* Define to 1 if you have the winldap.h header file. */
-#cmakedefine HAVE_WINLDAP_H 1
-
 /* Define to 1 if you have the winsock2.h header file. */
 #cmakedefine HAVE_WINSOCK2_H 1
 
@@ -603,12 +600,6 @@
 
 /* Define to 1 if you have the ws2tcpip.h header file. */
 #cmakedefine HAVE_WS2TCPIP_H 1
-
-/* Define if you have the <process.h> header file. */
-#cmakedefine HAVE_PROCESS_H 1
-
-/* if you have the zlib.h header file */
-#cmakedefine HAVE_ZLIB_H 1
 
 /* Define to 1 if you need the lber.h header file even with ldap.h */
 #cmakedefine NEED_LBER_H 1
@@ -643,54 +634,6 @@
 /* a suitable file to read random data from */
 #cmakedefine RANDOM_FILE "${RANDOM_FILE}"
 
-/* Define to the type of arg 1 for recv. */
-#cmakedefine RECV_TYPE_ARG1 ${RECV_TYPE_ARG1}
-
-/* Define to the type of arg 2 for recv. */
-#cmakedefine RECV_TYPE_ARG2 ${RECV_TYPE_ARG2}
-
-/* Define to the type of arg 3 for recv. */
-#cmakedefine RECV_TYPE_ARG3 ${RECV_TYPE_ARG3}
-
-/* Define to the type of arg 4 for recv. */
-#cmakedefine RECV_TYPE_ARG4 ${RECV_TYPE_ARG4}
-
-/* Define to the function return type for recv. */
-#cmakedefine RECV_TYPE_RETV ${RECV_TYPE_RETV}
-
-/* Define to the type qualifier of arg 5 for select. */
-#cmakedefine SELECT_QUAL_ARG5 ${SELECT_QUAL_ARG5}
-
-/* Define to the type of arg 1 for select. */
-#cmakedefine SELECT_TYPE_ARG1 ${SELECT_TYPE_ARG1}
-
-/* Define to the type of args 2, 3 and 4 for select. */
-#cmakedefine SELECT_TYPE_ARG234 ${SELECT_TYPE_ARG234}
-
-/* Define to the type of arg 5 for select. */
-#cmakedefine SELECT_TYPE_ARG5 ${SELECT_TYPE_ARG5}
-
-/* Define to the function return type for select. */
-#cmakedefine SELECT_TYPE_RETV ${SELECT_TYPE_RETV}
-
-/* Define to the type qualifier of arg 2 for send. */
-#cmakedefine SEND_QUAL_ARG2 ${SEND_QUAL_ARG2}
-
-/* Define to the type of arg 1 for send. */
-#cmakedefine SEND_TYPE_ARG1 ${SEND_TYPE_ARG1}
-
-/* Define to the type of arg 2 for send. */
-#cmakedefine SEND_TYPE_ARG2 ${SEND_TYPE_ARG2}
-
-/* Define to the type of arg 3 for send. */
-#cmakedefine SEND_TYPE_ARG3 ${SEND_TYPE_ARG3}
-
-/* Define to the type of arg 4 for send. */
-#cmakedefine SEND_TYPE_ARG4 ${SEND_TYPE_ARG4}
-
-/* Define to the function return type for send. */
-#cmakedefine SEND_TYPE_RETV ${SEND_TYPE_RETV}
-
 /*
  Note: SIZEOF_* variables are fetched with CMake through check_type_size().
  As per CMake documentation on CheckTypeSize, C preprocessor code is
@@ -705,6 +648,9 @@ ${SIZEOF_INT_CODE}
 
 /* The size of `long', as computed by sizeof. */
 ${SIZEOF_LONG_CODE}
+
+/* The size of `long long', as computed by sizeof. */
+${SIZEOF_LONG_LONG_CODE}
 
 /* The size of `off_t', as computed by sizeof. */
 ${SIZEOF_OFF_T_CODE}
@@ -759,12 +705,6 @@ ${SIZEOF_TIME_T_CODE}
 
 /* If you want to build curl with the built-in manual */
 #cmakedefine USE_MANUAL 1
-
-/* if NSS is enabled */
-#cmakedefine USE_NSS 1
-
-/* if you have the PK11_CreateManagedGenericObject function */
-#cmakedefine HAVE_PK11_CREATEMANAGEDGENERICOBJECT 1
 
 /* if you want to use OpenLDAP code instead of legacy ldap implementation */
 #cmakedefine USE_OPENLDAP 1
@@ -850,5 +790,5 @@ ${SIZEOF_TIME_T_CODE}
 /* to enable Windows IDN */
 #cmakedefine USE_WIN32_IDN 1
 
-/* to make the compiler know the prototypes of Windows IDN APIs */
-#cmakedefine WANT_IDN_PROTOTYPES 1
+/* Define to 1 to enable websocket support. */
+#cmakedefine USE_WEBSOCKETS 1

@@ -11,7 +11,9 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 using network::mojom::blink::ChunkedDataPipeGetter;
@@ -47,6 +49,10 @@ class MockBytesConsumer : public BytesConsumer {
 
 class BytesUploaderTest : public ::testing::Test {
  public:
+  ~BytesUploaderTest() override {
+    // Avoids leaking mocked objects passed to `bytes_uploader_`.
+    bytes_uploader_.Release();
+  }
   void InitializeBytesUploader(MockBytesConsumer* mock_bytes_consumer,
                                uint32_t capacity = 100u) {
     bytes_uploader_ = MakeGarbageCollected<BytesUploader>(
@@ -69,6 +75,7 @@ class BytesUploaderTest : public ::testing::Test {
   Persistent<BytesUploader> bytes_uploader_;
 
  private:
+  test::TaskEnvironment task_environment_;
   mojo::ScopedDataPipeProducerHandle writable_;
   mojo::ScopedDataPipeConsumerHandle readable_;
   mojo::Remote<ChunkedDataPipeGetter> remote_;
@@ -125,7 +132,7 @@ TEST_F(BytesUploaderTest, ReadEmpty) {
 
   checkpoint.Call(3);
   char buffer[20] = {};
-  uint32_t num_bytes = sizeof(buffer);
+  size_t num_bytes = sizeof(buffer);
   MojoResult rv =
       Readable()->ReadData(buffer, &num_bytes, MOJO_READ_DATA_FLAG_NONE);
   EXPECT_EQ(MOJO_RESULT_SHOULD_WAIT, rv);
@@ -165,7 +172,7 @@ TEST_F(BytesUploaderTest, ReadSmall) {
 
   checkpoint.Call(3);
   char buffer[20] = {};
-  uint32_t num_bytes = sizeof(buffer);
+  size_t num_bytes = sizeof(buffer);
   EXPECT_EQ(MOJO_RESULT_OK,
             Readable()->ReadData(buffer, &num_bytes, MOJO_READ_DATA_FLAG_NONE));
   EXPECT_EQ(6u, num_bytes);
@@ -225,7 +232,7 @@ TEST_F(BytesUploaderTest, ReadOverPipeCapacity) {
 
   checkpoint.Call(3);
   char buffer[20] = {};
-  uint32_t num_bytes = sizeof(buffer);
+  size_t num_bytes = sizeof(buffer);
   EXPECT_EQ(MOJO_RESULT_OK,
             Readable()->ReadData(buffer, &num_bytes, MOJO_READ_DATA_FLAG_NONE));
   EXPECT_EQ(10u, num_bytes);

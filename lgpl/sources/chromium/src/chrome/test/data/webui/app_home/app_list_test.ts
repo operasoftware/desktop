@@ -1,19 +1,19 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://webui-test/mojo_webui_test_support.js';
 import 'chrome://apps/app_list.js';
 import 'chrome://apps/app_item.js';
 import 'chrome://apps/deprecated_apps_link.js';
 
-import {AppInfo, PageRemote, RunOnOsLoginMode} from 'chrome://apps/app_home.mojom-webui.js';
-import {AppHomeEmptyPageElement} from 'chrome://apps/app_home_empty_page.js';
+import type {AppInfo, PageRemote} from 'chrome://apps/app_home.mojom-webui.js';
+import {RunOnOsLoginMode} from 'chrome://apps/app_home.mojom-webui.js';
+import type {AppHomeEmptyPageElement} from 'chrome://apps/app_home_empty_page.js';
 import {AppHomeUserAction} from 'chrome://apps/app_home_utils.js';
-import {AppListElement} from 'chrome://apps/app_list.js';
+import type {AppListElement} from 'chrome://apps/app_list.js';
 import {BrowserProxy} from 'chrome://apps/browser_proxy.js';
-import {DeprecatedAppsLinkElement} from 'chrome://apps/deprecated_apps_link.js';
-import {CrCheckboxElement} from 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.js';
+import type {DeprecatedAppsLinkElement} from 'chrome://apps/deprecated_apps_link.js';
+import type {CrCheckboxElement} from 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
@@ -66,6 +66,7 @@ suite('AppListTest', () => {
           mayUninstall: true,
           openInWindow: false,
           isDeprecatedApp: false,
+          storePageUrl: null,
         },
         {
           id: 'ahfgeienlihckogmotestdlkjgocpleb',
@@ -81,6 +82,7 @@ suite('AppListTest', () => {
           mayUninstall: false,
           openInWindow: false,
           isDeprecatedApp: false,
+          storePageUrl: null,
         },
       ],
     };
@@ -99,6 +101,7 @@ suite('AppListTest', () => {
       openInWindow: false,
       mayUninstall: true,
       isDeprecatedApp: false,
+      storePageUrl: null,
     };
     deprecatedAppInfo = {
       id: 'mplpmdejoamenolpcojgegminhcnmibo',
@@ -653,7 +656,7 @@ suite('AppListTest', () => {
     await callbackRouterRemote.$.flushForTesting();
     flush();
 
-    const appItems = appListElement.shadowRoot!.querySelectorAll('.item')!;
+    const appItems = appListElement.shadowRoot!.querySelectorAll('.item');
     assertTrue(!!appItems, 'No apps.');
 
     let found = false;

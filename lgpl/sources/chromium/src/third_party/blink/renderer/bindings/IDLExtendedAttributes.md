@@ -34,7 +34,6 @@ Extended attributes are named in UpperCamelCase, and are conventionally written 
 There are a few rules in naming extended attributes:
 
 Names should be aligned with the Web IDL spec as much as possible.
-Extended attributes for custom bindings are prefixed by "Custom".
 Lastly, please do not confuse "_extended_ attributes", which go inside `[...]` and modify various IDL elements, and "attributes", which are of the form `attribute foo` and are interface members.
 
 ## Special cases
@@ -142,9 +141,6 @@ are triggered for this method or attribute.
 
 Usage: `[CEReactions]` takes no arguments.
 
-`[CEReacionts]` doesn't work with `[Custom]`. Custom binding code should use
-`blink::CEReactionsScope` if the method or the attribute has `[CEReactions]`.
-
 Note that `blink::CEReactionsScope` must be constructed after `blink::ExceptionState`.
 
 ### [Clamp]
@@ -227,9 +223,9 @@ As with `[LegacyNoInterfaceObject]` does not affect generated code for the inter
 All non-callback interfaces without `[LegacyNoInterfaceObject]` have a corresponding interface property on the global object. Note that in the Web IDL spec, callback interfaces with constants also have interface properties, but in Blink callback interfaces only have methods (no constants or attributes), so this is not applicable. `[Exposed]` can be used with different values to indicate on which global object or objects the property should be generated. Valid values are:
 
 * `Window`
-* [Worker](http://www.whatwg.org/specs/web-apps/current-work/multipage/workers.html#the-workerglobalscope-common-interface)
-* [SharedWorker](http://www.whatwg.org/specs/web-apps/current-work/multipage/workers.html#dedicated-workers-and-the-dedicatedworkerglobalscope-interface)
-* [DedicatedWorker](http://www.whatwg.org/specs/web-apps/current-work/multipage/workers.html#shared-workers-and-the-sharedworkerglobalscope-interface)
+* [Worker](https://www.whatwg.org/specs/web-apps/current-work/multipage/workers.html#the-workerglobalscope-common-interface)
+* [SharedWorker](https://www.whatwg.org/specs/web-apps/current-work/multipage/workers.html#shared-workers-and-the-sharedworkerglobalscope-interface)
+* [DedicatedWorker](https://www.whatwg.org/specs/web-apps/current-work/multipage/workers.html#dedicated-workers-and-the-dedicatedworkerglobalscope-interface)
 * [ServiceWorker](https://rawgithub.com/slightlyoff/ServiceWorker/master/spec/service_worker/index.html#service-worker-global-scope)
 
 For reference, see [ECMAScript 5.1: 15.1 The Global Object](http://www.ecma-international.org/ecma-262/5.1/#sec-15.1) ([annotated](http://es5.github.io/#x15.1)), [HTML: 10 Web workers](http://www.whatwg.org/specs/web-apps/current-work/multipage/workers.html), [Web Workers](http://dev.w3.org/html5/workers/), and [Service Workers](https://rawgithub.com/slightlyoff/ServiceWorker/master/spec/service_worker/index.html) specs.
@@ -429,8 +425,6 @@ interface DOMWindow {
     [Replaceable] readonly attribute long screenX;
 };
 ```
-
-`[Replaceable]` is _incompatible_ with `[Custom]` and `[Custom=Setter]` (because replaceable attributes have a single interface-level setter callback, rather than individual attribute-level callbacks); if you need custom binding for a replaceable attribute, remove `[Replaceable]` and `readonly`.
 
 Intuitively, "replaceable" means that you can set a new value to the attribute without overwriting the original value. If you delete the new value, then the original value still remains.
 
@@ -1027,7 +1021,7 @@ When specified, caches the resulting object and returns it in later calls so tha
 
 ## Rare Blink-specific IDL Extended Attributes
 
-These extended attributes are rarely used, generally only in one or two places. These are often replacements for `[Custom]` bindings, and may be candidates for deprecation and removal.
+These extended attributes are rarely used, generally only in one or two places, and may be candidates for deprecation and removal.
 
 ### [CachedAccessor]
 
@@ -1191,6 +1185,14 @@ The FlexibleArrayBufferView extended attribute always requires the AllowShared e
 
 Usage: Applies to arguments of methods. See modules/webgl/WebGLRenderingContextBase.idl for an example.
 
+### [HasAsyncIteratorReturnAlgorithm]
+
+Summary: `[HasAsyncIteratorReturnAlgorithm]` indicates whether an [asynchronously iterable declaration](https://webidl.spec.whatwg.org/#dfn-async-iterable-declaration) has an [asynchronous iterator return algorithm](https://webidl.spec.whatwg.org/#asynchronous-iterator-return).
+
+This tells the code generator to add a `return()` method to the async iterator. The Blink implementation must then provide the return algorithm by overriding `AsyncIterationSourceBase::AsyncIteratorReturn()`.
+
+Usage: Applies only to `async iterable` declarations. See core/streams/readable_stream.idl for an example.
+
 ### [IsolatedContext]
 
 Summary: Interfaces and interface members with a `IsolatedContext` extended attribute are exposed only inside isolated contexts.
@@ -1289,111 +1291,11 @@ Summary: The byte length of buffer source types is currently restricted to be un
 
 Consult with the bindings team before you use this extended attribute.
 
-### [Custom]
+### [IDLTypeImplementedAsV8Promise]
 
-Summary: They allow you to write bindings code manually as you like: full bindings for methods and attributes, certain functions for interfaces.
+Summary: Indicates that an IDL `Promise` type should be implemented as `v8::Local<v8::Promise>` rather than the default `ScriptPromiseUntyped` type.
 
-Custom bindings are _strongly discouraged_. They are likely to be buggy, a source of security holes, and represent a significant maintenance burden. Before using `[Custom]`, you should doubly consider if you really need custom bindings. You are recommended to modify code generators and add specialized extended attributes or special cases if necessary to avoid using `[Custom]`.
-
-Usage: `[Custom]` can be specified on methods or attributes. `[Custom=Getter]` and `[Custom=Setter]` can be specified on attributes. `[Custom=A|B]` can be specified on interfaces, with various values (see below).
-
-On read only attributes (that are not `[Replaceable]`), `[Custom]` is equivalent to `[Custom=Getter]` (since there is no setter) and `[Custom=Getter]` is preferred.
-
-The bindings generator largely _ignores_ the specified type information of `[Custom]` members (signature of methods and type of attributes), but they must be valid types. It is best if the signature exactly matches the spec, but if one of the types is an interface that is not implemented, you can use object as the type instead, to indicate "unspecified object type".
-
-`[Replaceable]` is _incompatible_ with `[Custom]` and `[Custom=Setter]` (because replaceable attributes have a single interface-level setter callback, rather than individual attribute-level callbacks); if you need custom binding for a replaceable attribute, remove `[Replaceable]` and readonly.
-
-```webidl
-[Custom] void func();
-[Custom] attribute DOMString str1;
-[Custom=Getter] readonly attribute DOMString str2;
-[Custom=Setter] attribute DOMString str3;
-```
-
-Before explaining the details, let us clarify the relationship of these IDL attributes.
-
-* `[Custom]` on a method indicates that you can write V8 custom bindings for the method.
-* `[Custom=Getter]` or `[Custom=Setter]` on an attribute means custom bindings for the attribute getter or setter.
-* `[Custom]` on an attribute means custom bindings for both the getter and the setter
-
-Methods:
-
-```webidl
-interface XXX {
-    [Custom] void func();
-};
-```
-
-You can write custom bindings in third_party/blink/renderer/bindings/{core,modules}/v8/custom/v8_xxx_custom.cc:
-
-```c++
-void V8XXX::FuncMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  ...;
-}
-```
-
-Attribute getter:
-
-```webidl
-interface XXX {
-    [Custom=Getter] attribute DOMString str;
-};
-```
-
-You can write custom bindings in Source/bindings/v8/custom/V8XXXCustom.cpp:
-
-```c++
-void V8XXX::StrAttributeGetterCustom(const v8::PropertyCallbackInfo<v8::Value>& info) {
-  ...;
-}
-```
-
-Attribute setter:
-
-```webidl
-interface XXX {
-    [Custom=Setter] attribute DOMString str;
-};
-```
-
-You can write custom bindings in Source/bindings/v8/custom/V8XXXCustom.cpp:
-
-```c++
-void V8XXX::StrAttributeSetterCustom(v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info) {
-  ...;
-}
-```
-
-`[Custom]` may also be specified on special operations:
-
-```webidl
-interface XXX {  // anonymous special operations
-    [Custom] getter Node (unsigned long index);
-    [Custom] setter Node (unsigned long index, Node value);
-    [Custom] deleter boolean (unsigned long index);
-
-    [Custom] getter Node (DOMString name);
-    [Custom] setter Node (DOMString name, Node value);
-    [Custom] deleter boolean (DOMString name);
-}
-interface YYY {  // special operations with identifiers
-    [Custom] getter Node item(unsigned long index);
-    [Custom] getter Node namedItem(DOMString name);
-}
-```
-
-`[Custom]` may also be specified on callback functions:
-
-```webidl
-[Custom] callback SomeCallback = void ();
-interface XXX {
-    void func(SomeCallback callback);
-};
-```
-
-When`[Custom]` is specified on a callback function, the code generator doesn't
-generate bindings for the callback function. The binding layer uses a
-`ScriptValue` instead.
+This is currently only used for the return types of `AsyncIteratorBase` methods. Consult with the bindings team before you use this extended attribute.
 
 ### [TargetOfExposed]
 
@@ -1409,7 +1311,7 @@ These extended attributes are _deprecated_, or are under discussion for deprecat
 
 Summary: `[PermissiveDictionaryConversion]` relaxes the rules about what types of values may be passed for an argument of dictionary type.
 
-Ordinarily when passing in a value for a dictionary argument, the value must be either undefined, null, or an object. In other words, passing a boolean value like true or false must raise TypeError. The PermissiveDictionaryConversion extended attribute ignores non-object types, treating them the same as undefined and null. In order to effect this change, this extended attribute must be specified both on the dictionary type as well as the arguments of methods where it is passed. It exists only to eliminate certain custom bindings.
+Ordinarily when passing in a value for a dictionary argument, the value must be either undefined, null, or an object. In other words, passing a boolean value like true or false must raise TypeError. The PermissiveDictionaryConversion extended attribute ignores non-object types, treating them the same as undefined and null. In order to effect this change, this extended attribute must be specified both on the dictionary type as well as the arguments of methods where it is passed.
 
 Usage: applies to dictionaries and arguments of methods. Takes no arguments itself.
 

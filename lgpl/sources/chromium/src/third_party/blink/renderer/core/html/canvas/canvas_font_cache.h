@@ -63,12 +63,19 @@ class CORE_EXPORT CanvasFontCache final
   typedef HeapHashMap<String, Member<MutableCSSPropertyValueSet>>
       MutableStylePropertyMap;
 
-  HashMap<String, Font> fonts_resolved_using_default_style_;
+  struct FontWrapper : public GarbageCollected<FontWrapper> {
+    explicit FontWrapper(Font&& font) : font(font) {}
+
+    void Trace(Visitor* visitor) const { visitor->Trace(font); }
+    Font font;
+  };
+
+  HeapHashMap<String, Member<FontWrapper>> fonts_resolved_using_default_style_;
   MutableStylePropertyMap fetched_fonts_;
   LinkedHashSet<String> font_lru_list_;
   std::unique_ptr<FontCachePurgePreventer> main_cache_purge_preventer_;
   Member<Document> document_;
-  scoped_refptr<const ComputedStyle> default_font_style_;
+  Member<const ComputedStyle> default_font_style_;
   bool pruning_scheduled_;
 };
 

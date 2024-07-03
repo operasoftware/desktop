@@ -46,7 +46,8 @@ class CORE_EXPORT ContainerSelector {
     return (name_ == o.name_) && (physical_axes_ == o.physical_axes_) &&
            (logical_axes_ == o.logical_axes_) &&
            (has_style_query_ == o.has_style_query_) &&
-           (has_sticky_query_ == o.has_sticky_query_);
+           (has_sticky_query_ == o.has_sticky_query_) &&
+           (has_snap_query_ == o.has_snap_query_);
   }
   bool operator!=(const ContainerSelector& o) const { return !(*this == o); }
 
@@ -59,12 +60,16 @@ class CORE_EXPORT ContainerSelector {
   unsigned Type(WritingMode) const;
 
   bool SelectsSizeContainers() const {
-    return physical_axes_ != kPhysicalAxisNone ||
-           logical_axes_ != kLogicalAxisNone;
+    return physical_axes_ != kPhysicalAxesNone ||
+           logical_axes_ != kLogicalAxesNone;
   }
 
   bool SelectsStyleContainers() const { return has_style_query_; }
   bool SelectsStickyContainers() const { return has_sticky_query_; }
+  bool SelectsSnapContainers() const { return has_snap_query_; }
+  bool SelectsStateContainers() const {
+    return SelectsStickyContainers() || SelectsSnapContainers();
+  }
   bool HasUnknownFeature() const { return has_unknown_feature_; }
 
   PhysicalAxes GetPhysicalAxes() const { return physical_axes_; }
@@ -72,10 +77,11 @@ class CORE_EXPORT ContainerSelector {
 
  private:
   AtomicString name_;
-  PhysicalAxes physical_axes_{kPhysicalAxisNone};
-  LogicalAxes logical_axes_{kLogicalAxisNone};
+  PhysicalAxes physical_axes_{kPhysicalAxesNone};
+  LogicalAxes logical_axes_{kLogicalAxesNone};
   bool has_style_query_{false};
   bool has_sticky_query_{false};
+  bool has_snap_query_{false};
   bool has_unknown_feature_{false};
 };
 

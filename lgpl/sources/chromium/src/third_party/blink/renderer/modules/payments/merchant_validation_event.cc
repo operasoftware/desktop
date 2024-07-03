@@ -55,16 +55,17 @@ MerchantValidationEvent::MerchantValidationEvent(
     exception_state.ThrowTypeError("Invalid validation URL");
     return;
   }
-  if (!method_name_.empty() &&
-      !PaymentsValidators::IsValidMethodFormat(method_name_)) {
+  if (!method_name_.empty() && !PaymentsValidators::IsValidMethodFormat(
+                                   script_state->GetIsolate(), method_name_)) {
     exception_state.ThrowRangeError("Invalid payment method identifier.");
     return;
   }
 }
 
-void MerchantValidationEvent::complete(ScriptState* script_state,
-                                       ScriptPromise merchantSessionPromise,
-                                       ExceptionState& exception_state) {
+void MerchantValidationEvent::complete(
+    ScriptState* script_state,
+    ScriptPromiseUntyped merchantSessionPromise,
+    ExceptionState& exception_state) {
   if (!isTrusted()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,

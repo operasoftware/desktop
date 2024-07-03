@@ -2,21 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {DriveHandlerRemote} from 'chrome://new-tab-page/drive.mojom-webui.js';
-import {DismissModuleEvent, driveDescriptor, DriveModuleElement, DriveProxy} from 'chrome://new-tab-page/lazy_load.js';
-import {$$, CrAutoImgElement} from 'chrome://new-tab-page/new_tab_page.js';
+import {FileSuggestionHandlerRemote} from 'chrome://new-tab-page/file_suggestion.mojom-webui.js';
+import type {DismissModuleEvent, DriveModuleElement} from 'chrome://new-tab-page/lazy_load.js';
+import {driveDescriptor, FileProxy} from 'chrome://new-tab-page/lazy_load.js';
+import type {CrAutoImgElement} from 'chrome://new-tab-page/new_tab_page.js';
+import {$$} from 'chrome://new-tab-page/new_tab_page.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {TestMock} from 'chrome://webui-test/test_mock.js';
+import type {TestMock} from 'chrome://webui-test/test_mock.js';
 import {eventToPromise, isVisible} from 'chrome://webui-test/test_util.js';
 
 import {installMock} from '../../test_support.js';
 
 suite('NewTabPageModulesDriveModuleTest', () => {
-  let handler: TestMock<DriveHandlerRemote>;
+  let handler: TestMock<FileSuggestionHandlerRemote>;
 
   setup(() => {
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
-    handler = installMock(DriveHandlerRemote, DriveProxy.setHandler);
+    handler = installMock(FileSuggestionHandlerRemote, FileProxy.setHandler);
   });
 
   test('module appears on render', async () => {

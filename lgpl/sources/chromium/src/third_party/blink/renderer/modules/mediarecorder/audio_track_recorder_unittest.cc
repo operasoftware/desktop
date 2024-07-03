@@ -5,8 +5,13 @@
 #include "third_party/blink/renderer/modules/mediarecorder/audio_track_recorder.h"
 
 #include <stdint.h>
+
+#include <optional>
 #include <string>
 
+#include "base/barrier_closure.h"
+#include "base/functional/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/task/bind_post_task.h"
@@ -31,7 +36,6 @@
 #include "mojo/public/cpp/bindings/unique_receiver_set.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
@@ -44,6 +48,7 @@
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/openh264/openh264_buildflags.h"
@@ -51,6 +56,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <objbase.h>
+
 #include "media/gpu/windows/mf_audio_encoder.h"
 #define HAS_AAC_ENCODER 1
 #endif  //  BUILDFLAG(IS_WIN)
@@ -60,11 +66,18 @@
 #define HAS_AAC_ENCODER 1
 #endif  // BUILDFLAG(IS_MAC) && BUILDFLAG(USE_PROPRIETARY_CODECS)
 
-#if BUILDFLAG(ENABLE_FFMPEG) && BUILDFLAG(USE_PROPRIETARY_CODECS) && \
-    !defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(ENABLE_FFMPEG) && BUILDFLAG(USE_PROPRIETARY_CODECS)
 #include "media/filters/ffmpeg_audio_decoder.h"
 #define HAS_AAC_DECODER 1
 #endif  // BUILDFLAG(ENABLE_FFMPEG) && BUILDFLAG(USE_PROPRIETARY_CODECS)
+
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_MAC)
+#include "media/filters/at_audio_decoder.h"
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_MAC)
+
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
+#include "media/filters/wmf_audio_decoder.h"
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
 
 using base::TimeTicks;
 using base::test::RunOnceClosure;
@@ -320,7 +333,7 @@ class MockAudioTrackRecorderCallbackInterface
       OnEncodedAudio,
       (const media::AudioParameters& params,
        std::string encoded_data,
-       absl::optional<media::AudioEncoder::CodecDescription> codec_description,
+       std::optional<media::AudioEncoder::CodecDescription> codec_description,
        base::TimeTicks capture_time),
       (override));
   MOCK_METHOD(void, OnSourceReadyStateChanged, (), (override));
@@ -378,7 +391,7 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
         .WillRepeatedly(
             Invoke([this](const media::AudioParameters& params,
                           std::string encoded_data,
-                          absl::optional<media::AudioEncoder::CodecDescription>
+                          std::optional<media::AudioEncoder::CodecDescription>
                               codec_description,
                           base::TimeTicks capture_time) {
               OnEncodedAudio(params, encoded_data, std::move(codec_description),
@@ -405,12 +418,18 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
     // hold onto a reference to the task runner. This allows us to post tasks to
     // the sequence and apply the necessary overrides, without friending the
     // class.
-    encoder_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner({});
+    encoder_task_runner_ = base::ThreadPool::CreateSingleThreadTaskRunner({});
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_MAC)
+    std::optional<media::AudioEncoder::AacOptions> aac_options(
+        media::AudioEncoder::AacOutputFormat::ADTS);
+#else
+    std::optional<media::AudioEncoder::AacOptions> aac_options = std::nullopt;
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_MAC)
     audio_track_recorder_ = std::make_unique<AudioTrackRecorder>(
         scheduler::GetSingleThreadTaskRunnerForTesting(), codec_,
         media_stream_component_, mock_callback_interface_,
         0u /* bits_per_second */, GetParam().bitrate_mode,
-        encoder_task_runner_);
+        std::move(aac_options), encoder_task_runner_);
 
 #if HAS_AAC_ENCODER
     if (codec_ == AudioTrackRecorder::CodecId::kAac) {
@@ -454,6 +473,9 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
     } else if (codec == AudioTrackRecorder::CodecId::kAac) {
 #if HAS_AAC_DECODER
       InitializeAacDecoder(params.channels(), params.sample_rate());
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
+      expected_decoder_delay_ = 1;
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_WIN)
 #endif  // HAS_AAC_DECODER
     }
   }
@@ -613,6 +635,33 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
   void ExpectOutputsAndRunClosure(base::OnceClosure closure) {
 #if HAS_AAC_ENCODER
     if (GetParam().codec == AudioTrackRecorder::CodecId::kAac) {
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
+      constexpr auto kExpectedEncoderOutputCount = kExpectedNumOutputs;
+      CHECK_GT(kExpectedNumOutputs, expected_decoder_delay_);
+      const auto kExpectedDecoderOutputCount =
+          kExpectedEncoderOutputCount - expected_decoder_delay_;
+      expected_decoder_delay_ = 0;
+      // Imposing any particular relative order of encode, decode, and output
+      // callbacks here verifies nothing of importance and makes the test too
+      // brittle at the same time. (Separate) sequences are still necessary to
+      // be able to accumulate expectations if ExpectOutputsAndRunClosure() is
+      // called again before verifying the previous expectations.
+      auto barrier = base::BarrierClosure(
+          kExpectedEncoderOutputCount * 2 + kExpectedDecoderOutputCount,
+          std::move(closure));
+      EXPECT_CALL(*this, DoOnEncodedAudio)
+          .Times(kExpectedEncoderOutputCount)
+          .InSequence(s_)
+          .WillRepeatedly([=]() { barrier.Run(); });
+      EXPECT_CALL(*this, DecodeCb)
+          .Times(kExpectedEncoderOutputCount)
+          .InSequence(s2_)
+          .WillRepeatedly([=]() { barrier.Run(); });
+      EXPECT_CALL(*this, DecodeOutputCb)
+          .Times(kExpectedDecoderOutputCount)
+          .InSequence(s3_)
+          .WillRepeatedly([=]() { barrier.Run(); });
+#else
       EXPECT_CALL(*this, DoOnEncodedAudio)
           .Times(kExpectedNumOutputs - 1)
           .InSequence(s_);
@@ -642,6 +691,7 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
           .InSequence(s_)
           .WillOnce(RunOnceClosure(std::move(closure)));
 #endif  // HAS_AAC_DECODER
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
       return;
     }
 #endif  // HAS_AAC_ENCODER
@@ -663,7 +713,7 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
   void OnEncodedAudio(
       const media::AudioParameters& params,
       std::string encoded_data,
-      absl::optional<media::AudioEncoder::CodecDescription> codec_description,
+      std::optional<media::AudioEncoder::CodecDescription> codec_description,
       base::TimeTicks timestamp) {
     EXPECT_TRUE(!encoded_data.empty());
     switch (codec_) {
@@ -710,6 +760,8 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
     }
   }
 
+  test::TaskEnvironment task_environment_;
+
 #if HAS_AAC_DECODER
   void ValidateAacData(std::string& encoded_data) {
     // `ExpectOutputsAndRunClosure` sets up `EXPECT_CALL`s for `DecodeCB` and
@@ -725,8 +777,19 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
   }
 
   void InitializeAacDecoder(int channels, int sample_rate) {
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(IS_MAC)
+    aac_decoder_ = std::make_unique<media::ATAudioDecoder>(
+        scheduler::GetSequencedTaskRunnerForTesting(), media_log_.Clone());
+#elif BUILDFLAG(IS_WIN)
+    aac_decoder_ = std::make_unique<media::WMFAudioDecoder>(
+        scheduler::GetSequencedTaskRunnerForTesting(), media_log_.Clone());
+#endif
+#else
     aac_decoder_ = std::make_unique<media::FFmpegAudioDecoder>(
         scheduler::GetSequencedTaskRunnerForTesting(), &media_log_);
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
+    CHECK(aac_decoder_);
     media::ChannelLayout channel_layout = media::CHANNEL_LAYOUT_NONE;
     switch (channels) {
       case 1:
@@ -775,11 +838,12 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
   }
 
   media::MockMediaLog media_log_;
-  std::unique_ptr<media::FFmpegAudioDecoder> aac_decoder_;
+  std::unique_ptr<media::AudioDecoder> aac_decoder_;
 #endif  // HAS_AAC_DECODER
 
   ::testing::Sequence s_;
   ::testing::Sequence s2_;
+  ::testing::Sequence s3_;
   base::RunLoop run_loop_;
 
   Persistent<MockAudioTrackRecorderCallbackInterface> mock_callback_interface_;
@@ -813,8 +877,12 @@ class AudioTrackRecorderTest : public testing::TestWithParam<ATRTestParams> {
   // this so we can account for it and not receive unexpected outputs.
   int excess_input_ = 0;
 
+  // Some decoders must queue a number of input buffers before they start
+  // producing output.
+  int expected_decoder_delay_ = 0;
+
   // Decoder for verifying data was properly encoded.
-  OpusDecoder* opus_decoder_ = nullptr;
+  raw_ptr<OpusDecoder, DanglingUntriaged> opus_decoder_ = nullptr;
   std::unique_ptr<float[]> opus_buffer_;
   int opus_buffer_size_;
 

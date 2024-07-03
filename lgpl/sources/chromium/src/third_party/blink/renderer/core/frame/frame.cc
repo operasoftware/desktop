@@ -171,7 +171,7 @@ bool Frame::Detach(FrameDetachType type) {
   // the frame tree. https://crbug.com/578349.
   DisconnectOwnerElement();
   page_ = nullptr;
-  embedding_token_ = absl::nullopt;
+  embedding_token_ = std::nullopt;
 
   return true;
 }
@@ -190,7 +190,7 @@ void Frame::DisconnectOwnerElement() {
 }
 
 Page* Frame::GetPage() const {
-  return page_;
+  return page_.Get();
 }
 
 bool Frame::IsMainFrame() const {
@@ -286,11 +286,25 @@ void Frame::DidChangeVisibilityState() {
     child_frames[i]->DidChangeVisibilityState();
 }
 
+void Frame::NotifyUserActivationInFrameTreeStickyOnly() {
+  NotifyUserActivationInFrameTree(
+      mojom::blink::UserActivationNotificationType::kNone,
+      /*sticky_only=*/true);
+}
+
 void Frame::NotifyUserActivationInFrameTree(
-    mojom::blink::UserActivationNotificationType notification_type) {
+    mojom::blink::UserActivationNotificationType notification_type,
+    bool sticky_only) {
   for (Frame* node = this; node; node = node->Tree().Parent()) {
-    node->user_activation_state_.Activate(notification_type);
-    node->ActivateHistoryUserActivationState();
+    if (sticky_only) {
+      node->user_activation_state_.SetHasBeenActive();
+    } else {
+      node->user_activation_state_.Activate(notification_type);
+    }
+    auto* local_node = DynamicTo<LocalFrame>(node);
+    if (local_node) {
+      local_node->SetHadUserInteraction(true);
+    }
   }
 
   // See the "Same-origin Visibility" section in |UserActivationState| class
@@ -307,8 +321,12 @@ void Frame::NotifyUserActivationInFrameTree(
       if (local_frame_node &&
           security_origin->CanAccess(
               local_frame_node->GetSecurityContext()->GetSecurityOrigin())) {
-        node->user_activation_state_.Activate(notification_type);
-        node->ActivateHistoryUserActivationState();
+        if (sticky_only) {
+          node->user_activation_state_.SetHasBeenActive();
+        } else {
+          node->user_activation_state_.Activate(notification_type);
+        }
+        local_frame_node->SetHadUserInteraction(true);
       }
     }
   }
@@ -332,7 +350,10 @@ bool Frame::ConsumeTransientUserActivationInFrameTree() {
 void Frame::ClearUserActivationInFrameTree() {
   for (Frame* node = this; node; node = node->Tree().TraverseNext(this)) {
     node->user_activation_state_.Clear();
-    node->ClearHistoryUserActivationState();
+    auto* local_node = DynamicTo<LocalFrame>(node);
+    if (local_node) {
+      local_node->SetHadUserInteraction(false);
+    }
   }
 }
 
@@ -359,15 +380,15 @@ bool Frame::IsFencedFrameRoot() const {
   return IsInFencedFrameTree() && IsMainFrame();
 }
 
-absl::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
+std::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
 Frame::GetDeprecatedFencedFrameMode() const {
   DCHECK(!IsDetached());
 
   if (!features::IsFencedFramesEnabled())
-    return absl::nullopt;
+    return std::nullopt;
 
   if (!IsInFencedFrameTree())
-    return absl::nullopt;
+    return std::nullopt;
 
   return GetPage()->DeprecatedFencedFrameMode();
 }
@@ -590,7 +611,7 @@ Frame* Frame::Parent() const {
   if (!parent_)
     return nullptr;
 
-  return parent_;
+  return parent_.Get();
 }
 
 Frame* Frame::Top() {
@@ -607,6 +628,10 @@ Frame* Frame::Top() {
 bool Frame::AllowFocusWithoutUserActivation() {
   if (!features::IsFencedFramesEnabled())
     return true;
+
+  if (IsDetached()) {
+    return true;
+  }
 
   if (!IsInFencedFrameTree())
     return true;
@@ -684,8 +709,9 @@ bool Frame::SwapImpl(
     provisional_frame_ = nullptr;
   }
 
-  v8::HandleScope handle_scope(page->GetAgentGroupScheduler().Isolate());
-  WindowProxyManager::GlobalProxyVector global_proxies;
+  v8::Isolate* isolate = page->GetAgentGroupScheduler().Isolate();
+  v8::HandleScope handle_scope(isolate);
+  WindowProxyManager::GlobalProxyVector global_proxies(isolate);
   GetWindowProxyManager()->ReleaseGlobalProxies(global_proxies);
 
   if (new_web_frame->IsWebRemoteFrame()) {
@@ -784,6 +810,11 @@ bool Frame::SwapImpl(
         page->SetMainFrame(
             WebFrame::ToCoreFrame(*old_page_placeholder_remote_frame));
 
+        // The old page might be in the middle of closing when this swap
+        // happens. We need to ensure that the closing still happens with the
+        // new page, so also swap the CloseTaskHandlers in the pages.
+        new_page->TakeCloseTaskHandler(page);
+
         // On the new Page, we have a different placeholder main RemoteFrame,
         // which was created when the new Page's WebView was created from
         // AgentSchedulingGroup::CreateWebView(). The placeholder main
@@ -803,6 +834,11 @@ bool Frame::SwapImpl(
 
       // Set the provisioanl LocalFrame to become the new page's main frame.
       new_page->SetMainFrame(new_local_frame);
+      // We've done this in init() already, but any changes to the state have
+      // only been dispatched to the active frame tree and pending frames
+      // did not get them.
+      new_local_frame->OnPageLifecycleStateUpdated();
+
       // This trace event is needed to detect the main frame of the
       // renderer in telemetry metrics. See crbug.com/692112#c11.
       TRACE_EVENT_INSTANT1("loading", "markAsMainFrame",

@@ -9,7 +9,11 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/css/font_face.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
+#include "third_party/blink/renderer/core/html/html_link_element.h"
+#include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/pending_link_preload.h"
 #include "third_party/blink/renderer/core/script/script_element_base.h"
@@ -134,6 +138,115 @@ void RenderBlockingResourceManager::FontPreloadingTimerFired(TimerBase*) {
   document_->RenderBlockingResourceUnblocked();
 }
 
+void RenderBlockingResourceManager::AddPendingParsingElementLink(
+    const AtomicString& id,
+    const HTMLLinkElement* link) {
+  if (!RuntimeEnabledFeatures::DocumentRenderBlockingEnabled()) {
+    return;
+  }
+
+  CHECK(link);
+
+  // We can only add resources until the body element is parsed.
+  // Also we need a valid id.
+  if (document_->body() || id.empty()) {
+    return;
+  }
+
+  auto it = element_render_blocking_links_.find(id);
+  if (it == element_render_blocking_links_.end()) {
+    auto result = element_render_blocking_links_.insert(
+        id,
+        MakeGarbageCollected<HeapHashSet<WeakMember<const HTMLLinkElement>>>());
+    result.stored_value->value->insert(link);
+  } else {
+    it->value->insert(link);
+  }
+  document_->SetHasRenderBlockingExpectLinkElements(true);
+}
+
+void RenderBlockingResourceManager::RemovePendingParsingElement(
+    const AtomicString& id,
+    Element* element) {
+  if (!RuntimeEnabledFeatures::DocumentRenderBlockingEnabled()) {
+    return;
+  }
+
+  if (element_render_blocking_links_.empty() || id.empty()) {
+    return;
+  }
+
+  // <link rel=expect> matches elements found using "select the indicated part"
+  // https://html.spec.whatwg.org/multipage/browsing-the-web.html#select-the-indicated-part
+  // which only matches elements in the document tree (as in, not in a shadow
+  // tree)
+  if (element->IsInShadowTree() || !element->isConnected()) {
+    return;
+  }
+
+  element_render_blocking_links_.erase(id);
+  element_render_blocking_links_.erase(
+      AtomicString(EncodeWithURLEscapeSequences(id)));
+  if (element_render_blocking_links_.empty()) {
+    document_->SetHasRenderBlockingExpectLinkElements(false);
+    RenderBlockingResourceUnblocked();
+  }
+}
+
+void RenderBlockingResourceManager::RemovePendingParsingElementLink(
+    const AtomicString& id,
+    const HTMLLinkElement* link) {
+  if (!RuntimeEnabledFeatures::DocumentRenderBlockingEnabled()) {
+    return;
+  }
+
+  // We don't add empty ids.
+  if (id.empty()) {
+    return;
+  }
+
+  auto it = element_render_blocking_links_.find(id);
+  if (it == element_render_blocking_links_.end()) {
+    return;
+  }
+
+  it->value->erase(link);
+  if (it->value->empty()) {
+    element_render_blocking_links_.erase(it);
+  }
+
+  if (element_render_blocking_links_.empty()) {
+    document_->SetHasRenderBlockingExpectLinkElements(false);
+    RenderBlockingResourceUnblocked();
+  }
+}
+
+void RenderBlockingResourceManager::ClearPendingParsingElements() {
+  if (!RuntimeEnabledFeatures::DocumentRenderBlockingEnabled()) {
+    return;
+  }
+
+  if (element_render_blocking_links_.empty()) {
+    return;
+  }
+
+  for (const auto& links : element_render_blocking_links_) {
+    for (const auto& link : *(links.value)) {
+      document_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+          mojom::blink::ConsoleMessageSource::kOther,
+          mojom::blink::ConsoleMessageLevel::kWarning,
+          String("Did not find element expected to be parsed from: <link "
+                 "rel=expect "
+                 "href=\"") +
+              link->FastGetAttribute(html_names::kHrefAttr) + "\">"));
+    }
+  }
+
+  document_->SetHasRenderBlockingExpectLinkElements(false);
+  element_render_blocking_links_.clear();
+  RenderBlockingResourceUnblocked();
+}
+
 void RenderBlockingResourceManager::SetFontPreloadTimeoutForTest(
     base::TimeDelta timeout) {
   if (font_preload_max_blocking_timer_.IsActive()) {
@@ -215,6 +328,7 @@ void RenderBlockingResourceManager::EnsureStartFontPreloadMaxFCPDelayTimer() {
 }
 
 void RenderBlockingResourceManager::Trace(Visitor* visitor) const {
+  visitor->Trace(element_render_blocking_links_);
   visitor->Trace(document_);
   visitor->Trace(pending_stylesheet_owner_nodes_);
   visitor->Trace(pending_scripts_);

@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_VIDEO_ENCODER_ADAPTER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/location.h"
@@ -78,6 +79,7 @@ class PLATFORM_EXPORT RTCVideoEncoderAdapter final
   const scoped_refptr<base::SequencedTaskRunner> encoder_task_runner_;
 
   media::VideoEncoder::Options encoder_options_;
+  std::optional<webrtc::ScalabilityMode> scalability_mode_;
 
   WTF::Vector<webrtc::VideoFrame> input_frames_;
 

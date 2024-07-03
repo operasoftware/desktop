@@ -40,6 +40,7 @@
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -81,7 +82,7 @@ void HTMLDialogElement::SetFocusForDialogLegacy(HTMLDialogElement* dialog) {
 
   // 3. Run the focusing steps for control.
   if (control->IsFocusable())
-    control->Focus(FocusParams(/*gate_on_user_activation=*/true));
+    control->Focus();
   else
     document.ClearFocusedElement();
 
@@ -137,11 +138,17 @@ HTMLDialogElement::HTMLDialogElement(Document& document)
   UseCounter::Count(document, WebFeature::kDialogElement);
 }
 
-void HTMLDialogElement::close(const String& return_value) {
+void HTMLDialogElement::close(const String& return_value,
+                              bool ignore_open_attribute) {
   // https://html.spec.whatwg.org/C/#close-the-dialog
-
-  if (!FastHasAttribute(html_names::kOpenAttr))
+  if (is_closing_) {
     return;
+  }
+  base::AutoReset<bool> reset_close(&is_closing_, true);
+
+  if (!ignore_open_attribute && !FastHasAttribute(html_names::kOpenAttr)) {
+    return;
+  }
 
   Document& document = GetDocument();
   HTMLDialogElement* old_modal_dialog = document.ActiveModalDialog();
@@ -150,7 +157,13 @@ void HTMLDialogElement::close(const String& return_value) {
   bool was_modal = is_modal_;
   SetIsModal(false);
 
-  document.ScheduleForTopLayerRemoval(this, Document::TopLayerReason::kDialog);
+  // If this dialog is open as a non-modal dialog and open as a popover at the
+  // same time, then we shouldn't remove it from the top layer because it is
+  // still open as a popover.
+  if (was_modal) {
+    document.ScheduleForTopLayerRemoval(this,
+                                        Document::TopLayerReason::kDialog);
+  }
   InertSubtreesChanged(document, old_modal_dialog);
 
   if (!return_value.IsNull())
@@ -172,7 +185,7 @@ void HTMLDialogElement::close(const String& return_value) {
     if (previously_focused_element && (was_modal || descendant_is_focused)) {
       previously_focused_element->Focus(FocusParams(
           SelectionBehaviorOnFocus::kNone, mojom::blink::FocusType::kScript,
-          nullptr, focus_options, /*gate_on_user_activation=*/true));
+          nullptr, focus_options));
     }
   }
 
@@ -180,6 +193,57 @@ void HTMLDialogElement::close(const String& return_value) {
     close_watcher_->destroy();
     close_watcher_ = nullptr;
   }
+}
+
+bool HTMLDialogElement::IsValidInvokeAction(HTMLElement& invoker,
+                                            InvokeAction action) {
+  return HTMLElement::IsValidInvokeAction(invoker, action) ||
+         action == InvokeAction::kShowModal || action == InvokeAction::kClose;
+}
+
+bool HTMLDialogElement::HandleInvokeInternal(HTMLElement& invoker,
+                                             InvokeAction action) {
+  CHECK(IsValidInvokeAction(invoker, action));
+
+  if (HTMLElement::HandleInvokeInternal(invoker, action)) {
+    return true;
+  }
+
+  // Dialog actions conflict with popovers. We should avoid trying do anything
+  // with a dialog that is an open popover.
+  if (HasPopoverAttribute() && popoverOpen()) {
+    AddConsoleMessage(mojom::blink::ConsoleMessageSource::kOther,
+                      mojom::blink::ConsoleMessageLevel::kError,
+                      "Dialog invokeactions are ignored on open popovers.");
+    return false;
+  }
+
+  bool open = FastHasAttribute(html_names::kOpenAttr);
+  bool canShow = isConnected() && !open;
+  bool actionMayClose =
+      action == InvokeAction::kAuto || action == InvokeAction::kClose;
+  bool actionMayShowModal =
+      action == InvokeAction::kAuto || action == InvokeAction::kShowModal;
+
+  if (open && actionMayClose) {
+    close();
+    return true;
+  } else if (canShow && actionMayShowModal) {
+    showModal(ASSERT_NO_EXCEPTION);
+    return true;
+  } else if (!open && actionMayClose) {
+    AddConsoleMessage(
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        "A closing invokeaction attempted to close an already closed Dialog");
+  } else if (open && actionMayShowModal) {
+    AddConsoleMessage(
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        "An invokeaction attempted to open an already open Dialog as modal");
+  }
+
+  return false;
 }
 
 void HTMLDialogElement::SetIsModal(bool is_modal) {
@@ -195,29 +259,14 @@ void HTMLDialogElement::ScheduleCloseEvent() {
 }
 
 void HTMLDialogElement::show(ExceptionState& exception_state) {
-  if (RuntimeEnabledFeatures::PopoverDialogDontThrowEnabled()) {
-    if (FastHasAttribute(html_names::kOpenAttr)) {
-      if (is_modal_) {
-        exception_state.ThrowDOMException(
-            DOMExceptionCode::kInvalidStateError,
-            "The dialog is already open as a modal dialog, and therefore "
-            "cannot be opened as a non-modal dialog.");
-      }
-      return;
+  if (FastHasAttribute(html_names::kOpenAttr)) {
+    if (is_modal_) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kInvalidStateError,
+          "The dialog is already open as a modal dialog, and therefore "
+          "cannot be opened as a non-modal dialog.");
     }
-  } else {
-    if (FastHasAttribute(html_names::kOpenAttr)) {
-      return;
-    }
-  }
-
-  if (RuntimeEnabledFeatures::HTMLPopoverAttributeEnabled(
-          GetDocument().GetExecutionContext()) &&
-      HasPopoverAttribute() && popoverOpen()) {
-    return exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidStateError,
-        "The dialog is already open as a Popover, and therefore cannot be "
-        "opened as a non-modal dialog.");
+    return;
   }
 
   SetBooleanAttribute(html_names::kOpenAttr, true);
@@ -226,21 +275,33 @@ void HTMLDialogElement::show(ExceptionState& exception_state) {
   // Element::isFocusable, which requires an up-to-date layout.
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
 
-  // Showing a <dialog> should hide all open popovers.
-  auto& document = GetDocument();
-  if (RuntimeEnabledFeatures::HTMLPopoverAttributeEnabled(
-          document.GetExecutionContext())) {
-    HTMLElement::HideAllPopoversUntil(
-        nullptr, document, HidePopoverFocusBehavior::kNone,
-        HidePopoverTransitionBehavior::kFireEventsAndWaitForTransitions,
-        HidePopoverIndependence::kHideUnrelated);
-  }
+  // Proposed new behavior: top layer elements like dialogs and fullscreen
+  // elements can be nested inside popovers.
+  // Old/existing behavior: showing a modal dialog or fullscreen
+  // element should hide all open popovers.
+  auto* hide_until = HTMLElement::TopLayerElementPopoverAncestor(
+      *this, TopLayerElementType::kDialog);
+  DCHECK(RuntimeEnabledFeatures::NestedTopLayerSupportEnabled() || !hide_until);
+  HTMLElement::HideAllPopoversUntil(
+      hide_until, GetDocument(), HidePopoverFocusBehavior::kNone,
+      HidePopoverTransitionBehavior::kFireEventsAndWaitForTransitions);
 
   if (RuntimeEnabledFeatures::DialogNewFocusBehaviorEnabled()) {
     SetFocusForDialog();
   } else {
     SetFocusForDialogLegacy(this);
   }
+}
+
+bool HTMLDialogElement::IsKeyboardFocusable(
+    UpdateBehavior update_behavior) const {
+  if (!IsFocusable(update_behavior)) {
+    return false;
+  }
+  // This handles cases such as <dialog tabindex=0>, <dialog contenteditable>,
+  // etc.
+  return Element::SupportsFocus(update_behavior) &&
+         GetIntegralAttribute(html_names::kTabindexAttr, 0) >= 0;
 }
 
 class DialogCloseWatcherEventListener : public NativeEventListener {
@@ -267,33 +328,21 @@ class DialogCloseWatcherEventListener : public NativeEventListener {
 };
 
 void HTMLDialogElement::showModal(ExceptionState& exception_state) {
-  if (RuntimeEnabledFeatures::PopoverDialogDontThrowEnabled()) {
-    if (FastHasAttribute(html_names::kOpenAttr)) {
-      if (!is_modal_) {
-        exception_state.ThrowDOMException(
-            DOMExceptionCode::kInvalidStateError,
-            "The dialog is already open as a non-modal dialog, and therefore "
-            "cannot be opened as a modal dialog.");
-      }
-      return;
-    }
-  } else {
-    if (FastHasAttribute(html_names::kOpenAttr)) {
-      return exception_state.ThrowDOMException(
+  if (FastHasAttribute(html_names::kOpenAttr)) {
+    if (!is_modal_) {
+      exception_state.ThrowDOMException(
           DOMExceptionCode::kInvalidStateError,
-          "The element already has an 'open' "
-          "attribute, and therefore cannot be "
-          "opened modally.");
+          "The dialog is already open as a non-modal dialog, and therefore "
+          "cannot be opened as a modal dialog.");
     }
+    return;
   }
   if (!isConnected()) {
     return exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
         "The element is not in a Document.");
   }
-  if (RuntimeEnabledFeatures::HTMLPopoverAttributeEnabled(
-          GetDocument().GetExecutionContext()) &&
-      HasPopoverAttribute() && popoverOpen()) {
+  if (HasPopoverAttribute() && popoverOpen()) {
     return exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
         "The dialog is already open as a Popover, and therefore cannot be "
@@ -319,7 +368,7 @@ void HTMLDialogElement::showModal(ExceptionState& exception_state) {
   document.UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
 
   if (LocalDOMWindow* window = GetDocument().domWindow()) {
-    close_watcher_ = CloseWatcher::Create(window, this);
+    close_watcher_ = CloseWatcher::Create(*window);
     if (close_watcher_) {
       auto* event_listener =
           MakeGarbageCollected<DialogCloseWatcherEventListener>(this);
@@ -330,14 +379,16 @@ void HTMLDialogElement::showModal(ExceptionState& exception_state) {
     }
   }
 
-  // Showing a <dialog> should hide all open popovers.
-  if (RuntimeEnabledFeatures::HTMLPopoverAttributeEnabled(
-          document.GetExecutionContext())) {
-    HTMLElement::HideAllPopoversUntil(
-        nullptr, document, HidePopoverFocusBehavior::kNone,
-        HidePopoverTransitionBehavior::kFireEventsAndWaitForTransitions,
-        HidePopoverIndependence::kHideUnrelated);
-  }
+  // Proposed new behavior: top layer elements like dialogs and fullscreen
+  // elements can be nested inside popovers.
+  // Old/existing behavior: showing a modal dialog or fullscreen
+  // element should hide all open popovers.
+  auto* hide_until = HTMLElement::TopLayerElementPopoverAncestor(
+      *this, TopLayerElementType::kDialog);
+  DCHECK(RuntimeEnabledFeatures::NestedTopLayerSupportEnabled() || !hide_until);
+  HTMLElement::HideAllPopoversUntil(
+      hide_until, document, HidePopoverFocusBehavior::kNone,
+      HidePopoverTransitionBehavior::kFireEventsAndWaitForTransitions);
 
   if (RuntimeEnabledFeatures::DialogNewFocusBehaviorEnabled()) {
     SetFocusForDialog();
@@ -418,6 +469,25 @@ void HTMLDialogElement::Trace(Visitor* visitor) const {
   visitor->Trace(previously_focused_element_);
   visitor->Trace(close_watcher_);
   HTMLElement::Trace(visitor);
+}
+
+void HTMLDialogElement::ParseAttribute(
+    const AttributeModificationParams& params) {
+  if (RuntimeEnabledFeatures::DialogCloseWhenOpenRemovedEnabled() &&
+      params.name == html_names::kOpenAttr && params.new_value.IsNull() &&
+      !is_closing_) {
+    auto* console_message = MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        "The open attribute was removed from a dialog element while it was "
+        "open. This is not recommended. Please close it using the "
+        "dialog.close() method instead.");
+    console_message->SetNodes(GetDocument().GetFrame(), {GetDomNodeId()});
+    GetDocument().AddConsoleMessage(console_message);
+    close(/*return_value=*/String(), /*ignore_open_attribute=*/true);
+  }
+
+  HTMLElement::ParseAttribute(params);
 }
 
 }  // namespace blink

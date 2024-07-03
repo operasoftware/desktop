@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBMIDI_MIDI_DISPATCHER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBMIDI_MIDI_DISPATCHER_H_
 
+#include "base/memory/raw_ptr.h"
 #include "media/midi/midi_service.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -17,7 +18,7 @@ namespace blink {
 class MIDIDispatcher : public GarbageCollected<MIDIDispatcher>,
                        public midi::mojom::blink::MidiSessionClient {
  public:
-  class Client {
+  class Client : public GarbageCollectedMixin {
    public:
     virtual void DidAddInputPort(const String& id,
                                  const String& manufacturer,
@@ -68,7 +69,7 @@ class MIDIDispatcher : public GarbageCollected<MIDIDispatcher>,
   void Trace(Visitor* visitor) const;
 
  private:
-  Client* client_ = nullptr;
+  Member<Client> client_;
 
   bool initialized_ = false;
 

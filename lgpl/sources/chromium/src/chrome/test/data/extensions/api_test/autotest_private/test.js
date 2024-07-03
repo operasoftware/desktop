@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -302,10 +302,6 @@ var defaultTests = [
           chrome.test.succeed();
         });
   },
-  function bootstrapMachineLearningService() {
-    chrome.autotestPrivate.bootstrapMachineLearningService(
-        chrome.test.callbackFail('ML Service connection error'));
-  },
   function runCrostiniUninstaller() {
     chrome.autotestPrivate.runCrostiniUninstaller(chrome.test.callbackFail(
         'Crostini is not available for the current user'));
@@ -594,7 +590,7 @@ var defaultTests = [
       chrome.test.assertEq('Running', item.status);
       chrome.test.assertTrue(item.showsTooltip);
       chrome.test.assertFalse(item.pinnedByPolicy);
-      chrome.test.assertFalse(item.pinStateForcedByType);
+      chrome.test.assertTrue(item.pinStateForcedByType);
       chrome.test.assertFalse(item.hasNotification);
     }));
   },
@@ -1553,6 +1549,44 @@ var holdingSpaceTests = [
   },
 ];
 
+var isFieldTrialActiveTests = [
+  function getActiveTrialActiveGroup() {
+    chrome.autotestPrivate.isFieldTrialActive(
+        'ActiveTrialForTest', 'GroupForTest',
+        chrome.test.callbackPass(enabled => {
+          chrome.test.assertTrue(enabled);
+        }));
+  },
+  function getActiveTrialInactiveGroup() {
+    chrome.autotestPrivate.isFieldTrialActive(
+        'ActiveTrialForTest', 'WrongGroupForTest',
+        chrome.test.callbackPass(enabled => {
+          chrome.test.assertFalse(enabled);
+        }));
+  },
+  function getInactiveTrial() {
+    chrome.autotestPrivate.isFieldTrialActive(
+        'InactiveTrialForTest', 'GroupForTest',
+        chrome.test.callbackPass(enabled => {
+          chrome.test.assertFalse(enabled);
+        }));
+  }
+];
+
+var clearAllowedPrefTests = [
+  function clearAllowedPrefs(pref_name) {
+    chrome.autotestPrivate.clearAllowedPref(pref_name,
+        chrome.test.callbackPass());
+  }
+];
+
+var setDeviceLanguage = [
+  function setDeviceLanguage(locale) {
+    chrome.autotestPrivate.setDeviceLanguage(locale,
+        chrome.test.callbackPass());
+  }
+];
+
 // Tests that requires a concrete system web app installation.
 var systemWebAppsTests = [
   function getRegisteredSystemWebApps() {
@@ -1567,33 +1601,38 @@ var systemWebAppsTests = [
       })
     );
   },
-  function isSystemWebAppOpen() {
-    chrome.autotestPrivate.waitForSystemWebAppsInstall(
-        chrome.test.callbackPass(() => {
-          // Test system app should not be open by default.
-          chrome.autotestPrivate.isSystemWebAppOpen(
-              'maphiehpiinjgiaepbljmopkodkadcbh',
-              chrome.test.callbackPass(isOpen => {
-                chrome.test.assertFalse(isOpen);
-              }));
+  async function isSystemWebAppOpen() {
+    const waitForSystemWebAppsInstall = (...args) =>
+        promisify(chrome.autotestPrivate.waitForSystemWebAppsInstall, ...args);
+    const isSystemWebAppOpen = (...args) =>
+        promisify(chrome.autotestPrivate.isSystemWebAppOpen, ...args);
+    const launchSystemWebApp = (...args) =>
+        promisify(chrome.autotestPrivate.launchSystemWebApp, ...args);
 
-          // Open test app and verify the state should be open.
-          chrome.autotestPrivate.launchSystemWebApp(
-              'OSSettings', 'chrome://test-system-app/',
-              chrome.test.callbackPass(() => {
-                chrome.autotestPrivate.isSystemWebAppOpen(
-                    'maphiehpiinjgiaepbljmopkodkadcbh',
-                    chrome.test.callbackPass(isOpen => {
-                      chrome.test.assertTrue(isOpen);
-                    }));
-              }));
+    await waitForSystemWebAppsInstall();
 
-          // Check for invalid app.
-          chrome.autotestPrivate.isSystemWebAppOpen(
-              '',
-              chrome.test.callbackFail(
-                  'No system web app is found by given app id.'));
-        }));
+    // Checking for an invalid app should fail.
+    let did_error = false;
+    await isSystemWebAppOpen('').catch(() => did_error = true);
+    chrome.test.assertTrue(did_error, 'Checking an invalid app should error');
+    chrome.test.assertLastError('No system web app is found by given app id.');
+
+    // App isn't opened at the start.
+    chrome.test.assertFalse(
+        await isSystemWebAppOpen('maphiehpiinjgiaepbljmopkodkadcbh'),
+        'App shouldn\'t be opened before launchSystemWebApp');
+
+    // Launch an app.
+    await launchSystemWebApp('OSSettings', 'chrome://test-system-app/');
+
+    // App launch might be queued and processed later. We don't have a method to
+    // wait for launch completion, so we poll instead. If this test times out,
+    // most likely something is wrong with system web app launch logic.
+    while (!await isSystemWebAppOpen('maphiehpiinjgiaepbljmopkodkadcbh')) {
+      await sleep(100);
+    }
+
+    chrome.test.succeed();
   },
 ]
 
@@ -1635,7 +1674,10 @@ var systemWebAppsTests = [
       'holdingSpace': holdingSpaceTests,
       'systemWebApps': systemWebAppsTests,
       'lacrosEnabled': lacrosEnabledTests,
-      'launcherSearchBoxState' : launcherSearchBoxStateTests,
+      'launcherSearchBoxState': launcherSearchBoxStateTests,
+      'isFieldTrialActive': isFieldTrialActiveTests,
+      'clearAllowedPref': clearAllowedPrefTests,
+      'setDeviceLanguage': setDeviceLanguage
     };
 
 chrome.test.getConfig(function(config) {

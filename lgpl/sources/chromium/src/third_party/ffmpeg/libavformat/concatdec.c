@@ -194,7 +194,6 @@ static int copy_stream_props(AVStream *st, AVStream *source_st)
     avpriv_set_pts_info(st, 64, source_st->time_base.num, source_st->time_base.den);
 
     av_dict_copy(&st->metadata, source_st->metadata, 0);
-    ff_stream_side_data_copy(st, source_st);
     return 0;
 }
 
@@ -639,6 +638,12 @@ static int concat_parse_script(AVFormatContext *avf)
         }
     }
 
+    if (file->inpoint != AV_NOPTS_VALUE && file->outpoint != AV_NOPTS_VALUE) {
+        if (file->inpoint  > file->outpoint ||
+            file->outpoint - (uint64_t)file->inpoint > INT64_MAX)
+            ret = AVERROR_INVALIDDATA;
+    }
+
 fail:
     for (arg = 0; arg < MAX_ARGS; arg++)
         av_freep(&arg_str[arg]);
@@ -667,7 +672,9 @@ static int concat_read_header(AVFormatContext *avf)
         else
             time = cat->files[i].start_time;
         if (cat->files[i].user_duration == AV_NOPTS_VALUE) {
-            if (cat->files[i].inpoint == AV_NOPTS_VALUE || cat->files[i].outpoint == AV_NOPTS_VALUE)
+            if (cat->files[i].inpoint == AV_NOPTS_VALUE || cat->files[i].outpoint == AV_NOPTS_VALUE ||
+                cat->files[i].outpoint - (uint64_t)cat->files[i].inpoint != av_sat_sub64(cat->files[i].outpoint, cat->files[i].inpoint)
+            )
                 break;
             cat->files[i].user_duration = cat->files[i].outpoint - cat->files[i].inpoint;
         }
@@ -935,9 +942,10 @@ static const AVClass concat_class = {
 };
 
 
-const AVInputFormat ff_concat_demuxer = {
-    .name           = "concat",
-    .long_name      = NULL_IF_CONFIG_SMALL("Virtual concatenation script"),
+const FFInputFormat ff_concat_demuxer = {
+    .p.name         = "concat",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Virtual concatenation script"),
+    .p.priv_class   = &concat_class,
     .priv_data_size = sizeof(ConcatContext),
     .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = concat_probe,
@@ -945,5 +953,4 @@ const AVInputFormat ff_concat_demuxer = {
     .read_packet    = concat_read_packet,
     .read_close     = concat_read_close,
     .read_seek2     = concat_seek,
-    .priv_class     = &concat_class,
 };

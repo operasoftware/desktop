@@ -40,7 +40,7 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/keywords.h"
-#include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
+#include "third_party/blink/renderer/core/layout/layout_ng_block_flow.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/drag_data.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
@@ -119,10 +119,6 @@ Vector<String> FileInputType::FilesFromFormControlState(
                                                  &File::PathFromControlState);
 }
 
-const AtomicString& FileInputType::FormControlType() const {
-  return input_type_names::kFile;
-}
-
 FormControlState FileInputType::SaveFormControlState() const {
   if (file_list_->IsEmpty() ||
       GetElement().GetDocument().GetFormController().DropReferencedFilePaths())
@@ -188,14 +184,6 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
     return;
   }
 
-  bool intercepted = false;
-  probe::FileChooserOpened(document.GetFrame(), &input, input.Multiple(),
-                           &intercepted);
-  if (intercepted) {
-    event.SetDefaultHandled();
-    return;
-  }
-
   OpenPopupView();
   event.SetDefaultHandled();
 }
@@ -203,6 +191,13 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
 void FileInputType::OpenPopupView() {
   HTMLInputElement& input = GetElement();
   Document& document = input.GetDocument();
+
+  bool intercepted = false;
+  probe::FileChooserOpened(document.GetFrame(), &input, input.Multiple(),
+                           &intercepted);
+  if (intercepted) {
+    return;
+  }
 
   if (ChromeClient* chrome_client = GetChromeClient()) {
     FileChooserParams params;
@@ -222,16 +217,17 @@ void FileInputType::OpenPopupView() {
                                input.FastHasAttribute(html_names::kCaptureAttr);
     params.requestor = document.Url();
     HTMLInputElement* button = input.UploadButton();
-    Element* body = document.body();
-    std::vector<Element*> elements{button ? button : &input,
-                                   document.HoverElement(),
-                                   document.ActiveElement()};
-    auto iter = std::find_if(
-        elements.begin(), elements.end(), [&body](Element* element) {
+    const Element* body = document.body();
+    const Element* elements[] = {button ? button : &input,
+                                 document.HoverElement(),
+                                 document.ActiveElement()};
+    const Element** iter = std::find_if(
+        std::begin(elements), std::end(elements),
+        [&body](const Element* element) {
           return element && element != body &&
                  !element->VisibleBoundsInLocalRoot().IsEmpty();
         });
-    if (iter != elements.end()) {
+    if (iter != std::end(elements)) {
       params.triggering_rect = chrome_client->LocalRootToScreenDIPs(
           (*iter)->VisibleBoundsInLocalRoot(), body->GetDocument().View());
     }
@@ -363,8 +359,7 @@ void FileInputType::CreateShadowSubtree() {
   DCHECK(IsShadowHost(GetElement()));
   Document& document = GetElement().GetDocument();
 
-  auto* button =
-      MakeGarbageCollected<HTMLInputElement>(document, CreateElementFlags());
+  auto* button = MakeGarbageCollected<HTMLInputElement>(document);
   button->setType(input_type_names::kButton);
   button->setAttribute(
       html_names::kValueAttr,
@@ -401,7 +396,8 @@ Node* FileInputType::FileStatusElement() const {
 }
 
 void FileInputType::DisabledAttributeChanged() {
-  DCHECK(IsShadowHost(GetElement()));
+  DCHECK(RuntimeEnabledFeatures::CreateInputShadowTreeDuringLayoutEnabled() ||
+         IsShadowHost(GetElement()));
   if (Element* button = UploadButton()) {
     button->SetBooleanAttribute(html_names::kDisabledAttr,
                                 GetElement().IsDisabledFormControl());
@@ -409,7 +405,8 @@ void FileInputType::DisabledAttributeChanged() {
 }
 
 void FileInputType::MultipleAttributeChanged() {
-  DCHECK(IsShadowHost(GetElement()));
+  DCHECK(RuntimeEnabledFeatures::CreateInputShadowTreeDuringLayoutEnabled() ||
+         IsShadowHost(GetElement()));
   if (Element* button = UploadButton()) {
     button->setAttribute(
         html_names::kValueAttr,

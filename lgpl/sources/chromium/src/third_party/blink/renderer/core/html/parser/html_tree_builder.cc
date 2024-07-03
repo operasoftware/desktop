@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
@@ -386,7 +387,7 @@ Element* HTMLTreeBuilder::TakeScriptToProcess(
 }
 
 void HTMLTreeBuilder::ConstructTree(AtomicHTMLToken* token) {
-  RUNTIME_CALL_TIMER_SCOPE(V8PerIsolateData::MainThreadIsolate(),
+  RUNTIME_CALL_TIMER_SCOPE(parser_->GetDocument()->GetAgent().isolate(),
                            RuntimeCallStats::CounterId::kConstructTree);
   if (ShouldProcessTokenInForeignContent(token))
     ProcessTokenInForeignContent(token);
@@ -408,6 +409,9 @@ void HTMLTreeBuilder::ConstructTree(AtomicHTMLToken* token) {
   parser_->tokenizer().SetForceNullCharacterReplacement(
       GetInsertionMode() == kTextMode || in_foreign_content);
   parser_->tokenizer().SetShouldAllowCDATA(in_foreign_content);
+  if (RuntimeEnabledFeatures::DOMPartsAPIEnabled()) {
+    parser_->tokenizer().SetShouldAllowDOMParts(tree_.InParsePartsScope());
+  }
 
   tree_.ExecuteQueuedTasks();
   // We might be detached now.
@@ -444,6 +448,9 @@ void HTMLTreeBuilder::ProcessToken(AtomicHTMLToken* token) {
       break;
     case HTMLToken::kEndOfFile:
       ProcessEndOfFile(token);
+      break;
+    case HTMLToken::kDOMPart:
+      ProcessDOMPart(token);
       break;
   }
 }
@@ -723,6 +730,7 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
     case HTMLTag::kNav:
     case HTMLTag::kOl:
     case HTMLTag::kP:
+    case HTMLTag::kSearch:
     case HTMLTag::kSection:
     case HTMLTag::kSummary:
     case HTMLTag::kUl:
@@ -965,6 +973,14 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
     case HTMLTag::kTr:
       ParseError(token);
       break;
+    case HTMLTag::kPermission:
+      if (RuntimeEnabledFeatures::PermissionElementEnabled()) {
+        tree_.ReconstructTheActiveFormattingElements();
+        tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+        frameset_ok_ = false;
+        break;
+      }
+      [[fallthrough]];
     default:
       if (token->GetName() == mathml_names::kMathTag.LocalName()) {
         tree_.ReconstructTheActiveFormattingElements();
@@ -978,6 +994,12 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
         tree_.InsertForeignElement(token, svg_names::kNamespaceURI);
       } else {
         tree_.ReconstructTheActiveFormattingElements();
+        if (RuntimeEnabledFeatures::
+                FlushParserBeforeCreatingCustomElementsEnabled()) {
+          // Flush before creating custom elements. NOTE: Flush() can cause any
+          // queued tasks to execute, possibly re-entering the parser.
+          tree_.Flush();
+        }
         tree_.InsertHTMLElement(token);
       }
       break;
@@ -985,65 +1007,39 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
 }
 
 namespace {
-DeclarativeShadowRootType DeclarativeShadowRootTypeFromToken(
+DeclarativeShadowRootMode DeclarativeShadowRootModeFromToken(
     AtomicHTMLToken* token,
     const Document& document,
     bool include_shadow_roots) {
-  // Declarative shadow DOM, as initially shipped:
-  //   1. used the 'shadowroot' attribute, and
-  //   2. attached the shadow root at the *closing* </template> tag.
-  // In 2022, discussions of the spec resumed, and two changes were made:
-  //   1. the attribute is called 'shadowrootmode', and
-  //   2. the shadow root is attached at the *opening* <template> tag.
-  // During the transition between these two behaviors, *both* behaviors can
-  // be used, and are controlled by the developer:
-  //   <template shadowroot=open>  ==> old behavior
-  //   <template shadowrootmode=open>  ==> new behavior
-  //   <template shadowroot=open shadowrootmode=open> ==> new behavior
-  // crbug.com/1379513 tracks the new behavior.
-  // crbug.com/1396384 tracks the eventual removal of the old behavior.
-  Attribute* type_attribute_streaming =
+  Attribute* type_attribute =
       token->GetAttributeItem(html_names::kShadowrootmodeAttr);
-  bool streaming =
-      type_attribute_streaming &&
-      RuntimeEnabledFeatures::StreamingDeclarativeShadowDOMEnabled();
-  String shadow_mode;
-  if (streaming) {
-    shadow_mode = type_attribute_streaming->Value();
-  } else {
-    Attribute* type_attribute_non_streaming =
-        token->GetAttributeItem(html_names::kShadowrootAttr);
-    if (!type_attribute_non_streaming) {
-      return DeclarativeShadowRootType::kNone;
-    }
-    shadow_mode = type_attribute_non_streaming->Value();
+  if (!type_attribute) {
+    return DeclarativeShadowRootMode::kNone;
   }
+  String shadow_mode = type_attribute->Value();
 
   if (include_shadow_roots) {
     if (EqualIgnoringASCIICase(shadow_mode, "open")) {
-      return streaming ? DeclarativeShadowRootType::kStreamingOpen
-                       : DeclarativeShadowRootType::kOpen;
+      return DeclarativeShadowRootMode::kOpen;
     } else if (EqualIgnoringASCIICase(shadow_mode, "closed")) {
-      return streaming ? DeclarativeShadowRootType::kStreamingClosed
-                       : DeclarativeShadowRootType::kClosed;
+      return DeclarativeShadowRootMode::kClosed;
     }
   }
-  String attribute_in_use = streaming ? "shadowrootmode" : "shadowroot";
   if (!include_shadow_roots) {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
         mojom::blink::ConsoleMessageSource::kOther,
         mojom::blink::ConsoleMessageLevel::kWarning,
-        "Found declarative " + attribute_in_use +
-            " attribute on a template, but declarative "
-            "Shadow DOM has not been enabled by includeShadowRoots."));
+        "Found declarative shadowrootmode attribute on a template, but "
+        "declarative Shadow DOM is not being parsed. Use setHTMLUnsafe() "
+        "or parseHTMLUnsafe() instead."));
   } else {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
         mojom::blink::ConsoleMessageSource::kOther,
         mojom::blink::ConsoleMessageLevel::kWarning,
-        "Invalid declarative " + attribute_in_use + " attribute value \"" +
-            shadow_mode + "\". Valid values include \"open\" and \"closed\"."));
+        "Invalid declarative shadowrootmode attribute value \"" + shadow_mode +
+            "\". Valid values include \"open\" and \"closed\"."));
   }
-  return DeclarativeShadowRootType::kNone;
+  return DeclarativeShadowRootMode::kNone;
 }
 }  // namespace
 
@@ -1051,7 +1047,7 @@ void HTMLTreeBuilder::ProcessTemplateStartTag(AtomicHTMLToken* token) {
   tree_.ActiveFormattingElements()->AppendMarker();
   tree_.InsertHTMLTemplateElement(
       token,
-      DeclarativeShadowRootTypeFromToken(
+      DeclarativeShadowRootModeFromToken(
           token, tree_.OwnerDocumentForCurrentNode(), include_shadow_roots_));
   frameset_ok_ = false;
   template_insertion_modes_.push_back(kTemplateContentsMode);
@@ -1073,7 +1069,6 @@ bool HTMLTreeBuilder::ProcessTemplateEndTag(AtomicHTMLToken* token) {
   tree_.OpenElements()->PopUntil(HTMLTag::kTemplate);
   HTMLStackItem* template_stack_item = tree_.OpenElements()->TopStackItem();
   tree_.OpenElements()->Pop();
-  HTMLStackItem* shadow_host_stack_item = tree_.OpenElements()->TopStackItem();
   tree_.ActiveFormattingElements()->ClearToLastMarker();
   template_insertion_modes_.pop_back();
   ResetInsertionModeAppropriately();
@@ -1081,40 +1076,7 @@ bool HTMLTreeBuilder::ProcessTemplateEndTag(AtomicHTMLToken* token) {
     DCHECK(template_stack_item->IsElementNode());
     HTMLTemplateElement* template_element =
         DynamicTo<HTMLTemplateElement>(template_stack_item->GetElement());
-    DocumentFragment* template_content = nullptr;
-    if (template_element->IsDeclarativeShadowRoot()) {
-      if (shadow_host_stack_item->GetNode() ==
-          tree_.OpenElements()->RootNode()) {
-        // 10. If the adjusted current node is the topmost element in the stack
-        // of open elements, then stop this algorithm.
-        template_element->SetDeclarativeShadowRootType(
-            DeclarativeShadowRootType::kNone);
-      } else {
-        DCHECK(shadow_host_stack_item);
-        DCHECK(shadow_host_stack_item->IsElementNode());
-        if (template_element->IsNonStreamingDeclarativeShadowRoot()) {
-          template_content = template_element->DeclarativeShadowContent();
-          auto focus_delegation = template_stack_item->GetAttributeItem(
-                                      html_names::kShadowrootdelegatesfocusAttr)
-                                      ? FocusDelegation::kDelegateFocus
-                                      : FocusDelegation::kNone;
-          // TODO(crbug.com/1063157): Add an attribute for imperative slot
-          // assignment.
-          auto slot_assignment_mode = SlotAssignmentMode::kNamed;
-          shadow_host_stack_item->GetElement()
-              ->AttachDeprecatedNonStreamingDeclarativeShadowRoot(
-                  *template_element,
-                  template_element->GetDeclarativeShadowRootType() ==
-                          DeclarativeShadowRootType::kOpen
-                      ? ShadowRootType::kOpen
-                      : ShadowRootType::kClosed,
-                  focus_delegation, slot_assignment_mode);
-        }
-      }
-    } else {
-      template_content = template_element->content();
-    }
-    if (template_content) {
+    if (DocumentFragment* template_content = template_element->getContent()) {
       tree_.FinishedTemplateElement(template_content);
     }
   }
@@ -1502,6 +1464,31 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
       }
       ParseError(token);
       break;
+    case kInButtonInSelectMode:
+    case kInDatalistInSelectMode:
+      switch (tag) {
+        case HTMLTag::kSelect: {
+          // Don't allow <select> within <select> even if there is a <button> or
+          // <datalist> in between. To match the other branch for <select> in
+          // <select>, add a </select> instead of a <select>. ProcessEndTag()
+          // will also end all tags within the currently open <select>.
+          ParseError(token);
+          AtomicHTMLToken end_select(HTMLToken::kEndTag, HTMLTag::kSelect);
+          ProcessEndTag(&end_select);
+          break;
+        }
+        case HTMLTag::kButton:
+        case HTMLTag::kDatalist:
+          // Don't allow nesting of buttons or datalists in this mode because
+          // when we end these tags we go back to kInSelectMode.
+          // TODO(crbug.com/1511354): Try removing this when kButton and
+          // kDatalist are handled in ResetInsertionModeAppropriately
+          break;
+        default:
+          ProcessStartTagForInBody(token);
+          break;
+      }
+      break;
     case kInSelectInTableMode:
       switch (tag) {
         case HTMLTag::kCaption:
@@ -1543,6 +1530,21 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
           }
           tree_.InsertHTMLElement(token);
           return;
+        case HTMLTag::kHr:
+          if (!RuntimeEnabledFeatures::SelectHrEnabled()) {
+            break;
+          }
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOption)) {
+            AtomicHTMLToken end_option(HTMLToken::kEndTag, HTMLTag::kOption);
+            ProcessEndTag(&end_option);
+          }
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOptgroup)) {
+            AtomicHTMLToken end_optgroup(HTMLToken::kEndTag,
+                                         HTMLTag::kOptgroup);
+            ProcessEndTag(&end_optgroup);
+          }
+          tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+          return;
         case HTMLTag::kSelect: {
           ParseError(token);
           AtomicHTMLToken end_select(HTMLToken::kEndTag, HTMLTag::kSelect);
@@ -1570,7 +1572,35 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
         case HTMLTag::kTemplate:
           ProcessTemplateStartTag(token);
           return;
+        case HTMLTag::kButton:
+          // TODO(crbug.com/1511354): Add console warnings for this and the
+          // datalist branch when the flag is disabled once we're certain that
+          // we are shipping with <button> and <datalist>.
+          UseCounter::Count(tree_.CurrentNode()->GetDocument(),
+                            WebFeature::kHTMLButtonInSelect);
+          // TODO(crbug.com/1511354): Consider adding support for stylable
+          // select in <table>s and remove this kInSelectMode check and the one
+          // in the kDatalist case.
+          if (RuntimeEnabledFeatures::StylableSelectEnabled() &&
+              GetInsertionMode() == kInSelectMode) {
+            SetInsertionMode(kInButtonInSelectMode);
+            ProcessStartTagForInBody(token);
+            return;
+          }
+          break;
+        case HTMLTag::kDatalist:
+          UseCounter::Count(tree_.CurrentNode()->GetDocument(),
+                            WebFeature::kHTMLDatalistInSelect);
+          if (RuntimeEnabledFeatures::StylableSelectEnabled() &&
+              GetInsertionMode() == kInSelectMode) {
+            SetInsertionMode(kInDatalistInSelectMode);
+            ProcessStartTagForInBody(token);
+            return;
+          }
+          break;
         default:
+          UseCounter::Count(tree_.CurrentNode()->GetDocument(),
+                            WebFeature::kSelectParserDroppedTag);
           break;
       }
       break;
@@ -1816,6 +1846,9 @@ void HTMLTreeBuilder::ResetInsertionModeAppropriately() {
             }
           }
           return SetInsertionMode(kInSelectMode);
+        // TODO(crbug.com/1511354): Consider adding cases for kButton and
+        // kDatalist here to reset the insertion mode to kInButtonInSelectMode
+        // and kInDatalistInSelectMode
         case HTMLTag::kTd:
         case HTMLTag::kTh:
           return SetInsertionMode(kInCellMode);
@@ -2011,6 +2044,7 @@ void HTMLTreeBuilder::ProcessEndTagForInBody(AtomicHTMLToken* token) {
     case HTMLTag::kNav:
     case HTMLTag::kOl:
     case HTMLTag::kPre:
+    case HTMLTag::kSearch:
     case HTMLTag::kSection:
     case HTMLTag::kSummary:
     case HTMLTag::kUl:
@@ -2395,6 +2429,38 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
     case kAfterAfterFramesetMode:
       ParseError(token);
       break;
+    case kInButtonInSelectMode:
+      CHECK(RuntimeEnabledFeatures::StylableSelectEnabled());
+      switch (tag) {
+        case HTMLTag::kSelect:
+          tree_.OpenElements()->PopUntilPopped(HTMLTag::kSelect);
+          ResetInsertionModeAppropriately();
+          return;
+        default:
+          break;
+      }
+      // TODO(crbug.com/1511354): We need to review which end tags cause which
+      // elements to close once there's a reviewed HTML PR for styleable select.
+      ProcessEndTagForInBody(token);
+      if (tag == HTMLTag::kButton) {
+        ResetInsertionModeAppropriately();
+      }
+      return;
+    case kInDatalistInSelectMode:
+      switch (tag) {
+        case HTMLTag::kSelect:
+          SetInsertionMode(kInSelectMode);
+          tree_.OpenElements()->PopUntilPopped(HTMLTag::kSelect);
+          ResetInsertionModeAppropriately();
+          return;
+        default:
+          break;
+      }
+      ProcessEndTagForInBody(token);
+      if (tag == HTMLTag::kDatalist) {
+        ResetInsertionModeAppropriately();
+      }
+      return;
     case kInSelectInTableMode:
       switch (tag) {
         case HTMLTag::kCaption:
@@ -2483,6 +2549,12 @@ void HTMLTreeBuilder::ProcessComment(AtomicHTMLToken* token) {
   tree_.InsertComment(token);
 }
 
+void HTMLTreeBuilder::ProcessDOMPart(AtomicHTMLToken* token) {
+  DCHECK_EQ(token->GetType(), HTMLToken::kDOMPart);
+  DCHECK(tree_.InParsePartsScope());
+  tree_.InsertDOMPart(token);
+}
+
 void HTMLTreeBuilder::ProcessCharacter(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kCharacter);
   CharacterTokenBuffer buffer(token);
@@ -2560,6 +2632,8 @@ ReprocessBuffer:
     case kInBodyMode:
     case kInCaptionMode:
     case kTemplateContentsMode:
+    case kInDatalistInSelectMode:
+    case kInButtonInSelectMode:
     case kInCellMode: {
       ProcessCharacterBufferForInBody(buffer);
       break;
@@ -2726,6 +2800,8 @@ void HTMLTreeBuilder::ProcessEndOfFile(AtomicHTMLToken* token) {
     case kInFramesetMode:
     case kInTableMode:
     case kInTableBodyMode:
+    case kInButtonInSelectMode:
+    case kInDatalistInSelectMode:
     case kInSelectInTableMode:
     case kInSelectMode:
       if (tree_.CurrentNode() != tree_.OpenElements()->RootNode())
@@ -2934,6 +3010,9 @@ void HTMLTreeBuilder::ProcessTokenInForeignContent(AtomicHTMLToken* token) {
       NOTREACHED();
       break;
     case HTMLToken::DOCTYPE:
+    // TODO(crbug.com/1453291) This needs to be expanded to properly handle
+    // foreign content (e.g. <svg>) inside an element with `parseparts`.
+    case HTMLToken::kDOMPart:
       ParseError(token);
       break;
     case HTMLToken::kStartTag: {
@@ -3004,6 +3083,16 @@ void HTMLTreeBuilder::ProcessTokenInForeignContent(AtomicHTMLToken* token) {
         AdjustSVGAttributes(token);
       }
       AdjustForeignAttributes(token);
+
+      if (tag == HTMLTag::kScript && token->SelfClosing() &&
+          current_namespace == svg_names::kNamespaceURI) {
+        token->SetSelfClosingToFalse();
+        tree_.InsertForeignElement(token, current_namespace);
+        AtomicHTMLToken fake_token(HTMLToken::kEndTag, HTMLTag::kScript);
+        ProcessTokenInForeignContent(&fake_token);
+        return;
+      }
+
       tree_.InsertForeignElement(token, current_namespace);
       break;
     }
@@ -3097,6 +3186,8 @@ const char* HTMLTreeBuilder::ToString(HTMLTreeBuilder::InsertionMode mode) {
     DEFINE_STRINGIFY(kInCellMode)
     DEFINE_STRINGIFY(kInSelectMode)
     DEFINE_STRINGIFY(kInSelectInTableMode)
+    DEFINE_STRINGIFY(kInButtonInSelectMode)
+    DEFINE_STRINGIFY(kInDatalistInSelectMode)
     DEFINE_STRINGIFY(kAfterBodyMode)
     DEFINE_STRINGIFY(kInFramesetMode)
     DEFINE_STRINGIFY(kAfterFramesetMode)

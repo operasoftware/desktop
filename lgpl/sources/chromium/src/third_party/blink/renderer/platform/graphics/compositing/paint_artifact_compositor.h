@@ -24,11 +24,8 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/vector.h"
-
-#if DCHECK_IS_ON()
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#endif
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace cc {
 class ViewTransitionRequest;
@@ -88,9 +85,6 @@ class SynthesizedClip : private cc::ContentLayerClient {
 
  private:
   // ContentLayerClient implementation.
-  gfx::Rect PaintableRegion() const final {
-    return gfx::Rect(layer_->bounds());
-  }
   scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList() final;
   bool FillsBoundsCompletely() const final { return false; }
 
@@ -99,7 +93,7 @@ class SynthesizedClip : private cc::ContentLayerClient {
   gfx::Transform projection_;
   bool rrect_is_local_ = false;
   SkRRect rrect_;
-  absl::optional<Path> path_;
+  std::optional<Path> path_;
   CompositorElementId mask_isolation_id_;
   CompositorElementId mask_effect_id_;
 };
@@ -109,9 +103,8 @@ class SynthesizedClip : private cc::ContentLayerClient {
 // Owns a subtree of the compositor layer tree, and updates it in response to
 // changes in the paint artifact.
 class PLATFORM_EXPORT PaintArtifactCompositor final
-    : private PropertyTreeManagerClient {
-  USING_FAST_MALLOC(PaintArtifactCompositor);
-
+    : public GarbageCollected<PaintArtifactCompositor>,
+      private PropertyTreeManagerClient {
  public:
   PaintArtifactCompositor(
       base::WeakPtr<CompositorScrollCallbacks> scroll_callbacks);
@@ -119,7 +112,12 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   PaintArtifactCompositor& operator=(const PaintArtifactCompositor&) = delete;
   ~PaintArtifactCompositor() override;
 
+  void Trace(Visitor* visitor) const { visitor->Trace(pending_layers_); }
+
   struct ViewportProperties {
+    STACK_ALLOCATED();
+
+   public:
     const TransformPaintPropertyNode* overscroll_elasticity_transform = nullptr;
     const TransformPaintPropertyNode* page_scale = nullptr;
     const TransformPaintPropertyNode* inner_scroll_translation = nullptr;
@@ -134,17 +132,10 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   // noncomposited nodes, and is used for Scroll Unification to generate scroll
   // nodes for noncomposited scrollers to complete the compositor's scroll
   // property tree.
-  //
-  // |anchor_position_scrollers| is the set of scroll nodes whose scroll
-  // offset contributes to any anchor position scroll translation (namely, whose
-  // id is snapshotted in an AnchorPositionScrollData). This is needed only when
-  // ScrollUnification is disabled.
   void Update(
-      scoped_refptr<const PaintArtifact> artifact,
+      const PaintArtifact& artifact,
       const ViewportProperties& viewport_properties,
       const Vector<const TransformPaintPropertyNode*>& scroll_translation_nodes,
-      const Vector<const TransformPaintPropertyNode*>&
-          anchor_position_scrollers,
       Vector<std::unique_ptr<cc::ViewTransitionRequest>> requests);
 
   // Fast-path update where the painting of existing composited layers changed,
@@ -164,7 +155,7 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   // This copies over the newly-painted PaintChunks to existing
   // |pending_layers_|, issues raster invalidations, and updates the existing
   // cc::Layer properties such as background color.
-  void UpdateRepaintedLayers(scoped_refptr<const PaintArtifact>);
+  void UpdateRepaintedLayers(const PaintArtifact&);
 
   bool DirectlyUpdateCompositedOpacityValue(const EffectPaintPropertyNode&);
   bool DirectlyUpdateScrollOffsetTransform(const TransformPaintPropertyNode&);
@@ -176,6 +167,8 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   // transform node in DirectlyUpdateScrollOffsetTransform() or Update()).
   bool DirectlySetScrollOffset(CompositorElementId,
                                const gfx::PointF& scroll_offset);
+
+  void DropCompositorScrollDeltaNextCommit(CompositorElementId);
 
   uint32_t GetMainThreadScrollingReasons(const ScrollPaintPropertyNode&) const;
   // Returns true if the scroll node is currently composited in cc.
@@ -233,13 +226,15 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
 
   Vector<cc::Layer*> SynthesizedClipLayersForTesting() const;
 
-  void ClearPropertyTreeChangedState();
-
   size_t ApproximateUnsharedMemoryUsage() const;
 
   // Invalidates the scrollbar layer. Returns true if the scrollbar layer is
   // found by `element_id`.
   bool SetScrollbarNeedsDisplay(CompositorElementId element_id);
+
+  // Sets color for solid color scrollbar layer. Returns true if the scrollbar
+  // layer is found by `element_id`.
+  bool SetScrollbarSolidColor(CompositorElementId element_id, SkColor4f color);
 
   bool ShouldAlwaysUpdateOnScroll() const {
     return should_always_update_on_scroll_;
@@ -252,7 +247,7 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
 
   // Collects the PaintChunks into groups which will end up in the same
   // cc layer. This is the entry point of the layerization algorithm.
-  void CollectPendingLayers(scoped_refptr<const PaintArtifact>);
+  void CollectPendingLayers(const PaintArtifact&);
 
   // This is the internal recursion of CollectPendingLayers. This function
   // loops over the list of paint chunks, scoped by an isolated group
@@ -275,9 +270,9 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   // time a paint property tree node is encountered that has direct compositing
   // reasons. This case will always start a new layer and can skip merge tests.
   // New values are added when transform nodes are first encountered.
-  void LayerizeGroup(scoped_refptr<const PaintArtifact>,
+  void LayerizeGroup(const PaintArtifact&,
                      const EffectPaintPropertyNode&,
-                     Vector<PaintChunk>::const_iterator& chunk_cursor,
+                     PaintChunks::const_iterator& chunk_cursor,
                      HashSet<const TransformPaintPropertyNode*>&
                          directly_composited_transforms,
                      bool force_draws_content);
@@ -286,7 +281,7 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
                          const EffectPaintPropertyNode& effect,
                          wtf_size_t layer_index);
 
-  const TransformPaintPropertyNode& NearestScrollTranslationForLayer(
+  const TransformPaintPropertyNode& ScrollTranslationStateForLayer(
       const PendingLayer&);
 
   // if |needs_layer| is false, no cc::Layer is created, |mask_effect_id| is
@@ -304,7 +299,7 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
       const TransformPaintPropertyNode& scroll_translation) const final;
   bool ComputeNeedsCompositedScrolling(
       const PaintArtifact&,
-      Vector<PaintChunk>::const_iterator chunk_cursor) const;
+      PaintChunks::const_iterator chunk_cursor) const;
   PendingLayer::CompositingType ChunkCompositingType(const PaintArtifact&,
                                                      const PaintChunk&) const;
 
@@ -339,7 +334,6 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   };
   Vector<SynthesizedClipEntry> synthesized_clip_cache_;
 
-  using PendingLayers = Vector<PendingLayer, 0>;
   class OldPendingLayerMatcher;
   PendingLayers pending_layers_;
 

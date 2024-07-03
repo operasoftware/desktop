@@ -301,7 +301,8 @@ String CSSBasicShapePolygonValue::CustomCSSText() const {
 
 bool CSSBasicShapePolygonValue::Equals(
     const CSSBasicShapePolygonValue& other) const {
-  return CompareCSSValueVector(values_, other.values_);
+  return wind_rule_ == other.wind_rule_ &&
+         CompareCSSValueVector(values_, other.values_);
 }
 
 void CSSBasicShapePolygonValue::TraceAfterDispatch(
@@ -653,9 +654,16 @@ void CSSBasicShapeXYWHValue::Validate() const {
   DCHECK(x_);
   DCHECK(y_);
   DCHECK(width_);
-  DCHECK_GT(width_->GetFloatValue(), 0);
   DCHECK(height_);
-  DCHECK_GT(height_->GetFloatValue(), 0);
+
+  // The spec requires non-negative width and height but we can only validate
+  // numeric literals here.
+  if (width_->IsNumericLiteralValue()) {
+    DCHECK_GE(width_->GetFloatValue(), 0);
+  }
+  if (height_->IsNumericLiteralValue()) {
+    DCHECK_GE(height_->GetFloatValue(), 0);
+  }
 }
 
 }  // namespace cssvalue

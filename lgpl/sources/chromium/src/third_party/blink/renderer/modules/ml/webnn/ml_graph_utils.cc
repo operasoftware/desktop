@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <numeric>
+
 #include "third_party/blink/renderer/modules/ml/webnn/ml_graph_utils.h"
 
+#include "third_party/blink/renderer/bindings/modules/v8/v8_ml_gemm_options.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/ml/webnn/ml_operand.h"
 #include "third_party/blink/renderer/modules/ml/webnn/ml_operator.h"
@@ -52,7 +55,7 @@ HeapVector<Member<const MLOperator>>* GetOperatorsInTopologicalOrder(
       // operators are visited or not.
       bool skip_visit = false;
       for (const auto& operand : current_operator->Inputs()) {
-        if (operand->Kind() == MLOperand::OperandKind::kOutput) {
+        if (operand->Kind() == webnn::mojom::blink::Operand::Kind::kOutput) {
           const auto* dependent_operator = operand->Operator();
           CHECK(dependent_operator);
           if (!visited_operators.Contains(dependent_operator)) {
@@ -81,13 +84,17 @@ HeapVector<Member<const MLOperator>>* GetOperatorsInTopologicalOrder(
   return toposorted_operators;
 }
 
-absl::optional<ArrayBufferViewInfo> TransferArrayBufferView(
+std::optional<ArrayBufferViewInfo> TransferArrayBufferView(
     v8::Isolate* isolate,
     NotShared<DOMArrayBufferView> source_view,
     ExceptionState& exception_state) {
-  // A detached ArrayBufferView should be caught by
-  // `ValidateNamedArrayBufferViews()` called in `MLGraph::ComputeAsync()`.
-  CHECK(!source_view->IsDetached());
+  // Need to check whether each `ArrayBufferView` of `NamedArrayBufferViews` is
+  // detached because transferring an `ArrayBuffer` would impact all
+  // `ArrayBufferView`s sharing the same `ArrayBuffer`.
+  if (source_view->IsDetached()) {
+    exception_state.ThrowTypeError("The ArrayBuffer is detached.");
+    return std::nullopt;
+  }
 
   // Avoid transferring a non-detachable ArrayBuffer.
   // `DOMArrayBuffer::Transfer()` would make a copy if the ArrayBuffer is not
@@ -95,9 +102,8 @@ absl::optional<ArrayBufferViewInfo> TransferArrayBufferView(
   // ArrayBuffer of WebIDL spec:
   // https://webidl.spec.whatwg.org/#arraybuffer-transfer
   if (!source_view->buffer()->IsDetachable(isolate)) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kDataError,
-                                      "The ArrayBuffer is not detachable.");
-    return absl::nullopt;
+    exception_state.ThrowTypeError("The ArrayBuffer is not detachable.");
+    return std::nullopt;
   }
 
   // Get the offset and length of the source view before transferring it.
@@ -111,7 +117,7 @@ absl::optional<ArrayBufferViewInfo> TransferArrayBufferView(
   // detach key of the ArrayBuffer is not `undefined`.
   if (!source_view->buffer()->Transfer(isolate, view_info.contents,
                                        exception_state)) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   return view_info;
@@ -120,12 +126,12 @@ absl::optional<ArrayBufferViewInfo> TransferArrayBufferView(
 DOMArrayBufferView* CreateArrayBufferView(ArrayBufferViewInfo view_info) {
   auto* target_buffer = DOMArrayBuffer::Create(std::move(view_info.contents));
 
-  // Align with the ArrayBufferView types supported by WebNN MLOperandType:
-  // https://www.w3.org/TR/webnn/#appendices-mloperandtype-arraybufferview-compatibility
+  // Align with the ArrayBufferView types supported by WebNN MLOperandDataType:
+  // https://www.w3.org/TR/webnn/#appendices-MLOperandDataType-arraybufferview-compatibility
   DOMArrayBufferView* target_view = nullptr;
   switch (view_info.type) {
     case DOMArrayBufferView::kTypeFloat32:
-      // Float32Array is used for MLOperandType::float32.
+      // Float32Array is used for MLOperandDataType::float32.
       target_view = DOMFloat32Array::Create(target_buffer, view_info.offset,
                                             view_info.length);
       break;
@@ -136,22 +142,32 @@ DOMArrayBufferView* CreateArrayBufferView(ArrayBufferViewInfo view_info) {
                                            view_info.length);
       break;
     case DOMArrayBufferView::kTypeInt32:
-      // Int32Array is used for MLOperandType::int32.
+      // Int32Array is used for MLOperandDataType::int32.
       target_view = DOMInt32Array::Create(target_buffer, view_info.offset,
                                           view_info.length);
       break;
     case DOMArrayBufferView::kTypeUint32:
-      // Uint32Array is used for MLOperandType::uint32.
+      // Uint32Array is used for MLOperandDataType::uint32.
       target_view = DOMUint32Array::Create(target_buffer, view_info.offset,
                                            view_info.length);
       break;
+    case DOMArrayBufferView::kTypeBigInt64:
+      // BigInt64Array is used for MLOperandDataType::int64.
+      target_view = DOMBigInt64Array::Create(target_buffer, view_info.offset,
+                                             view_info.length);
+      break;
+    case DOMArrayBufferView::kTypeBigUint64:
+      // BigUint64Array is used for MLOperandDataType::uint64.
+      target_view = DOMBigUint64Array::Create(target_buffer, view_info.offset,
+                                              view_info.length);
+      break;
     case DOMArrayBufferView::kTypeInt8:
-      // Int8Array is used for MLOperandType::int8.
+      // Int8Array is used for MLOperandDataType::int8.
       target_view = DOMInt8Array::Create(target_buffer, view_info.offset,
                                          view_info.length);
       break;
     case DOMArrayBufferView::kTypeUint8:
-      // Uint8Array is used for MLOperandType::uint8.
+      // Uint8Array is used for MLOperandDataType::uint8.
       target_view = DOMUint8Array::Create(target_buffer, view_info.offset,
                                           view_info.length);
       break;
@@ -168,6 +184,7 @@ std::unique_ptr<NamedArrayBufferViewsInfo> TransferNamedArrayBufferViews(
     const MLNamedArrayBufferViews& source_views,
     ExceptionState& exception_state) {
   auto views_info = std::make_unique<NamedArrayBufferViewsInfo>();
+  views_info->reserve(source_views.size());
   for (const auto& [name, source_view] : source_views) {
     auto view_info =
         TransferArrayBufferView(isolate, source_view, exception_state);
@@ -182,6 +199,7 @@ std::unique_ptr<NamedArrayBufferViewsInfo> TransferNamedArrayBufferViews(
 MLNamedArrayBufferViews* CreateNamedArrayBufferViews(
     std::unique_ptr<NamedArrayBufferViewsInfo> views_info) {
   auto* target_views = MakeGarbageCollected<MLNamedArrayBufferViews>();
+  target_views->reserve(views_info->size());
   for (auto& [name, view_info] : *views_info) {
     target_views->push_back(
         std::make_pair(name, CreateArrayBufferView(std::move(view_info))));
@@ -189,16 +207,131 @@ MLNamedArrayBufferViews* CreateNamedArrayBufferViews(
   return target_views;
 }
 
-webnn::AutoPad BlinkAutoPadToComponent(blink::V8MLAutoPad::Enum type) {
-  switch (type) {
-    case blink::V8MLAutoPad::Enum::kExplicit:
-      return webnn::AutoPad::kExplicit;
-    case blink::V8MLAutoPad::Enum::kSameUpper:
-      return webnn::AutoPad::kSameUpper;
-    case blink::V8MLAutoPad::Enum::kSameLower:
-      return webnn::AutoPad::kSameLower;
+Vector<uint32_t> CreateDefaultPermutation(const wtf_size_t rank) {
+  Vector<uint32_t> default_permutation(rank);
+  for (wtf_size_t i = 0; i < rank; ++i) {
+    default_permutation[i] = rank - 1 - i;
   }
-  NOTREACHED_NORETURN();
+  return default_permutation;
+}
+
+Vector<uint32_t> CreateAllAxes(const wtf_size_t rank) {
+  Vector<uint32_t> default_axes(rank);
+  std::iota(default_axes.begin(), default_axes.end(), 0);
+  return default_axes;
+}
+
+Vector<uint32_t> CreateLayerNormalizationDefaultAxes(const wtf_size_t rank) {
+  Vector<uint32_t> default_axes;
+  if (rank > 1) {
+    default_axes.resize(rank - 1);
+    std::iota(default_axes.begin(), default_axes.end(), 1);
+  }
+  return default_axes;
+}
+
+base::expected<void, String> ValidateFilterLayout(
+    bool depthwise,
+    V8MLInputOperandLayout input_layout,
+    V8MLConv2dFilterOperandLayout filter_layout) {
+  CHECK(input_layout.AsEnum() == V8MLInputOperandLayout::Enum::kNhwc);
+
+  if (!depthwise) {
+    // For regular conv2d, NHWC input layout expects weights layout in ohwi that
+    // is [groups * group_output_channels, kernel_height, kernel_width,
+    // group_input_channels].
+    //
+    // TODO(crbug.com/1273291): support other layouts by transposing the
+    // filter operand.
+    if (filter_layout.AsEnum() != V8MLConv2dFilterOperandLayout::Enum::kOhwi) {
+      return base::unexpected(String::Format(
+          "The filter layout %s is not supported.", filter_layout.AsCStr()));
+    }
+  } else {
+    // For depthwise conv2d, NHWC input layout expects weights layout in ihwo
+    // that is [1, kernel_height, kernel_width, input_channels *
+    // depth_multiplier].
+    //
+    // TODO(crbug.com/1273291): support other layouts by transposing the
+    // filter operand.
+    if (filter_layout.AsEnum() != V8MLConv2dFilterOperandLayout::Enum::kIhwo) {
+      return base::unexpected(String::Format(
+          "The filter layout %s is not supported.", filter_layout.AsCStr()));
+    }
+  }
+
+  return base::ok();
+}
+
+base::expected<void, String> ValidateGemmOptions(const MLGemmOptions* options,
+                                                 uint32_t output_channels) {
+  CHECK(options);
+  if (options->hasC()) {
+    // Both XNNPACK and TFLite fully connected operator only supports 1-D bias
+    // tensor (operand c of WebNN gemm operator) with [output_channels]
+    // dimensions.
+    const auto* bias = options->c();
+    if (bias->Dimensions().size() != 1u ||
+        bias->Dimensions()[0] != output_channels) {
+      // TODO(crbug.com/1273291): Support the bias with other dimensions by
+      // element-wise addition operator.
+      return base::unexpected(String::Format(
+          "The dimensions of bias must be [%u].", output_channels));
+    }
+  }
+  if (options->alpha() != 1.0f) {
+    // TODO(crbug.com/1273291): Support alpha by using element-wise
+    // multiplication operator.
+    return base::unexpected("gemm doesn't support alpha option.");
+  }
+  if (options->beta() != 1.0f) {
+    // TODO(crbug.com/1273291): Support beta by using element-wise
+    // multiplication operator.
+    return base::unexpected("gemm doesn't support beta option.");
+  }
+  if (options->aTranspose()) {
+    // TODO(crbug.com/1273291): Support aTranspose by using transpose operator.
+    return base::unexpected("gemm doesn't support aTranspose option.");
+  }
+
+  return base::ok();
+}
+
+webnn::Size2d<uint32_t> CalculateConvTransposeOutputSize2D(
+    const blink::MLConvTranspose2dOptions* options,
+    uint32_t input_height,
+    uint32_t input_width,
+    uint32_t filter_height,
+    uint32_t filter_width,
+    uint32_t stride_height,
+    uint32_t stride_width,
+    uint32_t dilation_height,
+    uint32_t dilation_width,
+    uint32_t output_padding_height,
+    uint32_t output_padding_width) {
+  // Set the padding from WebNN explicit padding that is in
+  // [beginning_height, ending_height, beginning_width, ending_width],
+  // default to 0.
+  auto ml_padding = options->getPaddingOr({0, 0, 0, 0});
+  CHECK_EQ(ml_padding.size(), 4u);
+  const webnn::Padding2d padding{
+      .beginning = webnn::Size2d<uint32_t>{.height = ml_padding[0],
+                                           .width = ml_padding[2]},
+      .ending = webnn::Size2d<uint32_t>{.height = ml_padding[1],
+                                        .width = ml_padding[3]}};
+  const auto output_height = webnn::CalculateConvTranspose2dOutputSize(
+      input_height, filter_height, padding.beginning.height,
+      padding.ending.height, stride_height, dilation_height,
+      output_padding_height);
+  CHECK(output_height.has_value());
+
+  const auto output_width = webnn::CalculateConvTranspose2dOutputSize(
+      input_width, filter_width, padding.beginning.width, padding.ending.width,
+      stride_width, dilation_width, output_padding_width);
+  CHECK(output_width.has_value());
+
+  return webnn::Size2d<uint32_t>{.height = output_height.value(),
+                                 .width = output_width.value()};
 }
 
 }  // namespace blink

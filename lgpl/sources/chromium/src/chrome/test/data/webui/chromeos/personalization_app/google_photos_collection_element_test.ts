@@ -3,9 +3,8 @@
 // found in the LICENSE file.
 
 import 'chrome://personalization/strings.m.js';
-import 'chrome://webui-test/mojo_webui_test_support.js';
 
-import {GooglePhotosAlbum, GooglePhotosCollection, GooglePhotosEnablementState, Paths, PersonalizationRouter} from 'chrome://personalization/js/personalization_app.js';
+import {GooglePhotosAlbum, GooglePhotosCollectionElement, GooglePhotosEnablementState, Paths, PersonalizationRouterElement} from 'chrome://personalization/js/personalization_app.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
@@ -14,8 +13,8 @@ import {baseSetup, initElement, teardownElement} from './personalization_app_tes
 import {TestPersonalizationStore} from './test_personalization_store.js';
 import {TestWallpaperProvider} from './test_wallpaper_interface_provider.js';
 
-suite('GooglePhotosCollectionTest', function() {
-  let googlePhotosCollectionElement: GooglePhotosCollection|null;
+suite('GooglePhotosCollectionElementTest', function() {
+  let googlePhotosCollectionElement: GooglePhotosCollectionElement|null;
   let personalizationStore: TestPersonalizationStore;
   let wallpaperProvider: TestWallpaperProvider;
 
@@ -23,9 +22,10 @@ suite('GooglePhotosCollectionTest', function() {
    * Returns an initialized `googlePhotosCollectionElement`.
    */
   async function displayElement(enabled = GooglePhotosEnablementState.kEnabled):
-      Promise<GooglePhotosCollection> {
+      Promise<GooglePhotosCollectionElement> {
     personalizationStore.data.wallpaper.googlePhotos.enabled = enabled;
-    const googlePhotosCollectionElement = initElement(GooglePhotosCollection);
+    const googlePhotosCollectionElement =
+        initElement(GooglePhotosCollectionElement);
     personalizationStore.notifyObservers();
     await waitAfterNextRender(googlePhotosCollectionElement);
     return Promise.resolve(googlePhotosCollectionElement);
@@ -53,7 +53,7 @@ suite('GooglePhotosCollectionTest', function() {
 
   test('displays only photos content', async () => {
     // Tabs and albums content are not displayed if albums are absent.
-    wallpaperProvider.setGooglePhotosAlbums(undefined);
+    wallpaperProvider.setGooglePhotosAlbums(null);
     wallpaperProvider.setGooglePhotosPhotos([{
       id: '9bd1d7a3-f995-4445-be47-53c5b58ce1cb',
       dedupKey: '2d0d1595-14af-4471-b2db-b9c8eae3a491',
@@ -372,7 +372,7 @@ suite('GooglePhotosCollectionTest', function() {
 
                 // Mock `PersonalizationRouter.reloadAtWallpaper()`.
                 let didCallReloadAtWallpaper = false;
-                PersonalizationRouter.reloadAtWallpaper = () => {
+                PersonalizationRouterElement.reloadAtWallpaper = () => {
                   didCallReloadAtWallpaper = true;
                 };
 

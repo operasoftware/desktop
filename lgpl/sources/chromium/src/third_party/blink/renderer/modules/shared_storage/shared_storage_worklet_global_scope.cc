@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/platform/bindings/callback_method_retriever.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "v8/include/v8-context.h"
+#include "v8/include/v8-isolate.h"
 #include "v8/include/v8-local-handle.h"
 #include "v8/include/v8-primitive.h"
 #include "v8/include/v8-value.h"
@@ -53,18 +54,18 @@ namespace {
 constexpr char kCannotDeserializeDataErrorMessage[] =
     "Cannot deserialize data.";
 
-absl::optional<ScriptValue> Deserialize(
+std::optional<ScriptValue> Deserialize(
     v8::Isolate* isolate,
     ExecutionContext* execution_context,
     const BlinkCloneableMessage& serialized_data) {
   if (!serialized_data.message->CanDeserializeIn(execution_context)) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   Member<UnpackedSerializedScriptValue> unpacked =
       SerializedScriptValue::Unpack(serialized_data.message);
   if (!unpacked) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   return ScriptValue(isolate, unpacked->Deserialize(isolate));
@@ -245,8 +246,7 @@ SharedStorageWorkletGlobalScope::SharedStorageWorkletGlobalScope(
     WorkerThread* thread)
     : WorkletGlobalScope(std::move(creation_params),
                          thread->GetWorkerReportingProxy(),
-                         thread,
-                         /*create_microtask_queue=*/true) {
+                         thread) {
   ContextFeatureSettings::From(
       this, ContextFeatureSettings::CreationMode::kCreateIfNotExists)
       ->EnablePrivateAggregationInSharedStorage(
@@ -307,9 +307,9 @@ void SharedStorageWorkletGlobalScope::OnConsoleApiMessage(
     mojom::ConsoleMessageLevel level,
     const String& message,
     SourceLocation* location) {
-  client_->ConsoleLog(message);
-
   WorkerOrWorkletGlobalScope::OnConsoleApiMessage(level, message, location);
+
+  client_->DidAddMessageToConsole(level, message);
 }
 
 void SharedStorageWorkletGlobalScope::NotifyContextDestroyed() {
@@ -319,27 +319,6 @@ void SharedStorageWorkletGlobalScope::NotifyContextDestroyed() {
   }
 
   WorkletGlobalScope::NotifyContextDestroyed();
-}
-
-bool SharedStorageWorkletGlobalScope::FeatureEnabled(
-    OriginTrialFeature feature) const {
-  // The shared storage worklet infrastructure doesn't yet support checking the
-  // origin trial features. We'll go over each feature that can potentially be
-  // checked (e.g. IDL attribute/interface exposures conditioned on
-  // RuntimeEnabled=XXX), and replicate their status manually.
-
-  // The worklet must have been created from a context eligible for shared
-  // storage. It's okay to treat `kSharedStorageAPI` as enabled.
-  if (feature == OriginTrialFeature::kSharedStorageAPI) {
-    return true;
-  }
-
-  if (feature == OriginTrialFeature::kJavaScriptCompileHintsMagicRuntime) {
-    return false;
-  }
-
-  NOTREACHED_NORETURN() << "Attempted to check OriginTrialFeature: "
-                        << static_cast<int32_t>(feature);
 }
 
 void SharedStorageWorkletGlobalScope::Trace(Visitor* visitor) const {
@@ -423,7 +402,7 @@ void SharedStorageWorkletGlobalScope::RunURLSelectionOperation(
   base::ranges::transform(urls, std::back_inserter(urls_param),
                           [](const KURL& url) { return url.GetString(); });
 
-  absl::optional<ScriptValue> data_param =
+  std::optional<ScriptValue> data_param =
       Deserialize(isolate, /*execution_context=*/this, serialized_data);
   if (!data_param) {
     std::move(combined_operation_completion_cb)
@@ -432,7 +411,7 @@ void SharedStorageWorkletGlobalScope::RunURLSelectionOperation(
     return;
   }
 
-  v8::Maybe<ScriptPromise> result = registered_run_function->Invoke(
+  v8::Maybe<ScriptPromiseUntyped> result = registered_run_function->Invoke(
       instance.Get(isolate), urls_param, *data_param);
 
   if (try_catch.HasCaught()) {
@@ -453,7 +432,7 @@ void SharedStorageWorkletGlobalScope::RunURLSelectionOperation(
   auto* unresolved_request = MakeGarbageCollected<UnresolvedSelectURLRequest>(
       urls.size(), std::move(combined_operation_completion_cb));
 
-  ScriptPromise promise = result.FromJust();
+  ScriptPromiseUntyped promise = result.FromJust();
 
   auto* success_callback = MakeGarbageCollected<ScriptFunction>(
       script_state, MakeGarbageCollected<SelectURLResolutionSuccessCallback>(
@@ -500,7 +479,7 @@ void SharedStorageWorkletGlobalScope::RunOperation(
   V8RunFunctionForSharedStorageRunOperation* registered_run_function =
       operation_definition->GetRunFunctionForSharedStorageRunOperation();
 
-  absl::optional<ScriptValue> data_param =
+  std::optional<ScriptValue> data_param =
       Deserialize(isolate, /*execution_context=*/this, serialized_data);
   if (!data_param) {
     std::move(combined_operation_completion_cb)
@@ -508,7 +487,7 @@ void SharedStorageWorkletGlobalScope::RunOperation(
     return;
   }
 
-  v8::Maybe<ScriptPromise> result =
+  v8::Maybe<ScriptPromiseUntyped> result =
       registered_run_function->Invoke(instance.Get(isolate), *data_param);
 
   if (try_catch.HasCaught()) {
@@ -527,7 +506,7 @@ void SharedStorageWorkletGlobalScope::RunOperation(
   auto* unresolved_request = MakeGarbageCollected<UnresolvedRunRequest>(
       std::move(combined_operation_completion_cb));
 
-  ScriptPromise promise = result.FromJust();
+  ScriptPromiseUntyped promise = result.FromJust();
 
   auto* success_callback = MakeGarbageCollected<ScriptFunction>(
       script_state,
@@ -596,9 +575,8 @@ int64_t SharedStorageWorkletGlobalScope::GetCurrentOperationId() {
   ScriptState* script_state = ScriptController()->GetScriptState();
   DCHECK(script_state);
 
-  v8::Local<v8::Context> context = script_state->GetContext();
-
-  v8::Local<v8::Value> data = context->GetContinuationPreservedEmbedderData();
+  v8::Local<v8::Value> data =
+      script_state->GetIsolate()->GetContinuationPreservedEmbedderData();
   return data.As<v8::BigInt>()->Int64Value();
 }
 
@@ -715,11 +693,11 @@ base::OnceClosure SharedStorageWorkletGlobalScope::StartOperation(
   ScriptState* script_state = ScriptController()->GetScriptState();
   DCHECK(script_state);
 
-  v8::HandleScope handle_scope(script_state->GetIsolate());
-  v8::Local<v8::Context> context = script_state->GetContext();
+  v8::Isolate* isolate = script_state->GetIsolate();
+  v8::HandleScope handle_scope(isolate);
 
-  context->SetContinuationPreservedEmbedderData(
-      v8::BigInt::New(context->GetIsolate(), operation_id));
+  isolate->SetContinuationPreservedEmbedderData(
+      v8::BigInt::New(isolate, operation_id));
 
   if (ShouldDefinePrivateAggregationInSharedStorage()) {
     GetOrCreatePrivateAggregation()->OnOperationStarted(

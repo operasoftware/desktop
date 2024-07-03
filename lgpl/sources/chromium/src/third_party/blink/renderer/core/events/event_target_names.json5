@@ -49,9 +49,11 @@
     "ShadowRealmGlobalScope",
     "SharedWorker",
     "SharedWorkerGlobalScope",
+    "WebPrintJob",
     "Worker",
     "XMLHttpRequest",
     "XMLHttpRequestUpload",
     "CloseWatcher",
+    "PreferenceObject"
   ],
 }

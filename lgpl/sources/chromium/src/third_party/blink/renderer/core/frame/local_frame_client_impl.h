@@ -137,11 +137,11 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
       mojo::PendingRemote<mojom::blink::BlobURLToken>,
       base::TimeTicks input_start_time,
       const String& href_translate,
-      const absl::optional<Impression>& impression,
+      const std::optional<Impression>& impression,
       const LocalFrameToken* initiator_frame_token,
       std::unique_ptr<SourceLocation> source_location,
-      mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
-          initiator_policy_container_keep_alive_handle,
+      mojo::PendingRemote<mojom::blink::NavigationStateKeepAliveHandle>
+          initiator_navigation_state_keep_alive_handle,
       bool is_container_initiated,
       bool is_fullscreen_requested) override;
   void DispatchWillSendSubmitEvent(HTMLFormElement*) override;
@@ -149,13 +149,16 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void DidStopLoading() override;
   bool NavigateBackForward(
       int offset,
-      absl::optional<scheduler::TaskAttributionId>
+      std::optional<scheduler::TaskAttributionId>
           soft_navigation_heuristics_task_id) const override;
   void DidDispatchPingLoader(const KURL&) override;
   void DidChangePerformanceTiming() override;
-  void DidObserveInputDelay(base::TimeDelta) override;
-  void DidObserveUserInteraction(base::TimeDelta max_event_duration,
-                                 UserInteractionType interaction_type) override;
+  void DidObserveUserInteraction(base::TimeTicks max_event_start,
+                                 base::TimeTicks max_event_queued_main_thread,
+                                 base::TimeTicks max_event_commit_finish,
+                                 base::TimeTicks max_event_end,
+                                 UserInteractionType interaction_type,
+                                 uint64_t interaction_offset) override;
   void DidChangeCpuTiming(base::TimeDelta) override;
   void DidObserveLoadingBehavior(LoadingBehaviorFlag) override;
   void DidObserveJavaScriptFrameworks(
@@ -175,17 +178,12 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   String UserAgentOverride(const KURL& url) override;
   WTF::String UserAgent(const KURL& url) override;
-  absl::optional<blink::UserAgentMetadata> UserAgentMetadata(
+  std::optional<blink::UserAgentMetadata> UserAgentMetadata(
       const KURL& url) override;
   WTF::String DoNotTrackValue() override;
   void TransitionToCommittedForNewPage() override;
   LocalFrame* CreateFrame(const WTF::AtomicString& name,
                           HTMLFrameOwnerElement*) override;
-  std::pair<RemoteFrame*, PortalToken> CreatePortal(
-      HTMLPortalElement*,
-      mojo::PendingAssociatedReceiver<mojom::blink::Portal>,
-      mojo::PendingAssociatedRemote<mojom::blink::PortalClient>) override;
-  RemoteFrame* AdoptPortal(HTMLPortalElement*) override;
 
   RemoteFrame* CreateFencedFrame(
       HTMLFencedFrameElement*,
@@ -233,12 +231,15 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   std::unique_ptr<URLLoader> CreateURLLoaderForTesting() override;
 
+  blink::ChildURLLoaderFactoryBundle* GetLoaderFactoryBundle() override;
+
+  scoped_refptr<WebBackgroundResourceFetchAssets>
+  MaybeGetBackgroundResourceFetchAssets() override;
+
   blink::BrowserInterfaceBrokerProxy& GetBrowserInterfaceBroker() override;
 
   AssociatedInterfaceProvider* GetRemoteNavigationAssociatedInterfaces()
       override;
-
-  void AnnotatedRegionsChanged() override;
 
   base::UnguessableToken GetDevToolsFrameToken() const override;
 
@@ -284,6 +285,9 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   void SetMouseCapture(bool capture) override;
 
+  void NotifyAutoscrollForSelectionInMainFrame(
+      bool autoscroll_selection) override;
+
   bool UsePrintingLayout() const override;
 
   std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
@@ -292,10 +296,6 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void BindDevToolsAgent(
       mojo::PendingAssociatedRemote<mojom::blink::DevToolsAgentHost> host,
       mojo::PendingAssociatedReceiver<mojom::blink::DevToolsAgent> receiver)
-      override;
-
-  void UpdateSubresourceFactory(
-      std::unique_ptr<blink::PendingURLLoaderFactoryBundle> pending_factory)
       override;
 
  private:

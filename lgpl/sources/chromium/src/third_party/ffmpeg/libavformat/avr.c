@@ -21,6 +21,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 #include "pcm.h"
 
@@ -70,6 +71,9 @@ static int avr_read_header(AVFormatContext *s)
     avio_skip(s->pb, 1); // replay speed
 
     st->codecpar->sample_rate = avio_rb24(s->pb);
+    if (st->codecpar->sample_rate == 0)
+        return AVERROR_INVALIDDATA;
+
     avio_skip(s->pb, 4 * 3);
     avio_skip(s->pb, 2 * 3);
     avio_skip(s->pb, 20);
@@ -87,13 +91,13 @@ static int avr_read_header(AVFormatContext *s)
     return 0;
 }
 
-const AVInputFormat ff_avr_demuxer = {
-    .name           = "avr",
-    .long_name      = NULL_IF_CONFIG_SMALL("AVR (Audio Visual Research)"),
+const FFInputFormat ff_avr_demuxer = {
+    .p.name         = "avr",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("AVR (Audio Visual Research)"),
+    .p.extensions   = "avr",
+    .p.flags        = AVFMT_GENERIC_INDEX,
     .read_probe     = avr_probe,
     .read_header    = avr_read_header,
     .read_packet    = ff_pcm_read_packet,
     .read_seek      = ff_pcm_read_seek,
-    .extensions     = "avr",
-    .flags          = AVFMT_GENERIC_INDEX,
 };

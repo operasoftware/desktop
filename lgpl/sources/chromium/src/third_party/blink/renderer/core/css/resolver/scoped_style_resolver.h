@@ -64,11 +64,12 @@ class CORE_EXPORT ScopedStyleResolver final
   StyleRuleKeyframes* KeyframeStylesForAnimation(
       const AtomicString& animation_name);
 
-  CounterStyleMap* GetCounterStyleMap() { return counter_style_map_; }
+  CounterStyleMap* GetCounterStyleMap() { return counter_style_map_.Get(); }
   static void CounterStyleRulesChanged(TreeScope& scope);
 
-  StyleRulePositionFallback* PositionFallbackForName(
-      const AtomicString& fallback_name);
+  StyleRulePositionTry* PositionTryForName(const AtomicString& try_name);
+
+  StyleRuleFunction* FunctionForName(StringView name);
 
   const FontFeatureValuesStorage* FontFeatureValuesForFamily(
       AtomicString font_family);
@@ -76,10 +77,10 @@ class CORE_EXPORT ScopedStyleResolver final
   void RebuildCascadeLayerMap(const ActiveStyleSheetVector& sheets);
   bool HasCascadeLayerMap() const { return cascade_layer_map_.Get(); }
   const CascadeLayerMap* GetCascadeLayerMap() const {
-    return cascade_layer_map_;
+    return cascade_layer_map_.Get();
   }
-  const HeapVector<Member<CSSStyleSheet>>& GetStyleSheets() const {
-    return style_sheets_;
+  const ActiveStyleSheetVector& GetActiveStyleSheets() const {
+    return active_style_sheets_;
   }
 
   void AppendActiveStyleSheets(unsigned index, const ActiveStyleSheetVector&);
@@ -101,16 +102,12 @@ class CORE_EXPORT ScopedStyleResolver final
   void SetNeedsAppendAllSheets() { needs_append_all_sheets_ = true; }
   static void KeyframesRulesAdded(const TreeScope&);
   static Element& InvalidationRootForTreeScope(const TreeScope&);
-  void ClearSuperRuleset();
-  void RebuildSuperRuleset(const ActiveStyleSheetVector& new_style_sheets);
-  void AppendToSuperRuleset(const ActiveStyleSheet& new_sheet);
-  bool HasSuperRuleset() const { return super_rule_set_.Get(); }
 
   void Trace(Visitor*) const;
 
  private:
   template <class Func>
-  void ForAllStylesheets(const Func& func);
+  void ForAllStylesheets(ElementRuleCollector&, const Func& func);
 
   void AddFontFaceRules(const RuleSet&);
   void AddCounterStyleRules(const RuleSet&);
@@ -120,22 +117,32 @@ class CORE_EXPORT ScopedStyleResolver final
   bool KeyframeStyleShouldOverride(
       const StyleRuleKeyframes* new_rule,
       const StyleRuleKeyframes* existing_rule) const;
-  void AddPositionFallbackRules(const RuleSet&);
+  void AddPositionTryRules(const RuleSet&);
+  void AddFunctionRules(const RuleSet&);
 
   CounterStyleMap& EnsureCounterStyleMap();
 
+  void AddImplicitScopeTriggers(CSSStyleSheet&, const RuleSet&);
+  void AddImplicitScopeTrigger(Element&, const StyleScope&);
+  void RemoveImplicitScopeTriggers();
+  void RemoveImplicitScopeTriggers(CSSStyleSheet&, const RuleSet&);
+  void RemoveImplicitScopeTrigger(Element&, const StyleScope&);
+
   Member<TreeScope> scope_;
 
-  HeapVector<Member<CSSStyleSheet>> style_sheets_;
+  ActiveStyleSheetVector active_style_sheets_;
   MediaQueryResultFlags media_query_result_flags_;
 
   using KeyframesRuleMap =
       HeapHashMap<AtomicString, Member<StyleRuleKeyframes>>;
   KeyframesRuleMap keyframes_rule_map_;
 
-  using PositionFallbackRuleMap =
-      HeapHashMap<AtomicString, Member<StyleRulePositionFallback>>;
-  PositionFallbackRuleMap position_fallback_rule_map_;
+  using PositionTryRuleMap =
+      HeapHashMap<AtomicString, Member<StyleRulePositionTry>>;
+  PositionTryRuleMap position_try_rule_map_;
+
+  using FunctionRuleMap = HeapHashMap<String, Member<StyleRuleFunction>>;
+  FunctionRuleMap function_rule_map_;
 
   // Multiple entries are created pointing to the same
   // StyleRuleFontFeatureValues for each mentioned family name in the
@@ -146,21 +153,6 @@ class CORE_EXPORT ScopedStyleResolver final
 
   Member<CounterStyleMap> counter_style_map_;
   Member<CascadeLayerMap> cascade_layer_map_;
-
-  // We may choose to merge all of the active RuleSets for this scope
-  // into a superruleset, containing all of the rules. This can be cheaper
-  // to match against than doing each of them separately, since we get
-  // fewer hash table lookups and similar -- but it can also have a cost
-  // in terms of memory and time to build the superruleset. Currently,
-  // this is an all-or-nothing affair; if we have more than one active
-  // stylesheet, we merge them all into super_rule_set_. (Otherwise,
-  // it is nullptr.) This may change in the future.
-  //
-  // Use of superrulesets is gated on the CSSSuperRulesets Finch flag.
-  Member<RuleSet> super_rule_set_;
-
-  // See comment on LayerMap.
-  LayerMap super_rule_set_mapping_;
 
   bool has_unresolved_keyframes_rule_ = false;
   bool needs_append_all_sheets_ = false;

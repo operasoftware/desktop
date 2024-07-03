@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/functional/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -16,7 +17,6 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_request_loader.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value_wrapping.h"
-#include "third_party/blink/renderer/modules/indexeddb/web_idb_cursor.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
@@ -114,7 +114,7 @@ class IDBDatabaseGetAllResultSinkImpl
 
  private:
   mojo::Receiver<mojom::blink::IDBDatabaseGetAllResultSink> receiver_;
-  IDBRequestQueueItem* owner_;
+  raw_ptr<IDBRequestQueueItem> owner_;
   bool key_only_;
 
   WTF::Vector<mojom::blink::IDBReturnValuePtr> values_;
@@ -219,16 +219,17 @@ IDBRequestQueueItem::IDBRequestQueueItem(IDBRequest* request,
   }
 }
 
-IDBRequestQueueItem::IDBRequestQueueItem(IDBRequest* request,
-                                         std::unique_ptr<WebIDBCursor> cursor,
-                                         std::unique_ptr<IDBKey> key,
-                                         std::unique_ptr<IDBKey> primary_key,
-                                         std::unique_ptr<IDBValue> value,
-                                         base::OnceClosure on_result_ready)
+IDBRequestQueueItem::IDBRequestQueueItem(
+    IDBRequest* request,
+    mojo::PendingAssociatedRemote<mojom::blink::IDBCursor> pending_cursor,
+    std::unique_ptr<IDBKey> key,
+    std::unique_ptr<IDBKey> primary_key,
+    std::unique_ptr<IDBValue> value,
+    base::OnceClosure on_result_ready)
     : request_(request),
       key_(std::move(key)),
       primary_key_(std::move(primary_key)),
-      cursor_(std::move(cursor)),
+      pending_cursor_(std::move(pending_cursor)),
       on_result_ready_(std::move(on_result_ready)),
       response_type_(kCursorKeyPrimaryKeyValue) {
   DCHECK(on_result_ready_);
@@ -261,10 +262,10 @@ IDBRequestQueueItem::~IDBRequestQueueItem() {
 }
 
 void IDBRequestQueueItem::OnResultLoadComplete() {
-  DCHECK(!ready_);
+  CHECK(!ready_);
   ready_ = true;
 
-  DCHECK(on_result_ready_);
+  CHECK(on_result_ready_);
   std::move(on_result_ready_).Run();
 }
 
@@ -339,7 +340,7 @@ void IDBRequestQueueItem::SendResult() {
   DCHECK(!result_sent_);
   result_sent_ = true;
 #endif  // DCHECK_IS_ON()
-  DCHECK_EQ(request_->queue_item_, this);
+  CHECK_EQ(request_->queue_item_, this);
   request_->queue_item_ = nullptr;
 
   switch (response_type_) {
@@ -349,7 +350,7 @@ void IDBRequestQueueItem::SendResult() {
 
     case kCursorKeyPrimaryKeyValue:
       DCHECK_EQ(values_.size(), 1U);
-      request_->SendResultCursor(std::move(cursor_), std::move(key_),
+      request_->SendResultCursor(std::move(pending_cursor_), std::move(key_),
                                  std::move(primary_key_),
                                  std::move(values_.front()));
       break;

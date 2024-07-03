@@ -8,6 +8,8 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_ml_context_options.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
+#include "third_party/blink/renderer/modules/ml/buildflags.h"
+#include "third_party/blink/renderer/modules/ml/ml_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
@@ -52,45 +54,23 @@ void ML::Trace(Visitor* visitor) const {
   ScriptWrappable::Trace(visitor);
 }
 
-ScriptPromise ML::createContext(ScriptState* script_state,
-                                MLContextOptions* option,
-                                ExceptionState& exception_state) {
+ScriptPromise<MLContext> ML::createContext(ScriptState* script_state,
+                                           MLContextOptions* options,
+                                           ExceptionState& exception_state) {
+  ScopedMLTrace scoped_trace("ML::createContext");
   if (!script_state->ContextIsValid()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "Invalid script state");
-    return ScriptPromise();
+    return ScriptPromise<MLContext>();
   }
 
-  ScriptPromiseResolver* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver<MLContext>>(
       script_state, exception_state.GetContext());
 
   auto promise = resolver->Promise();
 
-  // Notice that currently, we just create the context in the renderer. In the
-  // future we may add backend query ability to check whether a context is
-  // supportable or not. At that time, this function will be truly asynced.
-  auto* ml_context = MakeGarbageCollected<MLContext>(
-      option->devicePreference(), option->powerPreference(),
-      option->modelFormat(), option->numThreads(), this);
-  resolver->Resolve(ml_context);
-
+  MLContext::ValidateAndCreate(resolver, options, this);
   return promise;
-}
-
-MLContext* ML::createContextSync(ScriptState* script_state,
-                                 MLContextOptions* options,
-                                 ExceptionState& exception_state) {
-  if (!script_state->ContextIsValid()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "Invalid script state");
-    return nullptr;
-  }
-
-  // TODO(crbug/1405354): Query browser about whether the given context is
-  // supported.
-  return MakeGarbageCollected<MLContext>(
-      options->devicePreference(), options->powerPreference(),
-      options->modelFormat(), options->numThreads(), this);
 }
 
 void ML::EnsureModelLoaderServiceConnection(ScriptState* script_state) {

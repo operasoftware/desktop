@@ -10,15 +10,9 @@
 
 namespace blink {
 
-void URLLoaderThrottle::Delegate::SetPriority(net::RequestPriority priority) {}
-void URLLoaderThrottle::Delegate::UpdateDeferredRequestHeaders(
-    const net::HttpRequestHeaders& modified_request_headers,
-    const net::HttpRequestHeaders& modified_cors_exempt_request_headers) {}
 void URLLoaderThrottle::Delegate::UpdateDeferredResponseHead(
     network::mojom::URLResponseHeadPtr new_response_head,
     mojo::ScopedDataPipeConsumerHandle body) {}
-void URLLoaderThrottle::Delegate::PauseReadingBodyFromNet() {}
-void URLLoaderThrottle::Delegate::ResumeReadingBodyFromNet() {}
 
 void URLLoaderThrottle::Delegate::InterceptResponse(
     mojo::PendingRemote<network::mojom::URLLoader> new_loader,
@@ -87,10 +81,6 @@ void URLLoaderThrottle::BeforeWillRedirectRequest(
 void URLLoaderThrottle::WillOnCompleteWithError(
     const network::URLLoaderCompletionStatus& status,
     bool* defer) {}
-
-bool URLLoaderThrottle::makes_unsafe_redirect() {
-  return false;
-}
 
 URLLoaderThrottle::URLLoaderThrottle() {}
 

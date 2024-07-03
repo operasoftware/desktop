@@ -35,21 +35,6 @@ Font CreateVerticalUprightTestFont(const AtomicString& family_name,
 
 class FontTest : public FontTestBase {
  public:
-  Vector<int> GetExpandedRange(const String& text, bool ltr, int from, int to) {
-    FontDescription::VariantLigatures ligatures(
-        FontDescription::kEnabledLigaturesState);
-    Font font = CreateTestFont(
-        AtomicString("roboto"),
-        test::PlatformTestDataPath("third_party/Roboto/roboto-regular.woff2"),
-        100, &ligatures);
-
-    TextRun text_run(text, ltr ? TextDirection::kLtr : TextDirection::kRtl,
-                     false);
-
-    font.ExpandRangeToIncludePartialGlyphs(text_run, &from, &to);
-    return Vector<int>({from, to});
-  }
-
   Font CreateFontWithOrientation(const Font& base_font,
                                  FontOrientation orientation) {
     FontDescription font_description = base_font.GetFontDescription();
@@ -88,7 +73,7 @@ TEST_F(FontTest, IdeographicFullWidthAhem) {
                              test::PlatformTestDataPath("Ahem.woff"), 16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
-  EXPECT_FALSE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
+  EXPECT_FALSE(font_data->IdeographicInlineSize().has_value());
 }
 
 // These tests use third_party/blink/web_tests
@@ -99,8 +84,8 @@ TEST_F(FontTest, IdeographicFullWidthCjkFull) {
       blink::test::BlinkWebTestsFontsTestDataPath("mplus-1p-regular.woff"), 16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
-  EXPECT_TRUE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
-  EXPECT_EQ(*font_data->GetFontMetrics().IdeographicFullWidth(), 16);
+  EXPECT_TRUE(font_data->IdeographicInlineSize().has_value());
+  EXPECT_EQ(*font_data->IdeographicInlineSize(), 16);
 }
 
 TEST_F(FontTest, IdeographicFullWidthCjkNarrow) {
@@ -110,8 +95,8 @@ TEST_F(FontTest, IdeographicFullWidthCjkNarrow) {
                              16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
-  EXPECT_TRUE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
-  EXPECT_EQ(*font_data->GetFontMetrics().IdeographicFullWidth(), 8);
+  EXPECT_TRUE(font_data->IdeographicInlineSize().has_value());
+  EXPECT_EQ(*font_data->IdeographicInlineSize(), 8);
 }
 
 // A font that does not have the CJK "water" glyph.
@@ -120,7 +105,7 @@ TEST_F(FontTest, IdeographicFullWidthUprightAhem) {
                              test::PlatformTestDataPath("Ahem.woff"), 16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
-  EXPECT_FALSE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
+  EXPECT_FALSE(font_data->IdeographicInlineSize().has_value());
 }
 
 // A Japanese font, with the "water" glyph, but the `vmtx` table is missing.
@@ -131,8 +116,8 @@ TEST_F(FontTest, IdeographicFullWidthUprightCjkNoVmtx) {
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
   // If the `vmtx` table is missing, the vertical advance should be synthesized.
-  ASSERT_TRUE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
-  EXPECT_EQ(*font_data->GetFontMetrics().IdeographicFullWidth(),
+  ASSERT_TRUE(font_data->IdeographicInlineSize().has_value());
+  EXPECT_EQ(*font_data->IdeographicInlineSize(),
             font_data->GetFontMetrics().Height());
 }
 
@@ -145,8 +130,8 @@ TEST_F(FontTest, IdeographicFullWidthUprightCjkVmtx) {
                                     16);
   const SimpleFontData* font_data = font.PrimaryFont();
   ASSERT_TRUE(font_data);
-  ASSERT_TRUE(font_data->GetFontMetrics().IdeographicFullWidth().has_value());
-  EXPECT_EQ(*font_data->GetFontMetrics().IdeographicFullWidth(), 16);
+  ASSERT_TRUE(font_data->IdeographicInlineSize().has_value());
+  EXPECT_EQ(*font_data->IdeographicInlineSize(), 16);
 }
 #endif  // !defined(OPERA_DESKTOP)
 
@@ -180,24 +165,6 @@ TEST_F(FontTest, TextIntercepts) {
   for (auto text_intercept : text_intercepts) {
     EXPECT_GT(text_intercept.end_, text_intercept.begin_);
   }
-}
-
-TEST_F(FontTest, ExpandRange) {
-  // "ffi" is a ligature, therefore a single glyph. Any range that includes one
-  // of the letters must be expanded to all of them.
-  EXPECT_EQ(GetExpandedRange("efficient", true, 0, 1), Vector<int>({0, 1}));
-  EXPECT_EQ(GetExpandedRange("efficient", true, 0, 2), Vector<int>({0, 4}));
-  EXPECT_EQ(GetExpandedRange("efficient", true, 3, 4), Vector<int>({1, 4}));
-  EXPECT_EQ(GetExpandedRange("efficient", true, 4, 6), Vector<int>({4, 6}));
-  EXPECT_EQ(GetExpandedRange("efficient", true, 6, 7), Vector<int>({6, 7}));
-  EXPECT_EQ(GetExpandedRange("efficient", true, 0, 9), Vector<int>({0, 9}));
-
-  EXPECT_EQ(GetExpandedRange("tneiciffe", false, 0, 1), Vector<int>({0, 1}));
-  EXPECT_EQ(GetExpandedRange("tneiciffe", false, 0, 2), Vector<int>({0, 2}));
-  EXPECT_EQ(GetExpandedRange("tneiciffe", false, 3, 4), Vector<int>({3, 4}));
-  EXPECT_EQ(GetExpandedRange("tneiciffe", false, 4, 6), Vector<int>({4, 8}));
-  EXPECT_EQ(GetExpandedRange("tneiciffe", false, 6, 7), Vector<int>({5, 8}));
-  EXPECT_EQ(GetExpandedRange("tneiciffe", false, 0, 9), Vector<int>({0, 9}));
 }
 
 TEST_F(FontTest, TabWidthZero) {

@@ -37,6 +37,7 @@
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -157,7 +158,7 @@ class DisplayLockContextTest : public testing::Test,
   }
 
   void UnlockImmediate(DisplayLockContext* context) {
-    context->SetRequestedState(EContentVisibility::kVisible, g_null_atom);
+    context->SetRequestedState(EContentVisibility::kVisible);
   }
 
   mojom::blink::FindOptionsPtr FindOptions(bool new_session = true) {
@@ -194,6 +195,8 @@ class DisplayLockContextTest : public testing::Test,
   const int FAKE_FIND_ID = 1;
 
  private:
+  test::TaskEnvironment task_environment;
+
   frame_test_helpers::WebViewHelper web_view_helper_;
 };
 
@@ -853,9 +856,8 @@ TEST_P(DisplayLockContextTest, LockedElementAndDescendantsAreNotFocusable) {
   ASSERT_TRUE(GetDocument()
                   .getElementById(AtomicString("textfield"))
                   ->IsKeyboardFocusable());
-  ASSERT_TRUE(GetDocument()
-                  .getElementById(AtomicString("textfield"))
-                  ->IsMouseFocusable());
+  ASSERT_TRUE(
+      GetDocument().getElementById(AtomicString("textfield"))->IsFocusable());
   ASSERT_TRUE(
       GetDocument().getElementById(AtomicString("textfield"))->IsFocusable());
   EXPECT_EQ(
@@ -883,9 +885,8 @@ TEST_P(DisplayLockContextTest, LockedElementAndDescendantsAreNotFocusable) {
   EXPECT_FALSE(GetDocument()
                    .getElementById(AtomicString("textfield"))
                    ->IsKeyboardFocusable());
-  EXPECT_FALSE(GetDocument()
-                   .getElementById(AtomicString("textfield"))
-                   ->IsMouseFocusable());
+  EXPECT_FALSE(
+      GetDocument().getElementById(AtomicString("textfield"))->IsFocusable());
   EXPECT_FALSE(
       GetDocument().getElementById(AtomicString("textfield"))->IsFocusable());
 
@@ -911,9 +912,8 @@ TEST_P(DisplayLockContextTest, LockedElementAndDescendantsAreNotFocusable) {
   EXPECT_TRUE(GetDocument()
                   .getElementById(AtomicString("textfield"))
                   ->IsKeyboardFocusable());
-  EXPECT_TRUE(GetDocument()
-                  .getElementById(AtomicString("textfield"))
-                  ->IsMouseFocusable());
+  EXPECT_TRUE(
+      GetDocument().getElementById(AtomicString("textfield"))->IsFocusable());
   EXPECT_TRUE(
       GetDocument().getElementById(AtomicString("textfield"))->IsFocusable());
 
@@ -942,7 +942,7 @@ TEST_P(DisplayLockContextTest, DisplayLockPreventsActivation) {
       *slotted, DisplayLockActivationReason::kAny));
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML(
       "<div id='container' style='contain:style layout "
       "paint;'><slot></slot></div>");
@@ -1045,14 +1045,13 @@ TEST_P(DisplayLockContextTest,
   auto* host = GetDocument().getElementById(AtomicString("shadowHost"));
   auto* text_field = GetDocument().getElementById(AtomicString("textfield"));
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML(
       "<div id='container' style='contain:style layout "
       "paint;'><slot></slot></div>");
 
   UpdateAllLifecyclePhasesForTest();
   ASSERT_TRUE(text_field->IsKeyboardFocusable());
-  ASSERT_TRUE(text_field->IsMouseFocusable());
   ASSERT_TRUE(text_field->IsFocusable());
 
   auto* element = shadow_root.getElementById(AtomicString("container"));
@@ -1071,7 +1070,6 @@ TEST_P(DisplayLockContextTest,
 
   // The input should not be focusable now.
   EXPECT_FALSE(text_field->IsKeyboardFocusable());
-  EXPECT_FALSE(text_field->IsMouseFocusable());
   EXPECT_FALSE(text_field->IsFocusable());
 
   // Calling explicit focus() should also not focus the element.
@@ -2047,7 +2045,7 @@ class DisplayLockContextRenderingTest
     return context->needs_compositing_dependent_flag_update_;
   }
   void LockImmediate(DisplayLockContext* context) {
-    context->SetRequestedState(EContentVisibility::kHidden, g_null_atom);
+    context->SetRequestedState(EContentVisibility::kHidden);
   }
   void RunStartOfLifecycleTasks() {
     auto start_of_lifecycle_tasks =
@@ -2149,8 +2147,9 @@ TEST_P(DisplayLockContextRenderingTest, FloatChildLocked) {
   auto* lockable = GetDocument().getElementById(AtomicString("lockable"));
   auto* lockable_box = lockable->GetLayoutBox();
   auto* floating = GetDocument().getElementById(AtomicString("floating"));
-  EXPECT_EQ(LayoutRect(0, 0, 200, 100), lockable_box->VisualOverflowRect());
-  EXPECT_EQ(LayoutRect(0, 0, 200, 100), lockable_box->LayoutOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 100), lockable_box->VisualOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 100),
+            lockable_box->ScrollableOverflowRect());
 
   lockable->classList().Add(AtomicString("hidden"));
   UpdateAllLifecyclePhasesForTest();
@@ -2160,8 +2159,9 @@ TEST_P(DisplayLockContextRenderingTest, FloatChildLocked) {
   ASSERT_TRUE(lockable->GetDisplayLockContext());
   EXPECT_TRUE(DescendantDependentFlagUpdateWasBlocked(
       lockable->GetDisplayLockContext()));
-  EXPECT_EQ(LayoutRect(0, 0, 200, 50), lockable_box->VisualOverflowRect());
-  EXPECT_EQ(LayoutRect(0, 0, 200, 50), lockable_box->LayoutOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 50), lockable_box->VisualOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 50),
+            lockable_box->ScrollableOverflowRect());
 
   floating->setAttribute(html_names::kStyleAttr, AtomicString("height: 200px"));
   // The following should not crash/DCHECK.
@@ -2170,15 +2170,17 @@ TEST_P(DisplayLockContextRenderingTest, FloatChildLocked) {
   ASSERT_TRUE(lockable->GetDisplayLockContext());
   EXPECT_TRUE(DescendantDependentFlagUpdateWasBlocked(
       lockable->GetDisplayLockContext()));
-  EXPECT_EQ(LayoutRect(0, 0, 200, 50), lockable_box->VisualOverflowRect());
-  EXPECT_EQ(LayoutRect(0, 0, 200, 50), lockable_box->LayoutOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 50), lockable_box->VisualOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 50),
+            lockable_box->ScrollableOverflowRect());
 
   // After unlocking, we should process the pending visual overflow recalc.
   lockable->classList().Remove(AtomicString("hidden"));
   UpdateAllLifecyclePhasesForTest();
 
-  EXPECT_EQ(LayoutRect(0, 0, 200, 200), lockable_box->VisualOverflowRect());
-  EXPECT_EQ(LayoutRect(0, 0, 200, 200), lockable_box->LayoutOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 200), lockable_box->VisualOverflowRect());
+  EXPECT_EQ(PhysicalRect(0, 0, 200, 200),
+            lockable_box->ScrollableOverflowRect());
 }
 
 TEST_P(DisplayLockContextRenderingTest,
@@ -2507,11 +2509,11 @@ TEST_P(DisplayLockContextRenderingTest,
   // layout.
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   // Verify lock state.
   auto* inner_context = inner_element->GetDisplayLockContext();
@@ -2531,11 +2533,11 @@ TEST_P(DisplayLockContextRenderingTest,
 
   // Everything should be layout clean.
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   // Inner context should not be observing the lifecycle.
   EXPECT_FALSE(IsObservingLifecycle(inner_context));
@@ -2548,11 +2550,11 @@ TEST_P(DisplayLockContextRenderingTest,
   for (int i = 0; i < 3; ++i) {
     // It shouldn't change the fact that we're layout clean.
     EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-    EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+    EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
     EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-    EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+    EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
     EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-    EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+    EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
     // Because we skipped hiding the element, inner_context should be observing
     // lifecycle.
@@ -2577,11 +2579,11 @@ TEST_P(DisplayLockContextRenderingTest,
 
   // Everything should be layout clean.
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   // Process visibility changes.
   RunStartOfLifecycleTasks();
@@ -2594,11 +2596,11 @@ TEST_P(DisplayLockContextRenderingTest,
 
   // Everything should be layout clean.
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 }
 
 TEST_P(DisplayLockContextRenderingTest, NestedLockDoesHideWhenItIsOffscreen) {
@@ -2628,11 +2630,11 @@ TEST_P(DisplayLockContextRenderingTest, NestedLockDoesHideWhenItIsOffscreen) {
   // layout.
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   // Verify lock state.
   auto* inner_context = inner_element->GetDisplayLockContext();
@@ -2652,11 +2654,11 @@ TEST_P(DisplayLockContextRenderingTest, NestedLockDoesHideWhenItIsOffscreen) {
 
   // Everything should be layout clean.
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   // Inner context should not be observing the lifecycle.
   EXPECT_FALSE(IsObservingLifecycle(inner_context));
@@ -2666,11 +2668,11 @@ TEST_P(DisplayLockContextRenderingTest, NestedLockDoesHideWhenItIsOffscreen) {
 
   // It shouldn't change the fact that we're layout clean.
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   // Let future spacer become a real spacer!
   GetDocument()
@@ -2699,11 +2701,11 @@ TEST_P(DisplayLockContextRenderingTest, NestedLockDoesHideWhenItIsOffscreen) {
 
   // Everything should be layout clean.
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   // Process any visibility changes.
   RunStartOfLifecycleTasks();
@@ -2717,11 +2719,11 @@ TEST_P(DisplayLockContextRenderingTest, NestedLockDoesHideWhenItIsOffscreen) {
 
   // Everything should be layout clean.
   EXPECT_FALSE(outer_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(outer_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(unrelated_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(unrelated_element->GetLayoutObject()->SelfNeedsFullLayout());
   EXPECT_FALSE(inner_element->GetLayoutObject()->NeedsLayout());
-  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(inner_element->GetLayoutObject()->SelfNeedsFullLayout());
 
   UpdateAllLifecyclePhasesForTest();
 
@@ -3182,11 +3184,11 @@ TEST_P(DisplayLockContextRenderingTest, FirstAutoFramePaintsInViewport) {
   EXPECT_FALSE(visible->GetDisplayLockContext()->IsLocked());
   EXPECT_TRUE(hidden->GetDisplayLockContext()->IsLocked());
 
-  EXPECT_FALSE(visible->GetLayoutObject()->SelfNeedsLayout());
-  EXPECT_FALSE(hidden->GetLayoutObject()->SelfNeedsLayout());
+  EXPECT_FALSE(visible->GetLayoutObject()->SelfNeedsFullLayout());
+  EXPECT_FALSE(hidden->GetLayoutObject()->SelfNeedsFullLayout());
 
-  auto* visible_rect = visible->getBoundingClientRect();
-  auto* hidden_rect = hidden->getBoundingClientRect();
+  auto* visible_rect = visible->GetBoundingClientRect();
+  auto* hidden_rect = hidden->GetBoundingClientRect();
 
   EXPECT_FLOAT_EQ(visible_rect->height(), 100);
   EXPECT_FLOAT_EQ(hidden_rect->height(), 200);
@@ -3354,10 +3356,10 @@ TEST_P(DisplayLockContextTest, ConnectedElementDefersSubtreeChecks) {
   range->setEnd(GetDocument().getElementById(AtomicString("s2"))->firstChild(),
                 5);
 
-  Selection().SetSelectionAndEndTyping(
-      SelectionInDOMTree::Builder()
-          .SetBaseAndExtent(EphemeralRange(range))
-          .Build());
+  Selection().SetSelection(SelectionInDOMTree::Builder()
+                               .SetBaseAndExtent(EphemeralRange(range))
+                               .Build(),
+                           SetSelectionOptions());
 
   UpdateAllLifecyclePhasesForTest();
 
@@ -3374,9 +3376,9 @@ TEST_P(DisplayLockContextTest, ConnectedElementDefersSubtreeChecks) {
 }
 
 TEST_P(DisplayLockContextTest, BlockedReattachOfSlotted) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div id="host">
-      <template shadowroot="open">
+      <template shadowrootmode="open">
         <style>
           slot { display: block; }
           .locked {
@@ -3403,12 +3405,12 @@ TEST_P(DisplayLockContextTest, BlockedReattachOfSlotted) {
 }
 
 TEST_P(DisplayLockContextTest, BlockedReattachOfShadowTree) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <style>
       .locked { content-visibility: hidden; }
     </style>
     <div id="host">
-      <template shadowroot="open">
+      <template shadowrootmode="open">
         <span id="span"></span>
       </template>
     </div>
@@ -3504,7 +3506,7 @@ TEST_P(DisplayLockContextTest, ReattachPropagationBlockedByDisplayLock) {
   auto* parent = GetDocument().getElementById(AtomicString("parent"));
 
   // Force update all layout objects
-  grandchild->getBoundingClientRect();
+  grandchild->GetBoundingClientRect();
 
   ASSERT_TRUE(locked->GetLayoutObject());
   ASSERT_TRUE(grandchild->GetLayoutObject());

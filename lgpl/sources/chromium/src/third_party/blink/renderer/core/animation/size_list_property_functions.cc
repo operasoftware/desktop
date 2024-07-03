@@ -13,7 +13,7 @@ static const FillLayer* GetFillLayerForSize(const CSSProperty& property,
   switch (property.PropertyID()) {
     case CSSPropertyID::kBackgroundSize:
       return &style.BackgroundLayers();
-    case CSSPropertyID::kWebkitMaskSize:
+    case CSSPropertyID::kMaskSize:
       return &style.MaskLayers();
     default:
       NOTREACHED();
@@ -26,7 +26,7 @@ static FillLayer* AccessFillLayerForSize(const CSSProperty& property,
   switch (property.PropertyID()) {
     case CSSPropertyID::kBackgroundSize:
       return &builder.AccessBackgroundLayers();
-    case CSSPropertyID::kWebkitMaskSize:
+    case CSSPropertyID::kMaskSize:
       return &builder.AccessMaskLayers();
     default:
       NOTREACHED();

@@ -22,6 +22,7 @@
  * filter for showing textual video frame information
  */
 
+#include <ctype.h>
 #include <inttypes.h>
 
 #include "libavutil/bswap.h"
@@ -52,6 +53,7 @@
 typedef struct ShowInfoContext {
     const AVClass *class;
     int calculate_checksums;
+    int udu_sei_as_ascii;
 } ShowInfoContext;
 
 #define OFFSET(x) offsetof(ShowInfoContext, x)
@@ -59,6 +61,8 @@ typedef struct ShowInfoContext {
 
 static const AVOption showinfo_options[] = {
     { "checksum", "calculate checksums", OFFSET(calculate_checksums), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, VF },
+    { "udu_sei_as_ascii", "try to print user data unregistered SEI as ascii character when possible",
+        OFFSET(udu_sei_as_ascii), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VF },
     { NULL }
 };
 
@@ -418,6 +422,7 @@ static void dump_video_enc_params(AVFilterContext *ctx, const AVFrameSideData *s
 static void dump_sei_unregistered_metadata(AVFilterContext *ctx, const AVFrameSideData *sd)
 {
     const uint8_t *user_data = sd->data;
+    ShowInfoContext *s = ctx->priv;
 
     if (sd->size < AV_UUID_LEN) {
         av_log(ctx, AV_LOG_ERROR, "invalid data(%"SIZE_SPECIFIER" < "
@@ -428,8 +433,13 @@ static void dump_sei_unregistered_metadata(AVFilterContext *ctx, const AVFrameSi
     av_log(ctx, AV_LOG_INFO, "UUID=" AV_PRI_UUID "\n", AV_UUID_ARG(user_data));
 
     av_log(ctx, AV_LOG_INFO, "User Data=");
-    for (size_t i = 16; i < sd->size; i++)
-        av_log(ctx, AV_LOG_INFO, "%02x", user_data[i]);
+    for (size_t i = 16; i < sd->size; i++) {
+        const char *format = "%02x";
+
+        if (s->udu_sei_as_ascii)
+            format = isprint(user_data[i]) ? "%c" : "\\x%02x";
+        av_log(ctx, AV_LOG_INFO, format, user_data[i]);
+    }
     av_log(ctx, AV_LOG_INFO, "\n");
 }
 
@@ -452,8 +462,46 @@ static void dump_sei_film_grain_params_metadata(AVFilterContext *ctx, const AVFr
 
     switch (fgp->type) {
     case AV_FILM_GRAIN_PARAMS_NONE:
-    case AV_FILM_GRAIN_PARAMS_AV1:
-        return;
+        break;
+    case AV_FILM_GRAIN_PARAMS_AV1: {
+        const AVFilmGrainAOMParams *aom = &fgp->codec.aom;
+        const int num_ar_coeffs_y = 2 * aom->ar_coeff_lag * (aom->ar_coeff_lag + 1);
+        const int num_ar_coeffs_uv = num_ar_coeffs_y + !!aom->num_y_points;
+        av_log(ctx, AV_LOG_INFO, "y_points={ ");
+        for (int i = 0; i < aom->num_y_points; i++)
+            av_log(ctx, AV_LOG_INFO, "(%d,%d) ", aom->y_points[i][0], aom->y_points[i][1]);
+        av_log(ctx, AV_LOG_INFO, "}; chroma_scaling_from_luma=%d; ", aom->chroma_scaling_from_luma);
+        for (int uv = 0; uv < 2; uv++) {
+            av_log(ctx, AV_LOG_INFO, "uv_points[%d]={ ", uv);
+            for (int i = 0; i < aom->num_uv_points[uv]; i++)
+                av_log(ctx, AV_LOG_INFO, "(%d,%d) ", aom->uv_points[uv][i][0], aom->uv_points[uv][i][1]);
+            av_log(ctx, AV_LOG_INFO, "}; ");
+        }
+        av_log(ctx, AV_LOG_INFO, "scaling_shift=%d; ", aom->scaling_shift);
+        av_log(ctx, AV_LOG_INFO, "ar_coeff_lag=%d; ", aom->ar_coeff_lag);
+        if (num_ar_coeffs_y) {
+            av_log(ctx, AV_LOG_INFO, "ar_coeffs_y={ ");
+            for (int i = 0; i < num_ar_coeffs_y; i++)
+                av_log(ctx, AV_LOG_INFO, "%d ", aom->ar_coeffs_y[i]);
+            av_log(ctx, AV_LOG_INFO, "}; ");
+        }
+        for (int uv = 0; num_ar_coeffs_uv && uv < 2; uv++) {
+            av_log(ctx, AV_LOG_INFO, "ar_coeffs_uv[%d]={ ", uv);
+            for (int i = 0; i < num_ar_coeffs_uv; i++)
+                av_log(ctx, AV_LOG_INFO, "%d ", aom->ar_coeffs_uv[uv][i]);
+            av_log(ctx, AV_LOG_INFO, "}; ");
+        }
+        av_log(ctx, AV_LOG_INFO, "ar_coeff_shift=%d; ", aom->ar_coeff_shift);
+        av_log(ctx, AV_LOG_INFO, "grain_scale_shift=%d; ", aom->grain_scale_shift);
+        for (int uv = 0; uv < 2; uv++) {
+            av_log(ctx, AV_LOG_INFO, "uv_mult[%d] = %d; ", uv, aom->uv_mult[uv]);
+            av_log(ctx, AV_LOG_INFO, "uv_mult_luma[%d] = %d; ", uv, aom->uv_mult_luma[uv]);
+            av_log(ctx, AV_LOG_INFO, "uv_offset[%d] = %d; ", uv, aom->uv_offset[uv]);
+        }
+        av_log(ctx, AV_LOG_INFO, "overlap_flag=%d; ", aom->overlap_flag);
+        av_log(ctx, AV_LOG_INFO, "limit_output_range=%d; ", aom->limit_output_range);
+        break;
+    }
     case AV_FILM_GRAIN_PARAMS_H274: {
         const AVFilmGrainH274Params *h274 = &fgp->codec.h274;
         const char *color_range_str     = av_color_range_name(h274->color_range);
@@ -715,11 +763,11 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     av_log(ctx, AV_LOG_INFO,
            "n:%4"PRId64" pts:%7s pts_time:%-7s duration:%7"PRId64
            " duration_time:%-7s "
-           "fmt:%s sar:%d/%d s:%dx%d i:%c iskey:%d type:%c ",
+           "fmt:%s cl:%s sar:%d/%d s:%dx%d i:%c iskey:%d type:%c ",
            inlink->frame_count_out,
            av_ts2str(frame->pts), av_ts2timestr(frame->pts, &inlink->time_base),
            frame->duration, av_ts2timestr(frame->duration, &inlink->time_base),
-           desc->name,
+           desc->name, av_chroma_location_name(frame->chroma_location),
            frame->sample_aspect_ratio.num, frame->sample_aspect_ratio.den,
            frame->width, frame->height,
            !(frame->flags & AV_FRAME_FLAG_INTERLACED)     ? 'P' :         /* Progressive  */

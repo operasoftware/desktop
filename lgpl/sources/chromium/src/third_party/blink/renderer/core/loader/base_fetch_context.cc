@@ -84,14 +84,15 @@ void SetHttpHeader(network::mojom::blink::WebClientHintsType hints_type,
 
 namespace blink {
 
-absl::optional<ResourceRequestBlockedReason> BaseFetchContext::CanRequest(
+std::optional<ResourceRequestBlockedReason> BaseFetchContext::CanRequest(
     ResourceType type,
     const ResourceRequest& resource_request,
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
-    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info) const {
-  absl::optional<ResourceRequestBlockedReason> blocked_reason =
+    base::optional_ref<const ResourceRequest::RedirectInfo> redirect_info)
+    const {
+  std::optional<ResourceRequestBlockedReason> blocked_reason =
       CanRequestInternal(type, resource_request, url, options,
                          reporting_disposition, redirect_info);
   if (blocked_reason &&
@@ -102,14 +103,15 @@ absl::optional<ResourceRequestBlockedReason> BaseFetchContext::CanRequest(
   return blocked_reason;
 }
 
-absl::optional<ResourceRequestBlockedReason>
+std::optional<ResourceRequestBlockedReason>
 BaseFetchContext::CanRequestBasedOnSubresourceFilterOnly(
     ResourceType type,
     const ResourceRequest& resource_request,
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
-    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info) const {
+    base::optional_ref<const ResourceRequest::RedirectInfo> redirect_info)
+    const {
   auto* subresource_filter = GetSubresourceFilter();
   if (subresource_filter &&
       !subresource_filter->AllowLoad(url, resource_request.GetRequestContext(),
@@ -122,32 +124,35 @@ BaseFetchContext::CanRequestBasedOnSubresourceFilterOnly(
     return ResourceRequestBlockedReason::kSubresourceFilter;
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool BaseFetchContext::CalculateIfAdSubresource(
     const ResourceRequestHead& request,
-    const absl::optional<KURL>& alias_url,
+    base::optional_ref<const KURL> alias_url,
     ResourceType type,
     const FetchInitiatorInfo& initiator_info) {
   // A derived class should override this if they have more signals than just
   // the SubresourceFilter.
   SubresourceFilter* filter = GetSubresourceFilter();
-  const KURL& url = alias_url ? alias_url.value() : request.Url();
+  const KURL& url = alias_url.has_value() ? alias_url.value() : request.Url();
 
   return request.IsAdResource() ||
          (filter && filter->IsAdResource(url, request.GetRequestContext()));
 }
 
+// TODO(https://crbug.com/1469830) Refactor the strings into some sort of
+// context object
 void BaseFetchContext::AddClientHintsIfNecessary(
     const ClientHintsPreferences& hints_preferences,
     const url::Origin& resource_origin,
     bool is_1p_origin,
-    absl::optional<UserAgentMetadata> ua,
+    std::optional<UserAgentMetadata> ua,
     const PermissionsPolicy* policy,
-    const absl::optional<ClientHintImageInfo>& image_info,
-    const absl::optional<WTF::AtomicString>& prefers_color_scheme,
-    const absl::optional<WTF::AtomicString>& prefers_reduced_motion,
+    base::optional_ref<const ClientHintImageInfo> image_info,
+    base::optional_ref<const WTF::AtomicString> prefers_color_scheme,
+    base::optional_ref<const WTF::AtomicString> prefers_reduced_motion,
+    base::optional_ref<const WTF::AtomicString> prefers_reduced_transparency,
     ResourceRequest& request) {
   // If the feature is enabled, then client hints are allowed only on secure
   // URLs.
@@ -163,7 +168,7 @@ void BaseFetchContext::AddClientHintsIfNecessary(
   // specifying accomponying client hints, in which case we disable sending
   // them.
   using network::mojom::blink::WebClientHintsType;
-  if (RuntimeEnabledFeatures::UserAgentClientHintEnabled() && ua) {
+  if (ua) {
     // ShouldSendClientHint is called to make sure UA is controlled by
     // Permissions Policy.
     if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
@@ -210,7 +215,7 @@ void BaseFetchContext::AddClientHintsIfNecessary(
   }
 
   // These hints only make sense if the image info is available
-  if (image_info) {
+  if (image_info.has_value()) {
     if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
                              WebClientHintsType::kDpr_DEPRECATED,
                              hints_preferences)) {
@@ -282,7 +287,7 @@ void BaseFetchContext::AddClientHintsIfNecessary(
   if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
                            WebClientHintsType::kRtt_DEPRECATED,
                            hints_preferences)) {
-    absl::optional<base::TimeDelta> http_rtt =
+    std::optional<base::TimeDelta> http_rtt =
         GetNetworkStateNotifier().GetWebHoldbackHttpRtt();
     if (!http_rtt) {
       http_rtt = GetNetworkStateNotifier().HttpRtt();
@@ -297,7 +302,7 @@ void BaseFetchContext::AddClientHintsIfNecessary(
   if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
                            WebClientHintsType::kDownlink_DEPRECATED,
                            hints_preferences)) {
-    absl::optional<double> throughput_mbps =
+    std::optional<double> throughput_mbps =
         GetNetworkStateNotifier().GetWebHoldbackDownlinkThroughputMbps();
     if (!throughput_mbps) {
       throughput_mbps = GetNetworkStateNotifier().DownlinkThroughputMbps();
@@ -312,7 +317,7 @@ void BaseFetchContext::AddClientHintsIfNecessary(
   if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
                            WebClientHintsType::kEct_DEPRECATED,
                            hints_preferences)) {
-    absl::optional<WebEffectiveConnectionType> holdback_ect =
+    std::optional<WebEffectiveConnectionType> holdback_ect =
         GetNetworkStateNotifier().GetWebHoldbackEffectiveType();
     if (!holdback_ect)
       holdback_ect = GetNetworkStateNotifier().EffectiveType();
@@ -325,7 +330,7 @@ void BaseFetchContext::AddClientHintsIfNecessary(
   }
 
   // Only send User Agent hints if the info is available
-  if (RuntimeEnabledFeatures::UserAgentClientHintEnabled() && ua) {
+  if (ua) {
     if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
                              WebClientHintsType::kUAArch, hints_preferences)) {
       SetHttpHeader(WebClientHintsType::kUAArch,
@@ -382,17 +387,17 @@ void BaseFetchContext::AddClientHintsIfNecessary(
 
     if (ShouldSendClientHint(
             policy, resource_origin, is_1p_origin,
-            network::mojom::blink::WebClientHintsType::kUAFormFactor,
+            network::mojom::blink::WebClientHintsType::kUAFormFactors,
             hints_preferences)) {
-      SetHttpHeader(WebClientHintsType::kUAFormFactor,
-                    SerializeStringHeader(ua->form_factor), request);
+      SetHttpHeader(WebClientHintsType::kUAFormFactors,
+                    AtomicString(ua->SerializeFormFactors().c_str()), request);
     }
   }
 
   if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
                            WebClientHintsType::kPrefersColorScheme,
                            hints_preferences) &&
-      prefers_color_scheme) {
+      prefers_color_scheme.has_value()) {
     SetHttpHeader(WebClientHintsType::kPrefersColorScheme,
                   prefers_color_scheme.value(), request);
   }
@@ -407,9 +412,17 @@ void BaseFetchContext::AddClientHintsIfNecessary(
   if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
                            WebClientHintsType::kPrefersReducedMotion,
                            hints_preferences) &&
-      prefers_reduced_motion) {
+      prefers_reduced_motion.has_value()) {
     SetHttpHeader(WebClientHintsType::kPrefersReducedMotion,
                   prefers_reduced_motion.value(), request);
+  }
+
+  if (ShouldSendClientHint(policy, resource_origin, is_1p_origin,
+                           WebClientHintsType::kPrefersReducedTransparency,
+                           hints_preferences) &&
+      prefers_reduced_transparency.has_value()) {
+    SetHttpHeader(WebClientHintsType::kPrefersReducedTransparency,
+                  prefers_reduced_transparency.value(), request);
   }
 }
 
@@ -435,7 +448,7 @@ void BaseFetchContext::PrintAccessDeniedMessage(const KURL& url) const {
       mojom::ConsoleMessageLevel::kError, message));
 }
 
-absl::optional<ResourceRequestBlockedReason>
+std::optional<ResourceRequestBlockedReason>
 BaseFetchContext::CheckCSPForRequest(
     mojom::blink::RequestContextType request_context,
     network::mojom::RequestDestination request_destination,
@@ -450,7 +463,7 @@ BaseFetchContext::CheckCSPForRequest(
       ContentSecurityPolicy::CheckHeaderType::kCheckReportOnly);
 }
 
-absl::optional<ResourceRequestBlockedReason>
+std::optional<ResourceRequestBlockedReason>
 BaseFetchContext::CheckCSPForRequestInternal(
     mojom::blink::RequestContextType request_context,
     network::mojom::RequestDestination request_destination,
@@ -462,11 +475,11 @@ BaseFetchContext::CheckCSPForRequestInternal(
     ContentSecurityPolicy::CheckHeaderType check_header_type) const {
   if (options.content_security_policy_option ==
       network::mojom::CSPDisposition::DO_NOT_CHECK) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   ContentSecurityPolicy* csp =
-      GetContentSecurityPolicyForWorld(options.world_for_csp.get());
+      GetContentSecurityPolicyForWorld(options.world_for_csp.Get());
   if (csp &&
       !csp->AllowRequest(request_context, request_destination, url,
                          options.content_security_policy_nonce,
@@ -475,19 +488,20 @@ BaseFetchContext::CheckCSPForRequestInternal(
                          reporting_disposition, check_header_type)) {
     return ResourceRequestBlockedReason::kCSP;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-absl::optional<ResourceRequestBlockedReason>
+std::optional<ResourceRequestBlockedReason>
 BaseFetchContext::CanRequestInternal(
     ResourceType type,
     const ResourceRequest& resource_request,
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
-    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info) const {
+    base::optional_ref<const ResourceRequest::RedirectInfo> redirect_info)
+    const {
   if (GetResourceFetcherProperties().IsDetached()) {
-    if (!resource_request.GetKeepalive() || !redirect_info) {
+    if (!resource_request.GetKeepalive() || !redirect_info.has_value()) {
       return ResourceRequestBlockedReason::kOther;
     }
   }
@@ -534,7 +548,7 @@ BaseFetchContext::CanRequestInternal(
   // restricted to data urls.
   if (options.initiator_info.name == fetch_initiator_type_names::kUacss) {
     if (type == ResourceType::kImage && url.ProtocolIsData()) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     return ResourceRequestBlockedReason::kOther;
   }
@@ -545,10 +559,11 @@ BaseFetchContext::CanRequestInternal(
       resource_request.GetRequestDestination();
 
   const KURL& url_before_redirects =
-      redirect_info ? redirect_info->original_url : url;
+      redirect_info.has_value() ? redirect_info->original_url : url;
   const ResourceRequestHead::RedirectStatus redirect_status =
-      redirect_info ? ResourceRequestHead::RedirectStatus::kFollowedRedirect
-                    : ResourceRequestHead::RedirectStatus::kNoRedirect;
+      redirect_info.has_value()
+          ? ResourceRequestHead::RedirectStatus::kFollowedRedirect
+          : ResourceRequestHead::RedirectStatus::kNoRedirect;
   // We check the 'report-only' headers before upgrading the request (in
   // populateResourceRequest). We check the enforced headers here to ensure we
   // block things we ought to block.
@@ -561,7 +576,7 @@ BaseFetchContext::CanRequestInternal(
   }
 
   if (type == ResourceType::kScript) {
-    if (!AllowScriptFromSource(url)) {
+    if (!AllowScript()) {
       // TODO(estark): Use a different ResourceRequestBlockedReason here, since
       // this check has nothing to do with CSP. https://crbug.com/600795
       return ResourceRequestBlockedReason::kCSP;
@@ -621,9 +636,9 @@ BaseFetchContext::CanRequestInternal(
   // Only warn if the resource URL's origin is different than its requestor
   // (we don't want to warn for <img src="faß.de/image.img"> on faß.de).
   // TODO(crbug.com/1396475): Remove once Non-Transitional mode is shipped.
-  if (!resource_request.RequestorOrigin()->IsSameOriginWith(
-          SecurityOrigin::Create(url).get()) &&
-      url.HasIDNA2008DeviationCharacter()) {
+  if (url.HasIDNA2008DeviationCharacter() &&
+      !resource_request.RequestorOrigin()->IsSameOriginWith(
+          SecurityOrigin::Create(url).get())) {
     String message = GetConsoleWarningForIDNADeviationCharacters(url);
     if (!message.empty()) {
       console_logger_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
@@ -635,7 +650,7 @@ BaseFetchContext::CanRequestInternal(
     }
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool BaseFetchContext::ShouldSendClientHint(

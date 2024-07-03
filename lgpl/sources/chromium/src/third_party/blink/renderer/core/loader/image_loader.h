@@ -82,8 +82,9 @@ class CORE_EXPORT ImageLoader : public GarbageCollected<ImageLoader>,
                          bool force_blocking = false);
 
   void ElementDidMoveToNewDocument();
+  void OnAttachLayoutTree();
 
-  Element* GetElement() const { return element_; }
+  Element* GetElement() const { return element_.Get(); }
   bool ImageComplete() const { return image_complete_; }
 
   ImageResourceContent* GetContent() const { return image_content_.Get(); }
@@ -132,7 +133,7 @@ class CORE_EXPORT ImageLoader : public GarbageCollected<ImageLoader>,
 
   bool GetImageAnimationPolicy(mojom::blink::ImageAnimationPolicy&) final;
 
-  ScriptPromise Decode(ScriptState*, ExceptionState&);
+  ScriptPromise<IDLUndefined> Decode(ScriptState*, ExceptionState&);
 
   // `force_blocking` ensures that the image will block the load event.
   void LoadDeferredImage(bool force_blocking = false,
@@ -164,9 +165,8 @@ class CORE_EXPORT ImageLoader : public GarbageCollected<ImageLoader>,
 
   // Called from the task or from updateFromElement to initiate the load.
   // force_blocking ensures that the image will block the load event.
-  void DoUpdateFromElement(scoped_refptr<const DOMWrapperWorld> world,
+  void DoUpdateFromElement(const DOMWrapperWorld* world,
                            UpdateFromElementBehavior,
-                           base::TimeTicks discovery_time,
                            UpdateType = UpdateType::kAsync,
                            bool force_blocking = false);
 
@@ -190,8 +190,7 @@ class CORE_EXPORT ImageLoader : public GarbageCollected<ImageLoader>,
   void ClearFailedLoadURL();
   void DispatchErrorEvent();
   void CrossSiteOrCSPViolationOccurred(AtomicString);
-  void EnqueueImageLoadingMicroTask(UpdateFromElementBehavior update_behavior,
-                                    base::TimeTicks discovery_time);
+  void EnqueueImageLoadingMicroTask(UpdateFromElementBehavior update_behavior);
 
   KURL ImageSourceToKURL(AtomicString) const;
 
@@ -266,14 +265,14 @@ class CORE_EXPORT ImageLoader : public GarbageCollected<ImageLoader>,
    public:
     enum State { kPendingMicrotask, kPendingLoad, kDispatched };
 
-    DecodeRequest(ImageLoader*, ScriptPromiseResolver*);
+    DecodeRequest(ImageLoader*, ScriptPromiseResolver<IDLUndefined>*);
     ~DecodeRequest() = default;
 
     void Trace(Visitor*) const;
 
     uint64_t request_id() const { return request_id_; }
     State state() const { return state_; }
-    ScriptPromise promise() { return resolver_->Promise(); }
+    ScriptPromise<IDLUndefined> promise() { return resolver_->Promise(); }
 
     void Resolve();
     void Reject();
@@ -287,7 +286,7 @@ class CORE_EXPORT ImageLoader : public GarbageCollected<ImageLoader>,
     uint64_t request_id_ = 0;
     State state_ = kPendingMicrotask;
 
-    Member<ScriptPromiseResolver> resolver_;
+    Member<ScriptPromiseResolver<IDLUndefined>> resolver_;
     Member<ImageLoader> loader_;
   };
 

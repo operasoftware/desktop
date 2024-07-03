@@ -4,10 +4,11 @@
 
 #include "third_party/blink/renderer/core/timing/background_tracing_helper.h"
 
+#include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/hash/md5.h"
+#include "base/numerics/byte_conversions.h"
 #include "base/rand_util.h"
-#include "base/sys_byteorder.h"
 #include "base/trace_event/typed_macros.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -274,11 +275,8 @@ size_t BackgroundTracingHelper::GetSequenceNumberPos(base::StringPiece string) {
 // static
 uint32_t BackgroundTracingHelper::MD5Hash32(base::StringPiece string) {
   base::MD5Digest digest;
-  base::MD5Sum(string.data(), string.size(), &digest);
-  uint32_t value;
-  DCHECK_GE(sizeof(digest.a), sizeof(value));
-  memcpy(&value, digest.a, sizeof(value));
-  return base::NetToHost32(value);
+  base::MD5Sum(base::as_byte_span(string), &digest);
+  return base::numerics::U32FromBigEndian(base::span(digest.a).first<4u>());
 }
 
 // static

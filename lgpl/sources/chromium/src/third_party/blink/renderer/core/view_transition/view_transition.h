@@ -9,12 +9,15 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/types/pass_key.h"
 #include "base/unguessable_token.h"
+#include "components/viz/common/navigation_id.h"
 #include "third_party/blink/public/common/frame/view_transition_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_property.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_sync_iterator_view_transition_type_set.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_view_transition_callback.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -29,25 +32,22 @@
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace viz {
-using NavigationID = base::UnguessableToken;
+using TransitionId = base::UnguessableToken;
 }
 
 namespace blink {
 
 class Document;
+class DOMViewTransition;
 class Element;
 class LayoutObject;
 class PseudoElement;
-class ScriptPromise;
-class ScriptState;
 
-class CORE_EXPORT ViewTransition : public ScriptWrappable,
-                                   public ActiveScriptWrappable<ViewTransition>,
+class CORE_EXPORT ViewTransition : public GarbageCollected<ViewTransition>,
                                    public ExecutionContextLifecycleObserver,
                                    public ChromeClient::CommitObserver {
-  DEFINE_WRAPPERTYPEINFO();
-
  public:
+  using PassKey = base::PassKey<ViewTransition>;
   class Delegate {
    public:
     virtual ~Delegate() = default;
@@ -58,10 +58,14 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
 
   // Creates and starts a same-document ViewTransition initiated using the
   // script API.
-  static ViewTransition* CreateFromScript(Document*,
-                                          ScriptState*,
-                                          V8ViewTransitionCallback*,
-                                          Delegate*);
+  static ViewTransition* CreateFromScript(
+      Document*,
+      V8ViewTransitionCallback*,
+      const std::optional<Vector<String>>& types,
+      Delegate*);
+
+  // Creates a skipped transition that still runs the specified callbacks.
+  static ViewTransition* CreateSkipped(Document*, V8ViewTransitionCallback*);
 
   // Creates a ViewTransition to cache the state of a Document before a
   // navigation. The cached state is provided to the caller using the
@@ -70,7 +74,9 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
       base::OnceCallback<void(const ViewTransitionState&)>;
   static ViewTransition* CreateForSnapshotForNavigation(
       Document*,
+      const viz::NavigationId& navigation_id,
       ViewTransitionStateCallback,
+      const Vector<String>& types,
       Delegate*);
 
   // Creates a ViewTransition using cached state from the previous Document
@@ -80,16 +86,25 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
                                                          ViewTransitionState,
                                                          Delegate*);
 
-  ViewTransition(Document*, ScriptState*, V8ViewTransitionCallback*, Delegate*);
-  ViewTransition(Document*, ViewTransitionStateCallback, Delegate*);
-  ViewTransition(Document*, ViewTransitionState, Delegate*);
+  // Script-based constructor.
+  ViewTransition(PassKey,
+                 Document*,
+                 V8ViewTransitionCallback*,
+                 const std::optional<Vector<String>>& types,
+                 Delegate*);
+  // Skipped transition constructor.
+  ViewTransition(PassKey, Document*, V8ViewTransitionCallback*);
+  // Navigation-initiated for-snapshot constructor.
+  ViewTransition(PassKey,
+                 Document*,
+                 const viz::NavigationId& navigation_id,
+                 ViewTransitionStateCallback,
+                 const Vector<String>& types,
+                 Delegate*);
+  // Navigation-initiated from-snapshot constructor.
+  ViewTransition(PassKey, Document*, ViewTransitionState, Delegate*);
 
-  // IDL implementation. Refer to view_transition.idl for additional
-  // comments.
-  void skipTransition();
-  ScriptPromise finished() const;
-  ScriptPromise ready() const;
-  ScriptPromise updateCallbackDone() const;
+  DOMViewTransition* GetScriptDelegate() { return script_delegate_.Get(); }
 
   // GC functionality.
   void Trace(Visitor* visitor) const override;
@@ -99,11 +114,16 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
   bool MatchForOnlyChild(PseudoId pseudo_id,
                          const AtomicString& view_transition_name) const;
 
+  // Returns true if the transition matches :active-view-transition
+  bool MatchForActiveViewTransition();
+
+  // Returns true if the transition matches :active-view-transition-type with
+  // the given types.
+  bool MatchForActiveViewTransitionType(
+      const Vector<AtomicString>& pseudo_types);
+
   // ExecutionContextLifecycleObserver implementation.
   void ContextDestroyed() override;
-
-  // ActiveScriptWrappable functionality.
-  bool HasPendingActivity() const override;
 
   // Returns true if this object needs to create an EffectNode for its element
   // transition.
@@ -211,9 +231,11 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
     return creation_type_ == CreationType::kFromSnapshot;
   }
 
-  // Notifies before the compositor associated with this frame will initiate a
-  // lifecycle update.
-  void NotifyRenderingHasBegun();
+  // Notifies the transition that frames are being produced and that the
+  // transition can start the animation phase (starting by capturing the
+  // incoming elements). No-op unless the transition is created from a
+  // snapshot.
+  void ActivateFromSnapshot();
 
   // Returns true if lifecycle updates should be throttled for the Document
   // associated with this transition.
@@ -223,12 +245,27 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
   // block concept, has up to date style.
   void UpdateSnapshotContainingBlockStyle();
 
+  // Indicates how the promise should be handled.
+  enum class PromiseResponse {
+    kResolve,
+    kRejectAbort,
+    kRejectInvalidState,
+    kRejectTimeout
+  };
+  void SkipTransition(PromiseResponse response = PromiseResponse::kRejectAbort);
+
+  // Dispatched when the promise returned from the author's update callback has
+  // resolved and start phase of the animation can be initiated. Note: this is
+  // called only if a callback is provided.
+  void NotifyDOMCallbackFinished(bool success);
+
+  ViewTransitionTypeSet* Types();
+
+  void InitTypes(const Vector<String>&);
+
  private:
   friend class ViewTransitionTest;
   friend class AXViewTransitionTest;
-
-  using PromiseProperty =
-      ScriptPromiseProperty<ToV8UndefinedGenerator, ScriptValue>;
 
   // Tracks how the ViewTransition object was created.
   enum class CreationType {
@@ -277,30 +314,6 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
   };
   static const char* StateToString(State state);
 
-  // State which is created only when ViewTransition is accessed from
-  // script.
-  struct ScriptBoundState : public GarbageCollected<ScriptBoundState> {
-    ScriptBoundState(ExecutionContext* context,
-                     ScriptState*,
-                     V8ViewTransitionCallback*);
-
-    // Indicates how the promise should be handled.
-    enum class Response {
-      kResolve,
-      kRejectAbort,
-      kRejectInvalidState,
-      kRejectTimeout
-    };
-    void HandlePromise(Response response, PromiseProperty* property);
-    void Trace(Visitor* visitor) const;
-
-    Member<ScriptState> script_state;
-    Member<V8ViewTransitionCallback> update_dom_callback;
-    Member<PromiseProperty> dom_updated_promise_property;
-    Member<PromiseProperty> ready_promise_property;
-    Member<PromiseProperty> finished_promise_property;
-  };
-
   // Advance to the new state. This returns true if the state should be
   // processed immediately.
   bool AdvanceTo(State state);
@@ -318,26 +331,7 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
 
   void ProcessCurrentState();
 
-  // Invoked when ViewTransitionCallback finishes running.
-  class DOMChangeFinishedCallback : public ScriptFunction::Callable {
-   public:
-    explicit DOMChangeFinishedCallback(ViewTransition* transition,
-                                       bool success);
-    ~DOMChangeFinishedCallback() override;
-
-    ScriptValue Call(ScriptState*, ScriptValue) override;
-    void Trace(Visitor* visitor) const override;
-
-   private:
-    Member<ViewTransition> transition_;
-    const bool success_;
-  };
-
   void NotifyCaptureFinished();
-
-  // Dispatched when the ViewTransitionCallback has finished executing and
-  // start phase of the animation can be initiated.
-  void NotifyDOMCallbackFinished(bool success, ScriptValue value);
 
   // Used to defer visual updates between transition prepare dispatching and
   // transition start to allow the page to set up the final scene
@@ -346,35 +340,27 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
   void OnRenderingPausedTimeout();
   void ResumeRendering();
 
-  // Returns the result of invoking the callback.
-  // kFailed: Indicates that there was a failure in running the callback and the
-  //          transition should be skipped.
-  // kFinished: Indicates that there was no callback to run so we can move to
-  //            finished state synchronously.
-  // kRunning: Indicates that the callback is in running state. Note that even
-  //           if the callback is synchronous, the notification that it has
-  //           finished running is async.
-  enum class DOMCallbackResult { kFailed, kFinished, kRunning };
-  DOMCallbackResult InvokeDOMChangeCallback();
-
-  void AtMicrotask(ScriptBoundState::Response response,
-                   PromiseProperty* resolver);
-  void SkipTransitionInternal(ScriptBoundState::Response response);
+  // Returns the navigation id to use when creating a capture request. This id
+  // is the same for captures on both old and new documents of a cross-document
+  // transition. It is an empty id if the transition is not cross document.
+  viz::NavigationId CrossDocumentNavigationId() const;
 
   State state_ = State::kInitial;
   const CreationType creation_type_;
 
   Member<Document> document_;
-  Delegate* const delegate_;
-  const viz::NavigationID navigation_id_;
+  Delegate* const delegate_ = nullptr;
+
+  // Each transition is assigned a unique ID. For cross-document navigations
+  // this is also the `navigation_id` provided to the browser/GPU process to
+  // track the lifetime of generated resources.
+  const viz::TransitionId transition_id_;
 
   // The document tag identifies the document to which this transition
   // belongs. It's unique among other local documents.
   uint32_t document_tag_ = 0u;
 
-  Member<ScriptBoundState> script_bound_state_;
-
-  Member<ViewTransitionStyleTracker> style_tracker_;
+  Member<ViewTransitionStyleTracker> style_tracker_ = nullptr;
 
   // Manages pausing rendering of the Document between capture and updateDOM
   // callback finishing.
@@ -393,9 +379,15 @@ class CORE_EXPORT ViewTransition : public ScriptWrappable,
    private:
     std::unique_ptr<cc::ScopedPauseRendering> cc_paused_;
   };
-  absl::optional<ScopedPauseRendering> rendering_paused_scope_;
+  std::optional<ScopedPauseRendering> rendering_paused_scope_;
 
   ViewTransitionStateCallback transition_state_callback_;
+
+  // This is the object that implements the IDL interface exposed to script. It
+  // is cleared if the document is torn down.
+  Member<DOMViewTransition> script_delegate_;
+
+  Member<ViewTransitionTypeSet> types_;
 
   bool in_main_lifecycle_update_ = false;
   bool dom_callback_succeeded_ = false;

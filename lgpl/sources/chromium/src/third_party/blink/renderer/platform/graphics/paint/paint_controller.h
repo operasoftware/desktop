@@ -6,14 +6,15 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PAINT_CONTROLLER_H_
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "base/memory/ptr_util.h"
+#include "cc/input/hit_test_opaqueness.h"
 #include "cc/input/layer_selection_bound.h"
 #include "cc/paint/element_id.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/geometry/layout_point.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item_list.h"
@@ -21,6 +22,8 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_chunk.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_chunker.h"
 #include "third_party/blink/renderer/platform/graphics/paint/region_capture_data.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
@@ -68,9 +71,8 @@ struct FrameFirstPaint {
 // Responsible for processing display items as they are produced, and producing
 // a final paint artifact when complete. This class includes logic for caching,
 // cache invalidation, and merging.
-class PLATFORM_EXPORT PaintController {
-  USING_FAST_MALLOC(PaintController);
-
+class PLATFORM_EXPORT PaintController
+    : public GarbageCollected<PaintController> {
  public:
   enum Usage {
     // The PaintController will be used for multiple paint cycles. It caches
@@ -87,15 +89,17 @@ class PLATFORM_EXPORT PaintController {
   PaintController& operator=(const PaintController&) = delete;
   ~PaintController();
 
+  void Trace(Visitor*) const;
+
 #if DCHECK_IS_ON()
   Usage GetUsage() const { return usage_; }
 #endif
 
   friend class PaintControllerCycleScope;
 
-  // These methods are called during painting.
+  void clear();
 
-  void RecordDebugInfo(const DisplayItemClient& client);
+  // These methods are called during painting.
 
   // Provide a new set of paint chunk properties to apply to recorded display
   // items. If id is nullptr, the id of the first display item will be used as
@@ -107,11 +111,6 @@ class PLATFORM_EXPORT PaintController {
   const PropertyTreeStateOrAlias& CurrentPaintChunkProperties() const {
     return paint_chunker_.CurrentPaintChunkProperties();
   }
-  // See PaintChunker for documentation of the following methods.
-  void SetWillForceNewChunk(bool force) {
-    paint_chunker_.SetWillForceNewChunk(force);
-  }
-  bool WillForceNewChunk() const { return paint_chunker_.WillForceNewChunk(); }
   void SetCurrentEffectivelyInvisible(bool invisible) {
     paint_chunker_.SetCurrentEffectivelyInvisible(invisible);
   }
@@ -120,10 +119,15 @@ class PLATFORM_EXPORT PaintController {
   }
   void EnsureChunk();
 
+  bool CurrentChunkIsNonEmptyAndTransparentToHitTest() const {
+    return paint_chunker_.CurrentChunkIsNonEmptyAndTransparentToHitTest();
+  }
   void RecordHitTestData(const DisplayItemClient&,
                          const gfx::Rect&,
                          TouchAction,
-                         bool);
+                         bool blocking_wheel,
+                         cc::HitTestOpaqueness,
+                         DisplayItem::Type type = DisplayItem::kHitTest);
 
   void RecordRegionCaptureData(const DisplayItemClient& client,
                                const RegionCaptureCropId& crop_id,
@@ -133,20 +137,21 @@ class PLATFORM_EXPORT PaintController {
       const DisplayItemClient&,
       DisplayItem::Type,
       const TransformPaintPropertyNode* scroll_translation,
-      const gfx::Rect&);
+      const gfx::Rect&,
+      cc::HitTestOpaqueness);
 
-  void RecordSelection(absl::optional<PaintedSelectionBound> start,
-                       absl::optional<PaintedSelectionBound> end,
+  void RecordSelection(std::optional<PaintedSelectionBound> start,
+                       std::optional<PaintedSelectionBound> end,
                        String debug_info);
   void RecordAnySelectionWasPainted() {
     paint_chunker_.RecordAnySelectionWasPainted();
   }
 
   wtf_size_t NumNewChunks() const {
-    return new_paint_artifact_->PaintChunks().size();
+    return new_paint_artifact_->GetPaintChunks().size();
   }
   const gfx::Rect& LastChunkBounds() const {
-    return new_paint_artifact_->PaintChunks().back().bounds;
+    return new_paint_artifact_->GetPaintChunks().back().bounds;
   }
 
   void MarkClientForValidation(const DisplayItemClient& client);
@@ -214,24 +219,20 @@ class PLATFORM_EXPORT PaintController {
     CheckNoNewPaint();
     return *current_paint_artifact_;
   }
-  scoped_refptr<const PaintArtifact> GetPaintArtifactShared() const {
-    CheckNoNewPaint();
-    return current_paint_artifact_;
-  }
   const DisplayItemList& GetDisplayItemList() const {
     return GetPaintArtifact().GetDisplayItemList();
   }
-  const Vector<PaintChunk>& PaintChunks() const {
-    return GetPaintArtifact().PaintChunks();
+  const PaintChunks& GetPaintChunks() const {
+    return GetPaintArtifact().GetPaintChunks();
   }
 
-  scoped_refptr<const PaintArtifact> GetNewPaintArtifactShared() const {
+  const PaintArtifact& GetNewPaintArtifact() const {
     DCHECK(new_paint_artifact_);
-    return new_paint_artifact_;
+    return *new_paint_artifact_;
   }
   wtf_size_t NewPaintChunkCount() const {
     DCHECK(new_paint_artifact_);
-    return new_paint_artifact_->PaintChunks().size();
+    return new_paint_artifact_->GetPaintChunks().size();
   }
 
   class ScopedBenchmarkMode {
@@ -313,6 +314,8 @@ class PLATFORM_EXPORT PaintController {
   // will cleanup data that will no longer be used for the next cycle, validate
   // clients, and prepare for the next cycle.
   void FinishCycle();
+
+  void RecordDebugInfo(const DisplayItemClient&);
 
   // True if all display items associated with the client are validly cached.
   // However, the current algorithm allows the following situations even if
@@ -397,15 +400,14 @@ class PLATFORM_EXPORT PaintController {
   // It includes paint chunks as well as display items.
   // It's initially empty and is never null if usage is kMultiplePaints.
   // Otherwise it's null before CommitNewDisplayItems().
-  scoped_refptr<PaintArtifact> current_paint_artifact_;
+  Member<PaintArtifact> current_paint_artifact_;
 
   // Data being used to build the next paint artifact.
   // It's never null and if usage is kMultiplePaints. Otherwise it's null after
   // CommitNewDisplayItems().
-  scoped_refptr<PaintArtifact> new_paint_artifact_;
+  Member<PaintArtifact> new_paint_artifact_;
   PaintChunker paint_chunker_;
-  Persistent<HeapVector<Member<const DisplayItemClient>>> clients_to_validate_ =
-      nullptr;
+  Member<HeapVector<Member<const DisplayItemClient>>> clients_to_validate_;
 
   bool cache_is_all_invalid_ = true;
   bool committed_ = false;
@@ -454,7 +456,7 @@ class PLATFORM_EXPORT PaintController {
   DisplayItem::Id::HashKey last_checked_cached_item_id_;
 #endif
 
-  std::unique_ptr<PaintUnderInvalidationChecker> under_invalidation_checker_;
+  Member<PaintUnderInvalidationChecker> under_invalidation_checker_;
 
   struct SubsequencesData {
     // Map a client to the index into |tree|.
@@ -480,14 +482,12 @@ class PLATFORM_EXPORT PaintControllerCycleScope {
 
  public:
   explicit PaintControllerCycleScope(PaintController& controller,
-                                     bool record_debug_info)
-      : controller_(controller) {
-    controller.StartCycle(record_debug_info);
-  }
-  ~PaintControllerCycleScope() { controller_.FinishCycle(); }
+                                     bool record_debug_info);
+  ~PaintControllerCycleScope();
 
  protected:
   PaintController& controller_;
+  PaintArtifact* old_paint_artifact_;
 };
 
 }  // namespace blink

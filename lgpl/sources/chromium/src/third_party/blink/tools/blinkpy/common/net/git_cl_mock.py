@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from typing import Optional
+
 from blinkpy.common.net.git_cl import CLStatus, GitCL
 from blinkpy.common.net.rpc import BuildbucketClient
 from blinkpy.common.system.executive import ScriptError
@@ -50,8 +52,14 @@ class MockGitCL(object):
             command.extend(['-b', builder])
         self.run(command)
 
+    def close(self, issue: Optional[int] = None):
+        self.run(['set-close'])
+
     def get_issue_number(self):
         return self._issue_number
+
+    def get_cl_status(self, issue: Optional[int] = None) -> str:
+        return self._status
 
     def try_job_results(self, **_):
         return self._try_job_results
@@ -62,12 +70,19 @@ class MockGitCL(object):
         return CLStatus(self._status,
                         self.filter_latest(self._try_job_results))
 
-    def wait_for_closed_status(self, **_):
+    def wait_for_closed_status(self,
+                               poll_delay_seconds: float = 2 * 60,
+                               timeout_seconds: float = 30 * 60,
+                               issue: Optional[int] = None,
+                               start: Optional[float] = None) -> Optional[str]:
         if self._time_out:
             return None
         return 'closed'
 
-    def latest_try_jobs(self, builder_names=None, **_):
+    def latest_try_jobs(self,
+                        issue_number: Optional[str] = None,
+                        builder_names=None,
+                        **_):
         if builder_names:
             jobs = {
                 build: status

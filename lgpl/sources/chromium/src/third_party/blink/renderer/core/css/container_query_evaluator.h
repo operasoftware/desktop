@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/container_selector.h"
-#include "third_party/blink/renderer/core/css/container_stuck.h"
+#include "third_party/blink/renderer/core/css/container_state.h"
 #include "third_party/blink/renderer/core/css/media_query_evaluator.h"
 #include "third_party/blink/renderer/core/css/media_query_exp.h"
 #include "third_party/blink/renderer/core/css/style_recalc_change.h"
@@ -44,12 +44,12 @@ class CORE_EXPORT ContainerQueryEvaluator final
 
   // Width/Height are used by container relative units (qi, qb, etc).
   //
-  // A return value of absl::nullopt normally means that the relevant axis
+  // A return value of std::nullopt normally means that the relevant axis
   // doesn't have effective containment (e.g. elements with display:table).
   //
   // https://drafts.csswg.org/css-contain-2/#containment-size
-  absl::optional<double> Width() const;
-  absl::optional<double> Height() const;
+  std::optional<double> Width() const;
+  std::optional<double> Height() const;
   void SetReferencedByUnit() { referenced_by_unit_ = true; }
   bool DependsOnStyle() const { return depends_on_style_; }
 
@@ -156,7 +156,7 @@ class CORE_EXPORT ContainerQueryEvaluator final
   bool referenced_by_unit_ = false;
   bool font_dirty_ = false;
   bool depends_on_style_ = false;
-  bool depends_on_sticky_ = false;
+  bool depends_on_state_ = false;
 };
 
 }  // namespace blink

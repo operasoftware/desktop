@@ -34,6 +34,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/lock.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream_track.h"
 #include "third_party/blink/public/platform/web_vector.h"
@@ -45,7 +46,6 @@
 #include "third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
@@ -125,7 +125,7 @@ class PLATFORM_EXPORT MediaStreamComponentImpl final
       WebMediaStreamTrack::ContentHintType::kNone;
   std::unique_ptr<MediaStreamTrackPlatform> platform_track_;
   // Frame where the referenced platform track was created, if applicable.
-  WebLocalFrame* creation_frame_ = nullptr;
+  raw_ptr<WebLocalFrame> creation_frame_ = nullptr;
 };
 
 }  // namespace blink

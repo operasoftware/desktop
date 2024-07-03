@@ -4,10 +4,9 @@
 
 import 'chrome://os-settings/os_settings.js';
 
-import {NetworkSummaryItemElement} from 'chrome://os-settings/os_settings.js';
+import {CrToggleElement, NetworkSummaryItemElement} from 'chrome://os-settings/os_settings.js';
 import {OncMojo} from 'chrome://resources/ash/common/network/onc_mojo.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {InhibitReason} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/cros_network_config.mojom-webui.js';
 import {ConnectionStateType, DeviceStateType, NetworkType, PortalState} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/network_types.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
@@ -412,9 +411,9 @@ suite('<network-summary-item>', () => {
         });
 
     test(
-        'kProxyAuthRequired shows signin text and opens portal signin on click',
+        'kPortalSuspected shows signin text and opens portal signin on click',
         async () => {
-          initWithPortalState(PortalState.kProxyAuthRequired);
+          initWithPortalState(PortalState.kPortalSuspected);
           assertTrue(netSummaryItem.shadowRoot!.querySelector('#networkState')!
                          .classList.contains('warning-message'));
           assertFalse(netSummaryItem.shadowRoot!.querySelector('#networkState')!
@@ -434,5 +433,43 @@ suite('<network-summary-item>', () => {
           assertEquals(1, browserProxy.getCallCount('showPortalSignin'));
           assertEquals(testGuid, guid);
         });
+
+    test('Error message displayed when Bluetooth is disabled', () => {
+      netSummaryItem.setProperties({
+        deviceState: {
+          inhibitReason: InhibitReason.kNotInhibited,
+          deviceState: DeviceStateType.kUninitialized,
+          type: NetworkType.kTether,
+        },
+        activeNetworkState: {
+          connectionState: ConnectionStateType.kNotConnected,
+          guid: '',
+          type: NetworkType.kTether,
+        },
+      });
+
+      flush();
+      assertEquals(
+          netSummaryItem.i18n('tetherEnableBluetooth'),
+          netSummaryItem['getNetworkStateText_']());
+
+      netSummaryItem.setProperties({
+        deviceState: {
+          inhibitReason: InhibitReason.kNotInhibited,
+          deviceState: DeviceStateType.kEnabled,
+          type: NetworkType.kTether,
+        },
+        activeNetworkState: {
+          connectionState: ConnectionStateType.kNotConnected,
+          guid: '',
+          type: NetworkType.kTether,
+        },
+      });
+
+      flush();
+      assertEquals(
+          netSummaryItem.i18n('networkListItemNoNetwork'),
+          netSummaryItem['getNetworkStateText_']());
+    });
   });
 });

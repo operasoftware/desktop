@@ -73,10 +73,6 @@ bool HTMLScriptElement::HasLegalLinkAttribute(const QualifiedName& name) const {
          HTMLElement::HasLegalLinkAttribute(name);
 }
 
-const QualifiedName& HTMLScriptElement::SubResourceAttributeName() const {
-  return html_names::kSrcAttr;
-}
-
 void HTMLScriptElement::ChildrenChanged(const ChildrenChange& change) {
   HTMLElement::ChildrenChanged(change);
   if (change.IsChildInsertion())
@@ -103,11 +99,9 @@ void HTMLScriptElement::ParseAttribute(
     // Hints is count usage upon parsing. Processing the value happens when the
     // element loads.
     UseCounter::Count(GetDocument(), WebFeature::kPriorityHints);
-  } else if (params.name == html_names::kBlockingAttr &&
-             RuntimeEnabledFeatures::BlockingAttributeEnabled()) {
-    blocking_attribute_->DidUpdateAttributeValue(params.old_value,
+  } else if (params.name == html_names::kBlockingAttr) {
+    blocking_attribute_->OnAttributeValueChanged(params.old_value,
                                                  params.new_value);
-    blocking_attribute_->CountTokenUsage();
     if (GetDocument().GetRenderBlockingResourceManager() &&
         !IsPotentiallyRenderBlocking()) {
       GetDocument().GetRenderBlockingResourceManager()->RemovePendingScript(
@@ -325,7 +319,7 @@ V8HTMLOrSVGScriptElement* HTMLScriptElement::AsV8HTMLOrSVGScriptElement() {
 }
 
 DOMNodeId HTMLScriptElement::GetDOMNodeId() {
-  return DOMNodeIds::IdForNode(this);
+  return this->GetDomNodeId();
 }
 
 void HTMLScriptElement::DispatchLoadEvent() {
@@ -368,9 +362,7 @@ bool HTMLScriptElement::IsPotentiallyRenderBlocking() const {
 }
 
 // static
-bool HTMLScriptElement::supports(ScriptState* script_state,
-                                 const AtomicString& type) {
-  ExecutionContext* execution_context = ExecutionContext::From(script_state);
+bool HTMLScriptElement::supports(const AtomicString& type) {
   if (type == script_type_names::kClassic)
     return true;
   if (type == script_type_names::kModule)
@@ -378,8 +370,7 @@ bool HTMLScriptElement::supports(ScriptState* script_state,
   if (type == script_type_names::kImportmap)
     return true;
 
-  if ((type == script_type_names::kSpeculationrules) &&
-      RuntimeEnabledFeatures::SpeculationRulesEnabled(execution_context)) {
+  if (type == script_type_names::kSpeculationrules) {
     return true;
   }
   if (type == script_type_names::kWebbundle)

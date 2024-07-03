@@ -387,7 +387,7 @@ TEST_F(FocusgroupControllerTest, FocusgroupExtendsInAxis) {
 }
 
 TEST_F(FocusgroupControllerTest, FindNearestFocusgroupAncestor) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div>
       <span id=item1 tabindex=0></span>
     </div>
@@ -413,7 +413,7 @@ TEST_F(FocusgroupControllerTest, FindNearestFocusgroupAncestor) {
             </tr>
           </table>
           <div id=fg6-container>
-            <template shadowroot=open>
+            <template shadowrootmode=open>
               <div id=fg6 focusgroup=extend>
                 <span id=item8 tabindex=-1></span>
               </div>
@@ -506,7 +506,7 @@ TEST_F(FocusgroupControllerTest, FindNearestFocusgroupAncestor) {
 }
 
 TEST_F(FocusgroupControllerTest, NextElement) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div id=fg1 focusgroup>
       <span id=item1></span>
       <span id=item2 tabindex=-1></span>
@@ -515,7 +515,7 @@ TEST_F(FocusgroupControllerTest, NextElement) {
       <span id=item3 tabindex=-1></span>
     </div>
     <div id=fg3 focusgroup>
-        <template shadowroot=open>
+        <template shadowrootmode=open>
           <span id=item4 tabindex=-1></span>
         </template>
     </div>
@@ -542,7 +542,7 @@ TEST_F(FocusgroupControllerTest, NextElement) {
 }
 
 TEST_F(FocusgroupControllerTest, PreviousElement) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div id=fg1 focusgroup>
       <span id=item1></span>
       <span id=item2 tabindex=-1></span>
@@ -551,7 +551,7 @@ TEST_F(FocusgroupControllerTest, PreviousElement) {
       <span id=item3 tabindex=-1></span>
     </div>
     <div id=fg3 focusgroup>
-        <template shadowroot=open>
+        <template shadowrootmode=open>
           <span id=item4 tabindex=-1></span>
         </template>
     </div>
@@ -573,13 +573,13 @@ TEST_F(FocusgroupControllerTest, PreviousElement) {
 }
 
 TEST_F(FocusgroupControllerTest, LastElementWithin) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div id=fg1 focusgroup>
       <span id=item1></span>
       <span id=item2 tabindex=-1></span>
     </div>
     <div id=fg2 focusgroup>
-        <template shadowroot=open>
+        <template shadowrootmode=open>
           <span id=item3 tabindex=-1></span>
           <span id=item4></span>
         </template>

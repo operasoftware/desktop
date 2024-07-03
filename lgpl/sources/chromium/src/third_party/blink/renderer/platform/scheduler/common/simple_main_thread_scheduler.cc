@@ -38,6 +38,13 @@ void SimpleMainThreadScheduler::AddRAILModeObserver(
 void SimpleMainThreadScheduler::RemoveRAILModeObserver(
     RAILModeObserver const* observer) {}
 
+void SimpleMainThreadScheduler::ForEachMainThreadIsolate(
+    base::RepeatingCallback<void(v8::Isolate* isolate)> callback) {
+  if (isolate_) {
+    callback.Run(isolate_.get());
+  }
+}
+
 scoped_refptr<base::SingleThreadTaskRunner>
 SimpleMainThreadScheduler::V8TaskRunner() {
   return base::SingleThreadTaskRunner::GetCurrentDefault();
@@ -91,5 +98,7 @@ v8::Isolate* SimpleMainThreadScheduler::Isolate() {
 }
 
 void SimpleMainThreadScheduler::StartIdlePeriodForTesting() {}
+
+void SimpleMainThreadScheduler::SetRendererBackgroundedForTesting(bool) {}
 
 }  // namespace blink::scheduler

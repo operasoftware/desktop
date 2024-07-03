@@ -37,14 +37,13 @@
 namespace blink {
 
 class ExceptionState;
-class ScriptState;
 
 class CORE_EXPORT HTMLScriptElement final : public HTMLElement,
                                             public ScriptElementBase {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static bool supports(ScriptState*, const AtomicString&);
+  static bool supports(const AtomicString&);
 
   HTMLScriptElement(Document&, const CreateElementFlags);
 
@@ -91,7 +90,6 @@ class CORE_EXPORT HTMLScriptElement final : public HTMLElement,
 
   bool IsURLAttribute(const Attribute&) const override;
   bool HasLegalLinkAttribute(const QualifiedName&) const override;
-  const QualifiedName& SubResourceAttributeName() const override;
 
   // ScriptElementBase overrides:
   String SourceAttributeValue() const override;

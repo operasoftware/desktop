@@ -30,7 +30,6 @@ PropertyTreeManager::PropertyTreeManager(PropertyTreeManagerClient& client,
                                          LayerListBuilder& layer_list_builder,
                                          int new_sequence_number)
     : client_(client),
-      property_trees_(property_trees),
       clip_tree_(property_trees.clip_tree_mutable()),
       effect_tree_(property_trees.effect_tree_mutable()),
       scroll_tree_(property_trees.scroll_tree_mutable()),
@@ -62,7 +61,7 @@ static void UpdateCcTransformLocalMatrix(
     cc::TransformNode& compositor_node,
     const TransformPaintPropertyNode& transform_node) {
   if (transform_node.GetStickyConstraint() ||
-      transform_node.GetAnchorPositionScrollersData()) {
+      transform_node.GetAnchorPositionScrollData()) {
     // The sticky offset on the blink transform node is pre-computed and stored
     // to the local matrix. Cc applies sticky offset dynamically on top of the
     // local matrix. We should not set the local matrix on cc node if it is a
@@ -87,12 +86,12 @@ static void UpdateCcTransformLocalMatrix(
 }
 
 static void SetTransformTreePageScaleFactor(
-    cc::TransformTree* transform_tree,
-    cc::TransformNode* page_scale_node) {
-  DCHECK(page_scale_node->local.IsScale2d());
-  auto page_scale = page_scale_node->local.To2dScale();
+    cc::TransformTree& transform_tree,
+    const cc::TransformNode& page_scale_node) {
+  DCHECK(page_scale_node.local.IsScale2d());
+  auto page_scale = page_scale_node.local.To2dScale();
   DCHECK_EQ(page_scale.x(), page_scale.y());
-  transform_tree->set_page_scale_factor(page_scale.x());
+  transform_tree.set_page_scale_factor(page_scale.x());
 }
 
 bool PropertyTreeManager::DirectlyUpdateCompositedOpacityValue(
@@ -130,11 +129,8 @@ bool PropertyTreeManager::DirectlyUpdateScrollOffsetTransform(
   auto* cc_scroll_node = property_trees->scroll_tree_mutable().Node(
       scroll_node->CcNodeId(property_trees->sequence_number()));
   if (!cc_scroll_node ||
-      // TODO(wangxianzhu): For now non-composited scroll offset change needs
-      // full update to issue raster invalidations and repaint scrollbars.
-      // We can directly update non-composited scroll offset once we implement
-      // raster-inducing scroll for both scrolling contents and scrollbars.
-      !cc_scroll_node->is_composited) {
+      property_trees->scroll_tree().ShouldRealizeScrollsOnMain(
+          *cc_scroll_node)) {
     return false;
   }
 
@@ -198,8 +194,8 @@ bool PropertyTreeManager::DirectlyUpdatePageScaleTransform(
     return false;
 
   UpdateCcTransformLocalMatrix(*cc_transform, transform);
-  SetTransformTreePageScaleFactor(&property_trees->transform_tree_mutable(),
-                                  cc_transform);
+  SetTransformTreePageScaleFactor(property_trees->transform_tree_mutable(),
+                                  *cc_transform);
   cc_transform->transform_changed = true;
   property_trees->transform_tree_mutable().set_needs_update(true);
   return true;
@@ -220,12 +216,17 @@ void PropertyTreeManager::DirectlySetScrollOffset(
   }
 }
 
+void PropertyTreeManager::DropCompositorScrollDeltaNextCommit(
+    cc::LayerTreeHost& host,
+    CompositorElementId element_id) {
+  host.DropActiveScrollDeltaNextCommit(element_id);
+}
+
 static uint32_t NonCompositedMainThreadScrollingReasons(
     const ScrollPaintPropertyNode& scroll) {
-  DCHECK(RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled());
   // TODO(crbug.com/1414885): We can't distinguish kNotOpaqueForTextAndLCDText
   // and kCantPaintScrollingBackgroundAndLCDText here. We should probably
-  // merge the two reasons for CompositeScrollAfterPaint.
+  // merge the two reasons.
   return scroll.GetCompositedScrollingPreference() ==
                  CompositedScrollingPreference::kNotPreferred
              ? cc::MainThreadScrollingReason::kPreferNonCompositedScrolling
@@ -235,30 +236,22 @@ static uint32_t NonCompositedMainThreadScrollingReasons(
 uint32_t PropertyTreeManager::GetMainThreadScrollingReasons(
     const cc::LayerTreeHost& host,
     const ScrollPaintPropertyNode& scroll) {
-  DCHECK(RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled());
   const auto* property_trees = host.property_trees();
   const auto* cc_scroll = property_trees->scroll_tree().Node(
       scroll.CcNodeId(property_trees->sequence_number()));
-  if (!cc_scroll) {
-    DCHECK(!base::FeatureList::IsEnabled(features::kScrollUnification));
-    return scroll.GetMainThreadScrollingReasons() |
-           NonCompositedMainThreadScrollingReasons(scroll);
-  }
+  DCHECK(cc_scroll);
   return cc_scroll->main_thread_scrolling_reasons;
 }
 
 bool PropertyTreeManager::UsesCompositedScrolling(
     const cc::LayerTreeHost& host,
     const ScrollPaintPropertyNode& scroll) {
-  DCHECK(RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled());
+  CHECK(!RuntimeEnabledFeatures::RasterInducingScrollEnabled() ||
+        !RuntimeEnabledFeatures::ScrollTimelineAlwaysOnCompositorEnabled());
   const auto* property_trees = host.property_trees();
   const auto* cc_scroll = property_trees->scroll_tree().Node(
       scroll.CcNodeId(property_trees->sequence_number()));
-  if (!cc_scroll) {
-    DCHECK(!base::FeatureList::IsEnabled(features::kScrollUnification));
-    return false;
-  }
-  return cc_scroll->is_composited;
+  return cc_scroll && cc_scroll->is_composited;
 }
 
 void PropertyTreeManager::SetupRootTransformNode() {
@@ -480,15 +473,14 @@ int PropertyTreeManager::EnsureCompositorTransformNode(
             sticky_data.constraints.nearest_element_shifting_containing_block) {
       // TODO(crbug.com/1224888): Get rid of the nullptr check below:
       if (cc::TransformNode* node = transform_tree_.FindNodeFromElementId(
-              shifting_containing_block_element_id))
+              shifting_containing_block_element_id)) {
         sticky_data.nearest_node_shifting_containing_block = node->id;
+      }
     }
   }
 
-  if (const auto* data = transform_node.GetAnchorPositionScrollersData()) {
-    cc::AnchorPositionScrollersData& compositor_data =
-        transform_tree_.EnsureAnchorPositionScrollersData(id);
-    compositor_data = *data;
+  if (const auto* data = transform_node.GetAnchorPositionScrollData()) {
+    transform_tree_.EnsureAnchorPositionScrollData(id) = *data;
   }
 
   auto compositor_element_id = transform_node.GetCompositorElementId();
@@ -512,8 +504,7 @@ int PropertyTreeManager::EnsureCompositorTransformNode(
     scroll_node->transform_id = id;
     scroll_node->is_composited =
         client_.NeedsCompositedScrolling(transform_node);
-    if (RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled() &&
-        !scroll_node->is_composited) {
+    if (!scroll_node->is_composited) {
       scroll_node->main_thread_scrolling_reasons |=
           NonCompositedMainThreadScrollingReasons(*transform_node.ScrollNode());
     }
@@ -546,7 +537,7 @@ int PropertyTreeManager::EnsureCompositorPageScaleTransformNode(
   int id = EnsureCompositorTransformNode(node);
   DCHECK(transform_tree_.Node(id));
   cc::TransformNode& compositor_node = *transform_tree_.Node(id);
-  SetTransformTreePageScaleFactor(&transform_tree_, &compositor_node);
+  SetTransformTreePageScaleFactor(transform_tree_, compositor_node);
   transform_tree_.set_needs_update(true);
   return id;
 }
@@ -628,13 +619,10 @@ int PropertyTreeManager::EnsureCompositorScrollNodeInternal(
     scroll_tree_.SetElementIdForNodeId(id, compositor_element_id);
   }
 
-  // These two fields are either permanent for unpainted scrolls, or will be
+  // These three fields are either permanent for unpainted scrolls, or will be
   // overridden when we handle the painted scroll.
   compositor_node.transform_id = cc::kInvalidPropertyNodeId;
-  // TODO(wangxianzhu): We should probably set is_composited=true here because
-  // unpainted scrollers paint nothing thus don't need repaint on scroll.
   compositor_node.is_composited = false;
-
   compositor_node.main_thread_scrolling_reasons =
       scroll_node.GetMainThreadScrollingReasons();
 
@@ -1158,8 +1146,9 @@ void PropertyTreeManager::BuildEffectNodesRecursively(
     // with the first contiguous set of chunks) is tagged with the shared
     // element resource ID. The view transition should either prevent such
     // content or ensure effect nodes are contiguous. See crbug.com/1303081 for
-    // details.
-    DCHECK(!next_effect.ViewTransitionElementId().valid() ||
+    // details. This restriction also applies to element capture.
+    DCHECK((!next_effect.ViewTransitionElementId().valid() &&
+            next_effect.ElementCaptureId()->is_zero()) ||
            !has_multiple_groups)
         << next_effect.ToString();
     PopulateCcEffectNode(effect_node, next_effect, output_clip_id);
@@ -1238,6 +1227,9 @@ static cc::RenderSurfaceReason RenderSurfaceReasonForEffect(
   if (effect.FlattensAtLeafOf3DScene())
     return cc::RenderSurfaceReason::k3dTransformFlattening;
 
+  if (!effect.ElementCaptureId()->is_zero()) {
+    return cc::RenderSurfaceReason::kSubtreeIsBeingCaptured;
+  }
   auto conditional_reason = ConditionalRenderSurfaceReasonForEffect(effect);
   DCHECK(conditional_reason == cc::RenderSurfaceReason::kNone ||
          IsConditionalRenderSurfaceReason(conditional_reason));
@@ -1273,6 +1265,9 @@ void PropertyTreeManager::PopulateCcEffectNode(
       effect.ViewTransitionElementId();
   effect_node.view_transition_element_resource_id =
       effect.ViewTransitionElementResourceId();
+
+  effect_node.subtree_capture_id =
+      viz::SubtreeCaptureId(*effect.ElementCaptureId());
 }
 
 void PropertyTreeManager::UpdateConditionalRenderSurfaceReasons(

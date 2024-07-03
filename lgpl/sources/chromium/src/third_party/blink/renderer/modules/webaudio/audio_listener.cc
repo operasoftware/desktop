@@ -33,7 +33,6 @@
 #include "third_party/blink/renderer/modules/webaudio/panner_handler.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
-#include "third_party/blink/renderer/platform/audio/hrtf_database_loader.h"
 
 namespace blink {
 
@@ -125,8 +124,6 @@ AudioListener::~AudioListener() {
     DeferredTaskHandler::GraphAutoLocker locker(*deferred_task_handler_);
     handler_ = nullptr;
   }
-
-  hrtf_database_loader_ = nullptr;
 }
 
 void AudioListener::setOrientation(float x, float y, float z,
@@ -139,97 +136,6 @@ void AudioListener::setOrientation(float x, float y, float z,
 void AudioListener::setPosition(float x, float y, float z,
                                 ExceptionState& exceptionState) {
   SetPosition(gfx::Point3F(x, y, z), exceptionState);
-}
-
-const gfx::Point3F AudioListener::GetPosition() const {
-  return Handler().GetPosition();
-}
-
-const gfx::Vector3dF AudioListener::GetOrientation() const {
-  return Handler().GetOrientation();
-}
-
-const gfx::Vector3dF AudioListener::GetUpVector() const {
-  return Handler().GetUpVector();
-}
-
-const float* AudioListener::GetPositionXValues(uint32_t frames_to_process) {
-  return Handler().GetPositionXValues(frames_to_process);
-}
-
-const float* AudioListener::GetPositionYValues(uint32_t frames_to_process) {
-  return Handler().GetPositionYValues(frames_to_process);
-}
-
-const float* AudioListener::GetPositionZValues(uint32_t frames_to_process) {
-  return Handler().GetPositionZValues(frames_to_process);
-}
-
-const float* AudioListener::GetForwardXValues(uint32_t frames_to_process) {
-  return Handler().GetForwardXValues(frames_to_process);
-}
-
-const float* AudioListener::GetForwardYValues(uint32_t frames_to_process) {
-  return Handler().GetForwardYValues(frames_to_process);
-}
-
-const float* AudioListener::GetForwardZValues(uint32_t frames_to_process) {
-  return Handler().GetForwardZValues(frames_to_process);
-}
-
-const float* AudioListener::GetUpXValues(uint32_t frames_to_process) {
-  return Handler().GetUpXValues(frames_to_process);
-}
-
-const float* AudioListener::GetUpYValues(uint32_t frames_to_process) {
-  return Handler().GetUpYValues(frames_to_process);
-}
-
-const float* AudioListener::GetUpZValues(uint32_t frames_to_process) {
-  return Handler().GetUpZValues(frames_to_process);
-}
-
-bool AudioListener::HasSampleAccurateValues() const {
-  return Handler().HasSampleAccurateValues();
-}
-
-bool AudioListener::IsAudioRate() const {
-  return Handler().IsAudioRate();
-}
-
-void AudioListener::UpdateState() {
-  Handler().UpdateState();
-}
-
-bool AudioListener::IsListenerDirty() const {
-  return Handler().IsListenerDirty();
-}
-
-base::Lock& AudioListener::ListenerLock() {
-  return Handler().Lock();
-}
-
-void AudioListener::AddPannerHandler(PannerHandler& panner_handler) {
-  Handler().AddPannerHandler(panner_handler);
-}
-
-void AudioListener::RemovePannerHandler(PannerHandler& panner_handler) {
-  Handler().RemovePannerHandler(panner_handler);
-}
-
-void AudioListener::CreateAndLoadHRTFDatabaseLoader(float sample_rate) {
-  DCHECK(IsMainThread());
-
-  if (!hrtf_database_loader_) {
-    hrtf_database_loader_ =
-        HRTFDatabaseLoader::CreateAndLoadAsynchronouslyIfNecessary(sample_rate);
-  }
-}
-
-void AudioListener::WaitForHRTFDatabaseLoaderThreadCompletion() {
-  if (hrtf_database_loader_) {
-    hrtf_database_loader_->WaitForLoaderThreadCompletion();
-  }
 }
 
 void AudioListener::Trace(Visitor* visitor) const {
@@ -281,12 +187,12 @@ void AudioListener::SetPosition(const gfx::Point3F& position,
                                 ExceptionState& exceptionState) {
   DCHECK(IsMainThread());
 
-  const base::AutoLock listener_locker(ListenerLock());
   const double now = position_x_->Context()->currentTime();
   position_x_->setValueAtTime(position.x(), now, exceptionState);
   position_y_->setValueAtTime(position.y(), now, exceptionState);
   position_z_->setValueAtTime(position.z(), now, exceptionState);
 
+  const base::AutoLock listener_locker(Handler().Lock());
   Handler().MarkPannersAsDirty(PannerHandler::kAzimuthElevationDirty |
                                PannerHandler::kDistanceConeGainDirty);
 }
@@ -295,12 +201,12 @@ void AudioListener::SetOrientation(const gfx::Vector3dF& orientation,
                                    ExceptionState& exceptionState) {
   DCHECK(IsMainThread());
 
-  const base::AutoLock listener_locker(ListenerLock());
   const double now = forward_x_->Context()->currentTime();
   forward_x_->setValueAtTime(orientation.x(), now, exceptionState);
   forward_y_->setValueAtTime(orientation.y(), now, exceptionState);
   forward_z_->setValueAtTime(orientation.z(), now, exceptionState);
 
+  const base::AutoLock listener_locker(Handler().Lock());
   Handler().MarkPannersAsDirty(PannerHandler::kAzimuthElevationDirty);
 }
 
@@ -308,12 +214,12 @@ void AudioListener::SetUpVector(const gfx::Vector3dF& up_vector,
                                 ExceptionState& exceptionState) {
   DCHECK(IsMainThread());
 
-  const base::AutoLock listener_locker(ListenerLock());
   const double now = up_x_->Context()->currentTime();
   up_x_->setValueAtTime(up_vector.x(), now, exceptionState);
   up_y_->setValueAtTime(up_vector.y(), now, exceptionState);
   up_z_->setValueAtTime(up_vector.z(), now, exceptionState);
 
+  const base::AutoLock listener_locker(Handler().Lock());
   Handler().MarkPannersAsDirty(PannerHandler::kAzimuthElevationDirty);
 }
 

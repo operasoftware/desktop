@@ -5,9 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_FRAME_PROVIDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_FRAME_PROVIDER_H_
 
+#include <optional>
+
 #include "base/time/time.h"
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "gpu/command_buffer/client/client_shared_image.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
@@ -40,7 +42,7 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
 
   explicit XRFrameProvider(XRSystem*);
 
-  XRSession* immersive_session() const { return immersive_session_; }
+  XRSession* immersive_session() const { return immersive_session_.Get(); }
 
   void OnSessionStarted(XRSession* session,
                         device::mojom::blink::XRSessionPtr session_ptr);
@@ -73,6 +75,11 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
   virtual void Trace(Visitor*) const;
 
  private:
+  enum class ScheduledFrameType {
+    kInline = 0,
+    kImmersive = 1,
+  };
+
   void OnImmersiveFrameData(device::mojom::blink::XRFrameDataPtr data);
   void OnNonImmersiveFrameData(XRSession* session,
                                device::mojom::blink::XRFrameDataPtr data);
@@ -95,7 +102,8 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
 
   void OnProviderConnectionError(XRSession* session);
   void ProcessScheduledFrame(device::mojom::blink::XRFrameDataPtr frame_data,
-                             double high_res_now_ms);
+                             double high_res_now_ms,
+                             ScheduledFrameType type);
 
   // Called before dispatching a frame to an inline session. This method ensures
   // that inline session frame calls can be scheduled and that they are neither
@@ -104,8 +112,8 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
   void OnPreDispatchInlineFrame(
       XRSession* session,
       double timestamp,
-      const absl::optional<gpu::MailboxHolder>& output_mailbox_holder,
-      const absl::optional<gpu::MailboxHolder>& camera_image_mailbox_holder);
+      const std::optional<gpu::MailboxHolder>& output_mailbox_holder,
+      const std::optional<gpu::MailboxHolder>& camera_image_mailbox_holder);
 
   // Updates the |first_immersive_frame_time_| and
   // |first_immersive_frame_time_delta_| members and returns the computed high
@@ -133,9 +141,9 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
 
   // Time the first immersive frame has arrived - used to align the monotonic
   // clock the devices use with the base::TimeTicks.
-  absl::optional<base::TimeTicks> first_immersive_frame_time_;
+  std::optional<base::TimeTicks> first_immersive_frame_time_;
   // The time_delta value of the first immersive frame that has arrived.
-  absl::optional<base::TimeDelta> first_immersive_frame_time_delta_;
+  std::optional<base::TimeDelta> first_immersive_frame_time_delta_;
 
   // Non-immersive session state
   HeapHashMap<Member<XRSession>,
@@ -148,12 +156,21 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
   // This frame ID is XR-specific and is used to track when frames arrive at the
   // XR compositor so that it knows which poses to use, when to apply bounds
   // updates, etc.
+  // TODO(https://crbug.com/1477016): Investigate making this get passed along
+  // the frame stack for the places it's used rather than be a member variable.
   int16_t frame_id_ = -1;
   bool pending_immersive_vsync_ = false;
   bool pending_non_immersive_vsync_ = false;
 
-  absl::optional<gpu::MailboxHolder> buffer_mailbox_holder_;
-  absl::optional<gpu::MailboxHolder> camera_image_mailbox_holder_;
+  // TODO(crbug.com/1494911): Remove |buffer_sync_token_| and
+  // |camera_image_sync_token_| once the sync tokens are incorporated
+  // into |buffer_shared_image_| and |camera_image_shared_image_| respectively.
+  scoped_refptr<gpu::ClientSharedImage> buffer_shared_image_;
+  gpu::SyncToken buffer_sync_token_;
+
+  scoped_refptr<gpu::ClientSharedImage> camera_image_shared_image_;
+  gpu::SyncToken camera_image_sync_token_;
+
   bool last_has_focus_ = false;
 };
 

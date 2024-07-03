@@ -22,10 +22,16 @@ import sys
 
 _DISALLOW_NON_BLINK_MOJOM = (
     # network::mojom::Foo is allowed to use as non-blink mojom type.
-    '(?!network::)(\w+::)?mojom::(?!blink).+',
-    'Using non-blink mojom types, consider using "::mojom::blink::Foo" instead'
+    # mojom::RendererContentSettingsPtr is allowed.
+    '(?!network::)(\w+::)?mojom::(?!RendererContentSettingsPtr)(?!blink).+',
+    'Using non-blink mojom types, consider using "::mojom::blink::Foo" instead '
     'of "::mojom::Foo" unless you have clear reasons not to do so.',
     'Warning')
+
+_DISALLOW_CONTINUATION_DATA_ = (
+    '.*(Get|Set)ContinuationPreservedEmbedderData.*',
+    '[Get|Set]ContinuationPreservedEmbedderData does not support multiple '
+    'clients.')
 
 _CONFIG = [
     {
@@ -39,18 +45,23 @@ _CONFIG = [
             'gfx::ICCProfile',
             'gfx::RadToDeg',
 
+            # For fast cos/sin functions
+            'gfx::SinCosDegrees',
+
             # absl
             'absl::MakeInt128',
             'absl::MakeUint128',
+            'absl::Int128High64',
+            'absl::Int128Low64',
+            'absl::Uint128High64',
+            'absl::Uint128Low64',
             'absl::get',
             'absl::get_if',
             'absl::holds_alternative',
             'absl::in_place',
+            'absl::in_place_type',
             'absl::int128',
-            'absl::make_optional',
-            'absl::nullopt',
-            'absl::nullopt_t',
-            'absl::optional',
+            'absl::monostate',
             'absl::uint128',
             'absl::variant',
             'absl::visit',
@@ -67,6 +78,7 @@ _CONFIG = [
             'base::DefaultTickClock',
             'base::ElapsedTimer',
             'base::EnumSet',
+            'base::HashInts',
             'base::JobDelegate',
             'base::JobHandle',
             'base::PostJob',
@@ -75,6 +87,7 @@ _CONFIG = [
             'base::FilePath',
             'base::FunctionRef',
             'base::GetUniqueIdForProcess',
+            'base::HeapArray',
             'base::HexStringToUInt64',
             'base::Hours',
             "base::i18n::TextDirection",
@@ -89,6 +102,7 @@ _CONFIG = [
             'base::Milliseconds',
             'base::Minutes',
             'base::Nanoseconds',
+            'base::NotFatalUntil',
             'base::OptionalFromPtr',
             'base::OptionalToPtr',
             'base::Overloaded',
@@ -124,25 +138,31 @@ _CONFIG = [
             'base::Token',
             'base::UnguessableToken',
             'base::UnguessableTokenHash',
+            'base::UnlocalizedTimeFormatWithPattern',
             'base::UnsafeSharedMemoryRegion',
             'base::Uuid',
             'base::WeakPtr',
             'base::WeakPtrFactory',
             'base::WrapRefCounted',
             'base::WritableSharedMemoryMapping',
+            'base::as_byte_span',
             'base::as_bytes',
+            'base::as_chars',
+            'base::as_writable_bytes',
             'base::bit_cast',
             'base::expected',
             'base::make_span',
+            'base::optional_ref',
             'base::to_underlying',
             'base::unexpected',
             'base::ranges::.+',
             'base::sequence_manager::TaskTimeObserver',
             'base::span',
+            'base::Span(Reader|Writer)',
             'logging::GetVlogLevel',
             'logging::SetLogItems',
 
-            # //base/allocator/partition_allocator/partition_alloc_constants.h
+            # //base/allocator/partition_allocator/src/partition_alloc/partition_alloc_constants.h
             'partition_alloc::internal::kAlignment',
 
             # //base/task/bind_post_task.h
@@ -150,6 +170,7 @@ _CONFIG = [
 
             # //base/types/expected.h
             'base::expected',
+            'base::ok',
             'base::unexpected',
 
             # //base/functional/bind.h
@@ -164,6 +185,7 @@ _CONFIG = [
 
             # //base/functional/callback_helpers.h.
             'base::DoNothing',
+            'base::IgnoreArgs',
             'base::SplitOnceCallback',
 
             # //base/functional/callback.h is allowed, but you need to use
@@ -256,10 +278,6 @@ _CONFIG = [
             # //base/strings/strcat.h.
             'base::StrCat',
 
-            # //base/template_util.h.
-            'base::void_t',
-            'base::remove_cvref_t',
-
             # Debugging helpers from //base/debug are allowed everywhere.
             'base::debug::.+',
 
@@ -278,10 +296,9 @@ _CONFIG = [
             'base::SingleThreadTaskRunnerThreadMode',
 
             # Byte order
-            'base::ByteSwap',
-            'base::ReadBigEndian',
-            'base::NetToHost(16|32|64)',
-            'base::HostToNet(16|32|64)',
+            'base::BigEndian(Reader|Writer)',
+            'base::numerics::U(8|16|32|64)(To|From)(Big|Little|Native)Endian',
+            'base::numerics::ByteSwap',
 
             # (Cryptographic) random number generation
             'base::RandUint64',
@@ -319,6 +336,8 @@ _CONFIG = [
             # cc painting and raster types.
             'cc::CategorizedWorkerPool',
             'cc::ColorFilter',
+            'cc::DrawLooper',
+            'cc::PathEffect',
             'cc::InspectablePaintRecorder',
             'cc::InspectableRecordPaintCanvas',
             'cc::PaintCanvas',
@@ -329,6 +348,7 @@ _CONFIG = [
             'cc::RecordPaintCanvas',
             'cc::PaintShader',
             'cc::PaintWorkletInput',
+            'cc::RefCountedBuffer',
             'cc::NodeId',
             'cc::NodeInfo',
             'cc::UsePaintCache',
@@ -440,6 +460,7 @@ _CONFIG = [
             'cc::SurfaceLayer',
 
             # cc::Layer helper data structs.
+            'cc::AnchorPositionScrollData',
             'cc::BrowserControlsParams',
             'cc::ElementId',
             'cc::LayerPositionConstraint',
@@ -460,6 +481,7 @@ _CONFIG = [
             'cc::BrowserControlsState',
             'cc::EventListenerClass',
             'cc::EventListenerProperties',
+            'cc::HitTestOpaqueness',
 
             # Animation
             'cc::AnimationHost',
@@ -505,17 +527,20 @@ _CONFIG = [
             'cc::SnapAreaData',
             'cc::SnapAxis',
             'cc::SnapContainerData',
+            'cc::SnappedTargetData',
             'cc::SnapFlingClient',
             'cc::SnapFlingController',
+            'cc::SnapPositionData',
             'cc::SnapSelectionStrategy',
             'cc::SnapStrictness',
             'cc::TargetSnapAreaElementIds',
             'ui::ScrollGranularity',
 
-            # Document transitions
-            'cc::ViewTransitionRequest',
+            # View transitions
             'cc::ViewTransitionContentLayer',
-            'viz::NavigationID'
+            'cc::ViewTransitionRequest',
+            'viz::NavigationId',
+            'viz::TransitionId',
             'viz::ViewTransitionElementResourceId',
 
             # base/types/strong_alias.h
@@ -538,7 +563,6 @@ _CONFIG = [
             'compositor_target_property::.+',
             'cors::.+',
             'css_parsing_utils::.+',
-            'css_toggle_key_handling::.+',
             'cssvalue::.+',
             'element_locator::.+',
             'encoding::.+',
@@ -611,6 +635,7 @@ _CONFIG = [
             'net::CanonicalCookie',
             'net::CookieInclusionStatus',
             'net::CookiePriority',
+            'net::CookiePartitionKey',
             'net::CookieSameSite',
             'net::CookieSourceScheme',
 
@@ -618,7 +643,7 @@ _CONFIG = [
             'net::HTTP_.+',
 
             # For ConnectionInfo enumeration
-            'net::HttpResponseInfo',
+            'net::HttpConnectionInfo',
 
             # Network service.
             'network::.+',
@@ -680,12 +705,16 @@ _CONFIG = [
             'ui::AXMode',
             'ui::AXNodeData',
             'ui::AXRelativeBounds',
+            'ui::AXTreeChecks',
             'ui::AXTreeData',
             'ui::AXTreeSerializer',
             'ui::AXTreeSource',
             'ui::AXTreeUpdate',
             'ui::AXTreeID',
             'ui::AXTreeIDUnknown',
+            'ui::kInvalidAXNodeID',
+            'ui::kFirstGeneratedRendererNodeID',
+            'ui::kLastGeneratedRendererNodeID',
             'ui::kAXModeBasic',
             'ui::kAXModeComplete',
             'ui::ToString',
@@ -698,11 +727,12 @@ _CONFIG = [
             # serialization. Please keep alphabetized.
             'ui::CanHaveInlineTextBoxChildren',
             'ui::IsCellOrTableHeader',
-            'ui::IsChildTreeOwner',
             'ui::IsClickable',
             'ui::IsComboBox',
+            'ui::IsComboBoxContainer',
             'ui::IsContainerWithSelectableChildren',
             'ui::IsDialog',
+            'ui::IsEmbeddingElement',
             'ui::IsHeading',
             'ui::IsPlainContentElement',
             'ui::IsLandmark',
@@ -725,14 +755,20 @@ _CONFIG = [
 
             # Useful for platform-specific code.
             'base::apple::(CFToNSPtrCast|NSToCFPtrCast|CFToNSOwnershipCast|NSToCFOwnershipCast)',
-            'base::mac::Is(AtMost|AtLeast)?OS.+',
-            'base::ScopedCFTypeRef',
+            'base::apple::ScopedCFTypeRef',
+            'base::mac::MacOSVersion',
+            'base::mac::MacOSMajorVersion',
+
+            # Protected memory
+            'base::ProtectedMemory',
+            'base::AutoWritableMemory',
         ],
         'disallowed': [
-            ('base::Bind(|Once|Repeating)',
-             'Use WTF::Bind or WTF::BindRepeating.'),
+            ('base::Bind(Once|Repeating)',
+             'Use WTF::BindOnce or WTF::BindRepeating.'),
             'base::BindPostTaskToCurrentDefault',
             _DISALLOW_NON_BLINK_MOJOM,
+            _DISALLOW_CONTINUATION_DATA_,
         ],
         # These task runners are generally banned in blink to ensure
         # that blink tasks remain properly labeled. See
@@ -747,9 +783,16 @@ _CONFIG = [
         'allowed': ['gin::.+'],
     },
     {
-        'paths':
-        ['third_party/blink/renderer/bindings/core/v8/serialization/'],
+        'paths': [
+            'third_party/blink/renderer/bindings/core/v8/serialization/',
+            'third_party/blink/renderer/core/typed_arrays/',
+        ],
         'allowed': ['base::BufferIterator'],
+    },
+    {
+        'paths':
+        ['third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h'],
+        'allowed': ['base::FastHash'],
     },
     {
         'paths':
@@ -858,6 +901,16 @@ _CONFIG = [
             'viz::SurfaceId',
         ],
     },
+    { # Needed for display-state CSS media query
+        'paths': [
+            'third_party/blink/renderer/core/frame',
+            'third_party/blink/renderer/core/css'
+        ],
+        'allowed': [
+            'ui::WindowShowState',
+            'ui::SHOW_STATE_.+',
+        ],
+    },
     {
         'paths': ['third_party/blink/renderer/core/exported/web_view_impl.cc'],
         'allowed': [
@@ -880,6 +933,12 @@ _CONFIG = [
         'paths': ['third_party/blink/renderer/core/css/media_values.cc'],
         'allowed': [
             'color_space_utilities::GetColorSpaceGamut',
+        ],
+    },
+    {
+        'paths': ['third_party/blink/renderer/core/css/properties/css_color_function_parser.cc'],
+        'allowed': [
+            'base::MakeFixedFlatMap',
         ],
     },
     {
@@ -915,7 +974,8 @@ _CONFIG = [
         ]
     },
     {
-        'paths': ['third_party/blink/renderer/core/frame/visual_viewport.cc'],
+        'paths': ['third_party/blink/renderer/core/frame/visual_viewport.cc',
+                  'third_party/blink/renderer/core/frame/visual_viewport.h'],
         'allowed': [
             'cc::SolidColorScrollbarLayer',
         ],
@@ -928,6 +988,7 @@ _CONFIG = [
             'cc::InputHandlerScrollResult',
             'cc::SwapPromise',
             'viz::CompositorFrameMetadata',
+            'viz::FrameTimingDetails',
         ],
     },
     {
@@ -1012,6 +1073,27 @@ _CONFIG = [
         ],
     },
     {
+        'paths': [
+            'third_party/blink/public/web/web_frame_widget.h',
+            'third_party/blink/renderer/core/frame/local_frame_client_impl.cc',
+            'third_party/blink/renderer/core/frame/web_frame_widget',
+            'third_party/blink/renderer/core/page/chrome_client.h',
+            'third_party/blink/renderer/core/paint/timing',
+            'third_party/blink/renderer/core/timing',
+        ],
+        'allowed': [
+            'viz::FrameTimingDetails',
+        ],
+    },
+    {
+        'paths': [
+            'third_party/blink/public/web/web_frame_widget.h',
+        ],
+        'allowed': [
+            'base::OnceCallback',
+        ],
+    },
+    {
         'paths': ['third_party/blink/renderer/core/style/computed_style.h'],
         'allowed': [
             'css_longhand::.+',
@@ -1042,6 +1124,7 @@ _CONFIG = [
     {
         'paths': [
             'third_party/blink/renderer/core/css/properties/css_parsing_utils.cc',
+            'third_party/blink/renderer/core/html/html_permission_element.cc',
             'third_party/blink/renderer/core/paint/box_border_painter.cc',
         ],
         'allowed': [
@@ -1176,6 +1259,7 @@ _CONFIG = [
         'allowed': [
             'base::flat_map',
             'gl::GpuPreference',
+            'gpu::ClientSharedImage',
             'gpu::SHARED_IMAGE_USAGE_.+',
             'gpu::gles2::GLES2Interface',
             'gpu::raster::RasterInterface',
@@ -1207,6 +1291,15 @@ _CONFIG = [
         ],
     },
     {
+        'paths': [
+            'third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h',
+        ],
+        # This class needs to pass gpu::Capabilities() to a //media function.
+        'allowed': [
+            'gpu::Capabilities',
+        ],
+    },
+   {
         'paths': [
             'third_party/blink/renderer/core/html/media/',
         ],
@@ -1276,16 +1369,21 @@ _CONFIG = [
             # TODO(https://crbug.com/787252): Remove most of the entries below,
             # once the directory is fully Onion soup'ed.
             'base::Bind.*',
-            'base::Unretained',
-            'base::NoDestructor',
-            'base::flat_map',
             'base::EraseIf',
+            'base::flat_map',
+            'base::flat_set',
+            'base::NoDestructor',
+            'base::RetainedRef',
             'base::ScopedPlatformFile',
+            'base::Unretained',
             'mojo::WrapCallbackWithDefaultInvokeIfNotRun',
 
             # TODO(https://crrev.com/787252): Consider allowlisting fidl::*
             # usage more broadly in Blink.
             'fidl::InterfaceHandle',
+        ],
+        'inclass_allowed': [
+            'base::SequencedTaskRunner::GetCurrentDefault'
         ]
     },
     {
@@ -1410,10 +1508,12 @@ _CONFIG = [
         ],
         'allowed': [
             'base::ClampMul',
+            'base::IsAligned',
             'base::DoNothingWithBoundArgs',
             'base::PlatformThreadRef',
             'base::WrapRefCounted',
             'cc::kNumYUVPlanes',
+            'cc::SkiaPaintCanvas',
             'cc::YUVIndex',
             'cc::YUVSubsampling',
             'gpu::kNullSurfaceHandle',
@@ -1426,6 +1526,7 @@ _CONFIG = [
             'viz::RasterContextProvider',
             'viz::ReleaseCallback',
             'media::.+',
+            'libgav1::.+',
             'libyuv::.+',
         ]
     },
@@ -1544,6 +1645,7 @@ _CONFIG = [
         'allowed': [
             # Required to provide a canonicalization functor to liburlpattern.
             "absl::InvalidArgumentError",
+            "absl::Status",
             "absl::StatusOr",
 
             # Required by liburlpattern API in order to pass string data
@@ -1627,13 +1729,12 @@ _CONFIG = [
             'base::LazyInstance',
             'base::Lock',
             # TODO(crbug.com/787254): Remove base::BindOnce, base::Unretained,
-            # base::Passed, base::OnceClosure, base::RepeatingClosure,
-            # base::CurrentThread and base::RetainedRef.
+            # base::OnceClosure, base::RepeatingClosure, base::CurrentThread and
+            # base::RetainedRef.
             'base::Bind.*',
             'base::MD5.*',
             'base::CurrentThread',
             'base::.*Closure',
-            'base::Passed',
             'base::PowerObserver',
             'base::RetainedRef',
             'base::StringPrintf',
@@ -1719,6 +1820,15 @@ _CONFIG = [
         ],
     },
     {
+        'paths': [
+            'third_party/blink/renderer/core/frame/local_frame.cc',
+            'third_party/blink/renderer/core/frame/local_frame.h',
+        ],
+        'allowed': [
+            'gfx::ImageSkia',
+        ],
+    },
+    {
         'paths': ['third_party/blink/renderer/core/frame/local_frame_view.cc'],
         'allowed': [
             'base::LapTimer',
@@ -1770,9 +1880,12 @@ _CONFIG = [
     },
     {
         'paths': [
-            'third_party/blink/renderer/core/view_transition/view_transition_style_tracker.h'
+            'third_party/blink/renderer/core/view_transition/',
         ],
-        'allowed': ['viz::ViewTransitionElementResourceId'],
+        'allowed': [
+            'base::flat_map',
+            'cc::ScopedPauseRendering'
+        ],
     },
     {
         'paths': [
@@ -1802,6 +1915,15 @@ _CONFIG = [
         ],
         'allowed': [
             'base::CommandLine',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/controller/blink_leak_detector.cc',
+        ],
+        'allowed': [
+            'base::CommandLine',
+            'switches::kEnableLeakDetectionHeapSnapshot',
         ]
     },
     {
@@ -1871,7 +1993,15 @@ _CONFIG = [
             'third_party/blink/renderer/core/frame/attribution_src_loader.h',
         ],
         'allowed': [
-            'attribution_reporting:.*',
+            'attribution_reporting::.*',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/core/origin_trials/origin_trial_context.cc',
+        ],
+        'allowed': [
+            'attribution_reporting::features::.*',
         ]
     },
     {
@@ -1894,7 +2024,6 @@ _CONFIG = [
     },
     {
         'paths': [
-            'third_party/blink/renderer/modules/service_worker/service_worker_router_type_converter.cc',
             'third_party/blink/renderer/modules/service_worker/service_worker_router_type_converter_test.cc',
             # TODO(crbug.com/1371756): consolidate code using liburlpattern.
             # Especially, consolidate manifest and this code.
@@ -1904,7 +2033,69 @@ _CONFIG = [
             'liburlpattern::Part',
             'liburlpattern::PartType',
         ]
-    }
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/remoteplayback/',
+        ],
+        'allowed': [
+            'media::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/ml/webnn/ml_graph_builder.cc',
+        ],
+        'allowed': [
+            'webnn::features::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/ml/webnn/ml_graph_test_mojo.cc',
+        ],
+        'allowed': [
+            'base::test::ScopedFeatureList',
+            'blink_mojom::.+',
+            'webnn::features::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/ml/webnn/ml_graph_type_converter.cc',
+        ],
+        'allowed': [
+            'blink_mojom::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/ml/webnn/ml_graph_tflite_converter.cc',
+            'third_party/blink/renderer/modules/ml/webnn/ml_graph_test_model_loader.cc',
+        ],
+        'allowed': [
+            'flatbuffers::.+',
+            'tflite::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/ad_auction/',
+            'third_party/blink/renderer/modules/shared_storage/',
+        ],
+        'allowed': [
+            'aggregation_service::.+',
+        ]
+    },
+     {
+        'paths': [
+            'third_party/blink/renderer/modules/scheduler/',
+            'third_party/blink/renderer/modules/shared_storage/',
+        ],
+        'allowed': [
+            _DISALLOW_CONTINUATION_DATA_[0],
+        ]
+    },
 ]
 
 
@@ -1979,11 +2170,14 @@ _COMPILED_CONFIG = _precompile_config()
 #
 # As a bit of a minor hack, this regex also hardcodes a check for GURL, since
 # GURL isn't namespace qualified and wouldn't match otherwise.
+# ContinuationPreservedEmbedder data is similarly hardcoded to restrict access
+# to the v8 APIs which would not otherwise match.
 #
 # An example of an identifier that will be matched with this RE is
 # "base::BindOnce" or "performance_manager::policies::WorkingSetTrimData".
 _IDENTIFIER_WITH_NAMESPACE_RE = re.compile(
-    r'\b(?:(?:[a-z_][a-z0-9_]*::)+[A-Za-z_][A-Za-z0-9_]*|GURL)\b')
+    r'\b(?:(?:[a-z_][a-z0-9_]*::)+[A-Za-z_][A-Za-z0-9_]*|GURL|.*ContinuationPreservedEmbedderData.*)\b'
+)
 
 # Different check which matches a non-empty sequence of lower-case
 # alphanumeric namespaces, followed by at least one
@@ -2082,6 +2276,7 @@ def check(path, contents):
     if (ext not in ('.cc', '.cpp', '.h', '.mm') or path.find('/testing/') >= 0
             or path.find('/core/web_test/') >= 0 or path.find('/tests/') >= 0
             or basename.endswith('_test') or basename.endswith('_test_helpers')
+            or basename.endswith('_test_utils')
             or basename.endswith('_unittest') or basename.endswith('_fuzzer')
             or basename.endswith('_perftest')):
         return results

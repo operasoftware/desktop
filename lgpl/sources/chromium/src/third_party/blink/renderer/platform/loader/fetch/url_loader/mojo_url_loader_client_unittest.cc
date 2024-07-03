@@ -5,8 +5,9 @@
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/mojo_url_loader_client.h"
 
 #include <vector>
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/task/single_thread_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -44,10 +45,9 @@ class MockResourceRequestSender : public ResourceRequestSender {
     EXPECT_FALSE(context_->complete);
   }
 
-  void OnReceivedRedirect(
-      const net::RedirectInfo& redirect_info,
-      network::mojom::URLResponseHeadPtr head,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner) override {
+  void OnReceivedRedirect(const net::RedirectInfo& redirect_info,
+                          network::mojom::URLResponseHeadPtr head,
+                          base::TimeTicks redirect_ipc_arrival_time) override {
     EXPECT_FALSE(context_->cancelled);
     EXPECT_FALSE(context_->complete);
     ++context_->seen_redirects;
@@ -58,22 +58,21 @@ class MockResourceRequestSender : public ResourceRequestSender {
   }
 
   void OnReceivedResponse(network::mojom::URLResponseHeadPtr head,
-                          base::TimeTicks response_arrival_time) override {
+                          mojo::ScopedDataPipeConsumerHandle body,
+                          std::optional<mojo_base::BigBuffer> cached_metadata,
+                          base::TimeTicks response_ipc_arrival_time) override {
     EXPECT_FALSE(context_->cancelled);
     EXPECT_FALSE(context_->received_response);
     EXPECT_FALSE(context_->complete);
     context_->received_response = true;
     context_->last_load_timing = head->load_timing;
-    if (context_->cancel_on_receive_response)
+    if (cached_metadata) {
+      context_->cached_metadata = std::move(*cached_metadata);
+    }
+    if (context_->cancel_on_receive_response) {
       context_->cancelled = true;
-  }
-
-  void OnStartLoadingResponseBody(
-      mojo::ScopedDataPipeConsumerHandle body) override {
-    if (context_->cancelled)
       return;
-    EXPECT_TRUE(context_->received_response);
-    EXPECT_FALSE(context_->complete);
+    }
     context_->body_handle = std::move(body);
   }
 
@@ -88,16 +87,8 @@ class MockResourceRequestSender : public ResourceRequestSender {
     }
   }
 
-  void OnReceivedCachedMetadata(mojo_base::BigBuffer data) override {
-    EXPECT_TRUE(context_->received_response);
-    EXPECT_FALSE(context_->complete);
-    if (context_->cancelled)
-      return;
-    context_->cached_metadata = std::move(data);
-  }
-
-  void OnRequestComplete(
-      const network::URLLoaderCompletionStatus& status) override {
+  void OnRequestComplete(const network::URLLoaderCompletionStatus& status,
+                         base::TimeTicks complete_ipc_arrival_time) override {
     if (context_->cancelled)
       return;
     EXPECT_TRUE(context_->received_response);
@@ -144,7 +135,7 @@ class MockResourceRequestSender : public ResourceRequestSender {
 
     net::LoadTimingInfo last_load_timing;
     network::URLLoaderCompletionStatus completion_status;
-    MojoURLLoaderClient* url_laoder_client;
+    raw_ptr<MojoURLLoaderClient> url_laoder_client;
   };
 
  private:
@@ -153,7 +144,7 @@ class MockResourceRequestSender : public ResourceRequestSender {
 
 std::string ReadOneChunk(mojo::ScopedDataPipeConsumerHandle* handle) {
   char buffer[kDataPipeCapacity];
-  uint32_t read_bytes = kDataPipeCapacity;
+  size_t read_bytes = kDataPipeCapacity;
   MojoResult result =
       (*handle)->ReadData(buffer, &read_bytes, MOJO_READ_DATA_FLAG_NONE);
   if (result != MOJO_RESULT_OK)
@@ -173,9 +164,10 @@ class TestBackForwardCacheLoaderHelper : public BackForwardCacheLoaderHelper {
  public:
   TestBackForwardCacheLoaderHelper() = default;
   void EvictFromBackForwardCache(
-      mojom::RendererEvictionReason reason) override {}
+      mojom::blink::RendererEvictionReason reason) override {}
 
-  void DidBufferLoadWhileInBackForwardCache(size_t num_bytes) override {}
+  void DidBufferLoadWhileInBackForwardCache(bool update_process_wide_count,
+                                            size_t num_bytes) override {}
 
   void Detach() override {}
 };
@@ -205,8 +197,10 @@ class WebMojoURLLoaderClientTest : public ::testing::Test,
     client_ = std::make_unique<MojoURLLoaderClient>(
         resource_request_sender_.get(), loading_task_runner,
         url_loader_factory->BypassRedirectChecks(), request->url,
-        /*back*/
-        MakeGarbageCollected<TestBackForwardCacheLoaderHelper>());
+        /*evict_from_bfcache_callback=*/
+        base::OnceCallback<void(mojom::blink::RendererEvictionReason)>(),
+        /*did_buffer_load_while_in_bfcache_callback=*/
+        base::RepeatingCallback<void(size_t)>());
     context_ = resource_request_sender_->context();
     context_->url_laoder_client = client_.get();
     url_loader_ = ThrottlingURLLoader::CreateLoaderAndStart(
@@ -214,7 +208,7 @@ class WebMojoURLLoaderClientTest : public ::testing::Test,
         std::vector<std::unique_ptr<blink::URLLoaderThrottle>>(), request_id_,
         /*loader_options=0*/ 0, request.get(), client_.get(),
         TRAFFIC_ANNOTATION_FOR_TESTS, std::move(loading_task_runner),
-        absl::make_optional(std::vector<std::string>()));
+        std::make_optional(std::vector<std::string>()));
 
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(url_loader_client_);
@@ -262,7 +256,7 @@ class WebMojoURLLoaderClientTest : public ::testing::Test,
   std::unique_ptr<ThrottlingURLLoader> url_loader_;
   std::unique_ptr<MojoURLLoaderClient> client_;
   std::unique_ptr<MockResourceRequestSender> resource_request_sender_;
-  MockResourceRequestSender::Context* context_;
+  raw_ptr<MockResourceRequestSender::Context> context_;
   int request_id_ = 0;
   mojo::Remote<network::mojom::URLLoaderClient> url_loader_client_;
 };
@@ -270,7 +264,7 @@ class WebMojoURLLoaderClientTest : public ::testing::Test,
 TEST_P(WebMojoURLLoaderClientTest, OnReceiveResponse) {
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         mojo::ScopedDataPipeConsumerHandle(),
-                                        absl::nullopt);
+                                        std::nullopt);
 
   EXPECT_FALSE(context_->received_response);
   base::RunLoop().RunUntilIdle();
@@ -285,13 +279,13 @@ TEST_P(WebMojoURLLoaderClientTest, ResponseBody) {
                                                  data_pipe_consumer));
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
 
   EXPECT_FALSE(context_->received_response);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(context_->received_response);
 
-  uint32_t size = 5;
+  size_t size = 5;
   MojoResult result =
       data_pipe_producer->WriteData("hello", &size, MOJO_WRITE_DATA_FLAG_NONE);
   ASSERT_EQ(MOJO_RESULT_OK, result);
@@ -332,7 +326,7 @@ TEST_P(WebMojoURLLoaderClientTest, OnReceiveResponseWithCachedMetadata) {
 TEST_P(WebMojoURLLoaderClientTest, OnTransferSizeUpdated) {
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         mojo::ScopedDataPipeConsumerHandle(),
-                                        absl::nullopt);
+                                        std::nullopt);
   url_loader_client_->OnTransferSizeUpdated(4);
   url_loader_client_->OnTransferSizeUpdated(4);
 
@@ -353,8 +347,8 @@ TEST_P(WebMojoURLLoaderClientTest, OnCompleteWithResponseBody) {
                                                  data_pipe_consumer));
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
-  uint32_t size = 5;
+                                        std::nullopt);
+  size_t size = 5;
   MojoResult result =
       data_pipe_producer->WriteData("hello", &size, MOJO_WRITE_DATA_FLAG_NONE);
   ASSERT_EQ(MOJO_RESULT_OK, result);
@@ -390,14 +384,14 @@ TEST_P(WebMojoURLLoaderClientTest, OnCompleteShouldBeTheLastMessage) {
                                                  data_pipe_consumer));
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
   url_loader_client_->OnComplete(status);
 
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(context_->received_response);
   EXPECT_TRUE(context_->complete);
 
-  uint32_t size = 5;
+  size_t size = 5;
   MojoResult result =
       data_pipe_producer->WriteData("hello", &size, MOJO_WRITE_DATA_FLAG_NONE);
   ASSERT_EQ(MOJO_RESULT_OK, result);
@@ -419,7 +413,7 @@ TEST_P(WebMojoURLLoaderClientTest, CancelOnReceiveResponse) {
                                                  data_pipe_consumer));
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
   url_loader_client_->OnComplete(status);
 
   EXPECT_FALSE(context_->received_response);
@@ -443,7 +437,7 @@ TEST_P(WebMojoURLLoaderClientTest, Defer) {
   data_pipe_producer.reset();  // Empty body.
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
   url_loader_client_->OnComplete(status);
 
   EXPECT_FALSE(context_->received_response);
@@ -473,7 +467,7 @@ TEST_P(WebMojoURLLoaderClientTest, DeferWithResponseBody) {
   EXPECT_EQ(MOJO_RESULT_OK, mojo::CreateDataPipe(&options, data_pipe_producer,
                                                  data_pipe_consumer));
   std::string msg1 = "hello";
-  uint32_t size = static_cast<uint32_t>(msg1.size());
+  size_t size = msg1.size();
   ASSERT_EQ(MOJO_RESULT_OK, data_pipe_producer->WriteData(
                                 msg1.data(), &size, MOJO_WRITE_DATA_FLAG_NONE));
   EXPECT_EQ(msg1.size(), size);
@@ -481,7 +475,7 @@ TEST_P(WebMojoURLLoaderClientTest, DeferWithResponseBody) {
 
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
   url_loader_client_->OnComplete(status);
 
   EXPECT_FALSE(context_->received_response);
@@ -518,7 +512,7 @@ TEST_P(WebMojoURLLoaderClientTest,
             mojo::CreateDataPipe(nullptr, producer_handle, consumer_handle));
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(consumer_handle),
-                                        absl::nullopt);
+                                        std::nullopt);
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(context_->received_response);
   EXPECT_FALSE(context_->complete);
@@ -526,7 +520,7 @@ TEST_P(WebMojoURLLoaderClientTest,
 
   // Write data to the response body pipe.
   std::string msg1 = "he";
-  uint32_t size = static_cast<uint32_t>(msg1.size());
+  size_t size = msg1.size();
   ASSERT_EQ(MOJO_RESULT_OK, producer_handle->WriteData(
                                 msg1.data(), &size, MOJO_WRITE_DATA_FLAG_NONE));
   EXPECT_EQ(msg1.size(), size);
@@ -536,7 +530,7 @@ TEST_P(WebMojoURLLoaderClientTest,
   // Defer for back-forward cache.
   client_->Freeze(LoaderFreezeMode::kBufferIncoming);
   std::string msg2 = "ll";
-  size = static_cast<uint32_t>(msg2.size());
+  size = msg2.size();
   ASSERT_EQ(MOJO_RESULT_OK, producer_handle->WriteData(
                                 msg2.data(), &size, MOJO_WRITE_DATA_FLAG_NONE));
   EXPECT_EQ(msg2.size(), size);
@@ -546,7 +540,7 @@ TEST_P(WebMojoURLLoaderClientTest,
   // Defer not for back-forward cache again.
   client_->Freeze(LoaderFreezeMode::kBufferIncoming);
   std::string msg3 = "o";
-  size = static_cast<uint32_t>(msg3.size());
+  size = msg3.size();
   ASSERT_EQ(MOJO_RESULT_OK, producer_handle->WriteData(
                                 msg3.data(), &size, MOJO_WRITE_DATA_FLAG_NONE));
   EXPECT_EQ(msg3.size(), size);
@@ -562,7 +556,7 @@ TEST_P(WebMojoURLLoaderClientTest,
 
   // Write more data to the pipe while not deferred.
   std::string msg4 = "world";
-  size = static_cast<uint32_t>(msg4.size());
+  size = msg4.size();
   ASSERT_EQ(MOJO_RESULT_OK, producer_handle->WriteData(
                                 msg4.data(), &size, MOJO_WRITE_DATA_FLAG_NONE));
   EXPECT_EQ(msg4.size(), size);
@@ -584,7 +578,7 @@ TEST_P(WebMojoURLLoaderClientTest,
             mojo::CreateDataPipe(nullptr, producer_handle, consumer_handle));
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(consumer_handle),
-                                        absl::nullopt);
+                                        std::nullopt);
   network::URLLoaderCompletionStatus status;
   url_loader_client_->OnComplete(status);
   base::RunLoop().RunUntilIdle();
@@ -594,7 +588,7 @@ TEST_P(WebMojoURLLoaderClientTest,
 
   // Write data to the response body pipe, but don't close the connection yet.
   std::string msg1 = "hello";
-  uint32_t size = static_cast<uint32_t>(msg1.size());
+  size_t size = msg1.size();
   // We expect that the other end of the pipe to be ready to read the data
   // immediately.
   ASSERT_EQ(MOJO_RESULT_OK, producer_handle->WriteData(
@@ -615,7 +609,7 @@ TEST_P(WebMojoURLLoaderClientTest,
 
   // Write more data to the pipe while not deferred.
   std::string msg2 = "world";
-  size = static_cast<uint32_t>(msg2.size());
+  size = msg2.size();
   ASSERT_EQ(MOJO_RESULT_OK, producer_handle->WriteData(
                                 msg2.data(), &size, MOJO_WRITE_DATA_FLAG_NONE));
   EXPECT_EQ(msg2.size(), size);
@@ -644,7 +638,7 @@ TEST_P(WebMojoURLLoaderClientTest,
             mojo::CreateDataPipe(nullptr, producer_handle, consumer_handle));
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(consumer_handle),
-                                        absl::nullopt);
+                                        std::nullopt);
   network::URLLoaderCompletionStatus status;
   url_loader_client_->OnComplete(status);
   base::RunLoop().RunUntilIdle();
@@ -653,12 +647,12 @@ TEST_P(WebMojoURLLoaderClientTest,
   EXPECT_EQ("", GetRequestPeerContextBody(context_));
 
   // Write to the response body pipe. It will take several writes.
-  const uint32_t body_size = 70000;
-  uint32_t bytes_remaining = body_size;
+  const size_t body_size = 70000;
+  size_t bytes_remaining = body_size;
   std::string body(body_size, '*');
   while (bytes_remaining > 0) {
-    uint32_t start_position = body_size - bytes_remaining;
-    uint32_t bytes_sent = bytes_remaining;
+    size_t start_position = body_size - bytes_remaining;
+    size_t bytes_sent = bytes_remaining;
     MojoResult result = producer_handle->WriteData(
         body.c_str() + start_position, &bytes_sent, MOJO_WRITE_DATA_FLAG_NONE);
     if (result == MOJO_RESULT_SHOULD_WAIT) {
@@ -673,7 +667,7 @@ TEST_P(WebMojoURLLoaderClientTest,
   }
   // Ensure we've written all that we can write. When buffering is disabled, we
   // can only write |body_size| - |bytes_remaining| bytes.
-  const uint32_t bytes_written = body_size - bytes_remaining;
+  const size_t bytes_written = body_size - bytes_remaining;
   EXPECT_EQ(body_size, bytes_written);
   producer_handle.reset();
 
@@ -708,7 +702,7 @@ TEST_P(WebMojoURLLoaderClientTest, DeferWithTransferSizeUpdated) {
   mojo::ScopedDataPipeConsumerHandle data_pipe_consumer;
   EXPECT_EQ(MOJO_RESULT_OK, mojo::CreateDataPipe(&options, data_pipe_producer,
                                                  data_pipe_consumer));
-  uint32_t size = 5;
+  size_t size = 5;
   MojoResult result =
       data_pipe_producer->WriteData("hello", &size, MOJO_WRITE_DATA_FLAG_NONE);
   ASSERT_EQ(MOJO_RESULT_OK, result);
@@ -717,7 +711,7 @@ TEST_P(WebMojoURLLoaderClientTest, DeferWithTransferSizeUpdated) {
 
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
   url_loader_client_->OnTransferSizeUpdated(4);
   url_loader_client_->OnComplete(status);
 
@@ -760,7 +754,7 @@ TEST_P(WebMojoURLLoaderClientTest, SetDeferredDuringFlushingDeferredMessage) {
   mojo::ScopedDataPipeConsumerHandle data_pipe_consumer;
   EXPECT_EQ(MOJO_RESULT_OK, mojo::CreateDataPipe(&options, data_pipe_producer,
                                                  data_pipe_consumer));
-  uint32_t size = 5;
+  size_t size = 5;
   MojoResult result =
       data_pipe_producer->WriteData("hello", &size, MOJO_WRITE_DATA_FLAG_NONE);
   ASSERT_EQ(MOJO_RESULT_OK, result);
@@ -769,7 +763,7 @@ TEST_P(WebMojoURLLoaderClientTest, SetDeferredDuringFlushingDeferredMessage) {
 
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
   url_loader_client_->OnTransferSizeUpdated(4);
   url_loader_client_->OnComplete(status);
 
@@ -827,7 +821,7 @@ TEST_P(WebMojoURLLoaderClientTest,
   data_pipe_producer.reset();  // Empty body.
   url_loader_client_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                         std::move(data_pipe_consumer),
-                                        absl::nullopt);
+                                        std::nullopt);
 
   url_loader_client_->OnTransferSizeUpdated(4);
   url_loader_client_->OnComplete(status);

@@ -25,6 +25,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/dict.h"
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 
 #define RPL_SIGNATURE "ARMovie\x0A"
@@ -268,6 +269,9 @@ static int rpl_read_header(AVFormatContext *s)
                "Video stream will be broken!\n", av_fourcc2str(vst->codecpar->codec_tag));
 
     number_of_chunks = read_line_and_int(pb, &error);  // number of chunks in the file
+    if (number_of_chunks == INT_MAX)
+        return AVERROR_INVALIDDATA;
+
     // The number in the header is actually the index of the last chunk.
     number_of_chunks++;
 
@@ -390,9 +394,9 @@ static int rpl_read_packet(AVFormatContext *s, AVPacket *pkt)
     return ret;
 }
 
-const AVInputFormat ff_rpl_demuxer = {
-    .name           = "rpl",
-    .long_name      = NULL_IF_CONFIG_SMALL("RPL / ARMovie"),
+const FFInputFormat ff_rpl_demuxer = {
+    .p.name         = "rpl",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("RPL / ARMovie"),
     .priv_data_size = sizeof(RPLContext),
     .read_probe     = rpl_probe,
     .read_header    = rpl_read_header,

@@ -1,4 +1,4 @@
-// Copyright 2023 The Chromium Authors. All rights reserved.
+// Copyright 2023 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ class FakeConnectionTestBase : public ::testing::Test {
   const ::cricket::Connection* GetConnection(base::StringPiece remote_ip,
                                              int remote_port) {
     return connection_factory_->CreateConnection(
-        FakeConnectionFactory::CandidateType::LOCAL, remote_ip, remote_port);
+        webrtc::IceCandidateType::kHost, remote_ip, remote_port);
   }
 
   ::base::test::SingleThreadTaskEnvironment env{

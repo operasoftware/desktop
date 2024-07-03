@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/buffering_bytes_consumer.h"
 
-#include "base/debug/alias.h"
+#include "base/debug/crash_logging.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/numerics/safe_conversions.h"
@@ -147,10 +147,12 @@ mojo::ScopedDataPipeConsumerHandle BufferingBytesConsumer::DrainAsDataPipe() {
 }
 
 void BufferingBytesConsumer::SetClient(BytesConsumer::Client* client) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   client_ = client;
 }
 
 void BufferingBytesConsumer::ClearClient() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   client_ = nullptr;
 }
 
@@ -191,9 +193,8 @@ void BufferingBytesConsumer::OnTimerFired(TimerBase*) {
 }
 
 void BufferingBytesConsumer::OnStateChange() {
-  base::debug::Alias(&client_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   BytesConsumer::Client* client = client_;
-  base::debug::Alias(&client);
   BufferData();
   if (client)
     client->OnStateChange();
@@ -203,6 +204,7 @@ void BufferingBytesConsumer::BufferData() {
   if (buffering_state_ != BufferingState::kStarted)
     return;
 
+  DCHECK(bytes_consumer_);
   while (true) {
     const char* p = nullptr;
     size_t available = 0;

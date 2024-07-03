@@ -43,6 +43,7 @@
 #include "internal.h"
 #include "avio_internal.h"
 #include "id3v2.h"
+#include "url.h"
 
 #include "hls_sample_encryption.h"
 
@@ -539,11 +540,16 @@ static struct rendition *new_rendition(HLSContext *c, struct rendition_info *inf
     }
 
     if (info->assoc_language[0]) {
-        int langlen = strlen(rend->language);
+        size_t langlen = strlen(rend->language);
         if (langlen < sizeof(rend->language) - 3) {
+            size_t assoc_len;
             rend->language[langlen] = ',';
-            strncpy(rend->language + langlen + 1, info->assoc_language,
-                    sizeof(rend->language) - langlen - 2);
+            assoc_len = av_strlcpy(rend->language + langlen + 1,
+                                   info->assoc_language,
+                                   sizeof(rend->language) - langlen - 1);
+            if (langlen + assoc_len + 2 > sizeof(rend->language)) // truncation occurred
+                av_log(c->ctx, AV_LOG_WARNING, "Truncated rendition language: %s\n",
+                       info->assoc_language);
         }
     }
 
@@ -1265,7 +1271,7 @@ static void intercept_id3(struct playlist *pls, uint8_t *buf,
     if (pls->id3_buf) {
         /* Now parse all the ID3 tags */
         FFIOContext id3ioctx;
-        ffio_init_context(&id3ioctx, pls->id3_buf, id3_buf_pos, 0, NULL, NULL, NULL, NULL);
+        ffio_init_read_context(&id3ioctx, pls->id3_buf, id3_buf_pos);
         handle_id3(&id3ioctx.pub, pls);
     }
 
@@ -1851,17 +1857,6 @@ static int set_stream_info_from_input_stream(AVStream *st, struct playlist *pls,
 
     av_dict_copy(&st->metadata, ist->metadata, 0);
 
-    // copy side data
-    for (int i = 0; i < ist->nb_side_data; i++) {
-        const AVPacketSideData *sd_src = &ist->side_data[i];
-        uint8_t *dst_data;
-
-        dst_data = av_stream_new_side_data(st, sd_src->type, sd_src->size);
-        if (!dst_data)
-            return AVERROR(ENOMEM);
-        memcpy(dst_data, sd_src->data, sd_src->size);
-    }
-
     ffstream(st)->need_context_update = 1;
 
     return 0;
@@ -2107,7 +2102,7 @@ static int hls_read_header(AVFormatContext *s)
             pls->audio_setup_info.codec_id != AV_CODEC_ID_NONE) {
             void *iter = NULL;
             while ((in_fmt = av_demuxer_iterate(&iter)))
-                if (in_fmt->raw_codec_id == pls->audio_setup_info.codec_id)
+                if (ffifmt(in_fmt)->raw_codec_id == pls->audio_setup_info.codec_id)
                     break;
         } else {
             pls->ctx->probesize = s->probesize > 0 ? s->probesize : 1024 * 4;
@@ -2506,6 +2501,9 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
         /* Flush the packet queue of the subdemuxer. */
         ff_read_frame_flush(pls->ctx);
 
+        /* Reset the init segment so it's re-fetched and served appropiately */
+        pls->cur_init_section = NULL;
+
         pls->seek_timestamp = seek_timestamp;
         pls->seek_flags = flags;
 
@@ -2573,7 +2571,7 @@ static const AVOption hls_options[] = {
         {.str = "3gp,aac,avi,ac3,eac3,flac,mkv,m3u8,m4a,m4s,m4v,mpg,mov,mp2,mp3,mp4,mpeg,mpegts,ogg,ogv,oga,ts,vob,wav"},
         INT_MIN, INT_MAX, FLAGS},
     {"max_reload", "Maximum number of times a insufficient list is attempted to be reloaded",
-        OFFSET(max_reload), AV_OPT_TYPE_INT, {.i64 = 1000}, 0, INT_MAX, FLAGS},
+        OFFSET(max_reload), AV_OPT_TYPE_INT, {.i64 = 3}, 0, INT_MAX, FLAGS},
     {"m3u8_hold_counters", "The maximum number of times to load m3u8 when it refreshes without new segments",
         OFFSET(m3u8_hold_counters), AV_OPT_TYPE_INT, {.i64 = 1000}, 0, INT_MAX, FLAGS},
     {"http_persistent", "Use persistent HTTP connections",
@@ -2596,12 +2594,12 @@ static const AVClass hls_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVInputFormat ff_hls_demuxer = {
-    .name           = "hls",
-    .long_name      = NULL_IF_CONFIG_SMALL("Apple HTTP Live Streaming"),
-    .priv_class     = &hls_class,
+const FFInputFormat ff_hls_demuxer = {
+    .p.name         = "hls",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Apple HTTP Live Streaming"),
+    .p.priv_class   = &hls_class,
+    .p.flags        = AVFMT_NOGENSEARCH | AVFMT_TS_DISCONT | AVFMT_NO_BYTE_SEEK,
     .priv_data_size = sizeof(HLSContext),
-    .flags          = AVFMT_NOGENSEARCH | AVFMT_TS_DISCONT | AVFMT_NO_BYTE_SEEK,
     .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = hls_probe,
     .read_header    = hls_read_header,

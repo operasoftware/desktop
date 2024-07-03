@@ -163,12 +163,11 @@ WorkerThread::~WorkerThread() {
 
   DCHECK(child_threads_.empty());
   DCHECK_NE(ExitCode::kNotTerminated, exit_code_);
-  base::UmaHistogramEnumeration("WorkerThread.ExitCode", exit_code_);
 }
 
 void WorkerThread::Start(
     std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params,
-    const absl::optional<WorkerBackingThreadStartupData>& thread_startup_data,
+    const std::optional<WorkerBackingThreadStartupData>& thread_startup_data,
     std::unique_ptr<WorkerDevToolsParams> devtools_params) {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   devtools_worker_token_ = devtools_params->devtools_worker_token;
@@ -194,7 +193,9 @@ void WorkerThread::Start(
       CrossThreadBindOnce(&WorkerThread::InitializeOnWorkerThread,
                           CrossThreadUnretained(this),
                           std::move(global_scope_creation_params),
-                          thread_startup_data, std::move(devtools_params)));
+                          IsOwningBackingThread() ?
+                              thread_startup_data : std::nullopt,
+                          std::move(devtools_params)));
 }
 
 void WorkerThread::EvaluateClassicScript(
@@ -597,7 +598,7 @@ void WorkerThread::InitializeSchedulerOnWorkerThread(
 
 void WorkerThread::InitializeOnWorkerThread(
     std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params,
-    const absl::optional<WorkerBackingThreadStartupData>& thread_startup_data,
+    const std::optional<WorkerBackingThreadStartupData>& thread_startup_data,
     std::unique_ptr<WorkerDevToolsParams> devtools_params) {
   DCHECK(IsCurrentThread());
   backing_thread_weak_factory_.emplace(this);
@@ -608,6 +609,7 @@ void WorkerThread::InitializeOnWorkerThread(
     DCHECK_EQ(ThreadState::kNotStarted, thread_state_);
 
     if (IsOwningBackingThread()) {
+      global_scope_creation_params->is_default_world_of_isolate = true;
       DCHECK(thread_startup_data.has_value());
       GetWorkerBackingThread().InitializeOnBackingThread(*thread_startup_data);
     } else {
@@ -626,16 +628,9 @@ void WorkerThread::InitializeOnWorkerThread(
     worker_scheduler_->InitializeOnWorkerThread(global_scope_);
     worker_reporting_proxy_.DidCreateWorkerGlobalScope(GlobalScope());
 
-    // `url_for_debugger` can be null for out-of-process worklet (e.g. shared
-    // storage worklet). Tentatively skip creating the
-    // `WorkerInspectorController`.
-    // TODO(crbug.com/1419253): support inspector for out-of-process worklet and
-    // remove this if-check.
-    if (!url_for_debugger.IsNull()) {
-      worker_inspector_controller_ = WorkerInspectorController::Create(
-          this, url_for_debugger, inspector_task_runner_,
-          std::move(devtools_params));
-    }
+    worker_inspector_controller_ = WorkerInspectorController::Create(
+        this, url_for_debugger, inspector_task_runner_,
+        std::move(devtools_params));
 
     // Since context initialization below may fail, we should notify debugger
     // about the new worker thread separately, so that it can resolve it by id
@@ -670,21 +665,15 @@ void WorkerThread::InitializeOnWorkerThread(
     WorkerThreads().insert(this);
   }
 
-  // `worker_inspector_controller_` can be null for out-of-process worklet (e.g.
-  // shared storage worklet).
-  // TODO(crbug.com/1419253): support inspector for out-of-process worklet and
-  // remove this if-check.
-  if (worker_inspector_controller_) {
-    // It is important that no code is run on the Isolate between
-    // initializing InspectorTaskRunner and pausing on start.
-    // Otherwise, InspectorTaskRunner might interrupt isolate execution
-    // from another thread and try to resume "pause on start" before
-    // we even paused.
-    worker_inspector_controller_->WaitForDebuggerIfNeeded();
-    // Note the above call runs nested message loop which may result in
-    // worker thread being torn down by request from the parent thread,
-    // while waiting for debugger.
-  }
+  // It is important that no code is run on the Isolate between
+  // initializing InspectorTaskRunner and pausing on start.
+  // Otherwise, InspectorTaskRunner might interrupt isolate execution
+  // from another thread and try to resume "pause on start" before
+  // we even paused.
+  worker_inspector_controller_->WaitForDebuggerIfNeeded();
+  // Note the above call runs nested message loop which may result in
+  // worker thread being torn down by request from the parent thread,
+  // while waiting for debugger.
 }
 
 void WorkerThread::EvaluateClassicScriptOnWorkerThread(
@@ -759,7 +748,7 @@ void WorkerThread::PrepareForShutdownOnWorkerThread() {
     SetThreadState(ThreadState::kReadyToShutdown);
   }
 
-  backing_thread_weak_factory_ = absl::nullopt;
+  backing_thread_weak_factory_ = std::nullopt;
   if (pause_or_freeze_count_ > 0) {
     DCHECK(nested_runner_);
     pause_or_freeze_count_ = 0;

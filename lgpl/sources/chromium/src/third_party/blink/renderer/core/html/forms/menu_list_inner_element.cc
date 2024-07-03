@@ -17,8 +17,7 @@ MenuListInnerElement::MenuListInnerElement(Document& document)
   SetHasCustomStyleCallbacks();
 }
 
-scoped_refptr<const ComputedStyle>
-MenuListInnerElement::CustomStyleForLayoutObject(
+const ComputedStyle* MenuListInnerElement::CustomStyleForLayoutObject(
     const StyleRecalcContext& style_recalc_context) {
   const ComputedStyle& parent_style = OwnerShadowHost()->ComputedStyleRef();
   ComputedStyleBuilder style_builder =
@@ -29,7 +28,9 @@ MenuListInnerElement::CustomStyleForLayoutObject(
   style_builder.SetFlexShrink(1);
   // min-width: 0; is needed for correct shrinking.
   style_builder.SetMinWidth(Length::Fixed(0));
-  style_builder.SetHasLineIfEmpty(true);
+  if (parent_style.ApplyControlFixedSize(OwnerShadowHost())) {
+    style_builder.SetHasLineIfEmpty(true);
+  }
   style_builder.SetOverflowX(EOverflow::kHidden);
   style_builder.SetOverflowY(EOverflow::kHidden);
   style_builder.SetShouldIgnoreOverflowPropertyForInlineBlockBaseline();
@@ -52,7 +53,8 @@ MenuListInnerElement::CustomStyleForLayoutObject(
   // when the content overflows, treat it the same as align-items: flex-start.
   // But we only do that for the cases where html.css would otherwise use
   // center.
-  if (parent_style.AlignItems().GetPosition() == ItemPosition::kCenter) {
+  if (parent_style.AlignItems().GetPosition() == ItemPosition::kCenter ||
+      parent_style.AlignItems().GetPosition() == ItemPosition::kAnchorCenter) {
     style_builder.SetMarginTop(Length());
     style_builder.SetMarginBottom(Length());
     style_builder.SetAlignSelf(StyleSelfAlignmentData(

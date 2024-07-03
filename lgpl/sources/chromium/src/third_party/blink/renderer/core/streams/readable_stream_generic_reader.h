@@ -15,7 +15,7 @@ namespace blink {
 
 class ExceptionState;
 class ReadableStream;
-class ScriptPromise;
+class ScriptPromiseUntyped;
 class ScriptState;
 class StreamPromiseResolver;
 
@@ -29,11 +29,13 @@ class CORE_EXPORT ReadableStreamGenericReader : public ScriptWrappable {
   virtual bool IsBYOBReader() const = 0;
 
   // https://streams.spec.whatwg.org/#generic-reader-closed
-  ScriptPromise closed(ScriptState*) const;
+  ScriptPromiseUntyped closed(ScriptState*) const;
 
   // https://streams.spec.whatwg.org/#generic-reader-cancel
-  ScriptPromise cancel(ScriptState*, ExceptionState&);
-  ScriptPromise cancel(ScriptState*, ScriptValue reason, ExceptionState&);
+  ScriptPromiseUntyped cancel(ScriptState*, ExceptionState&);
+  ScriptPromiseUntyped cancel(ScriptState*,
+                              ScriptValue reason,
+                              ExceptionState&);
 
   //
   // Readable stream reader abstract operations
@@ -52,7 +54,7 @@ class CORE_EXPORT ReadableStreamGenericReader : public ScriptWrappable {
                                 ReadableStreamGenericReader*,
                                 ReadableStream*);
 
-  StreamPromiseResolver* ClosedPromise() const { return closed_promise_; }
+  StreamPromiseResolver* ClosedPromise() const { return closed_promise_.Get(); }
 
   void Trace(Visitor*) const override;
 

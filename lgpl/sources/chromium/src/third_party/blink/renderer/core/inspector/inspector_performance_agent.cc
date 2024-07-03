@@ -9,8 +9,10 @@
 #include "base/process/process.h"
 #include "base/process/process_metrics.h"
 #include "base/time/time_override.h"
+#include "base/types/expected.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/inspected_frames.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
@@ -49,8 +51,7 @@ std::unique_ptr<base::ProcessMetrics> GetCurrentProcessMetrics() {
 base::TimeDelta GetCurrentProcessTime() {
   std::unique_ptr<base::ProcessMetrics> process_metrics =
       GetCurrentProcessMetrics();
-  base::TimeDelta process_time = process_metrics->GetCumulativeCPUUsage();
-  return process_time;
+  return process_metrics->GetCumulativeCPUUsage().value_or(base::TimeDelta());
 }
 
 }  // namespace
@@ -242,16 +243,16 @@ protocol::Response InspectorPerformanceAgent::getMetrics(
   base::TimeDelta process_time = GetCurrentProcessTime();
   AppendMetric(result.get(), "ProcessTime", process_time.InSecondsF());
 
-  v8::HeapStatistics heap_statistics;
-  V8PerIsolateData::MainThreadIsolate()->GetHeapStatistics(&heap_statistics);
-  AppendMetric(result.get(), "JSHeapUsedSize",
-               heap_statistics.used_heap_size());
-  AppendMetric(result.get(), "JSHeapTotalSize",
-               heap_statistics.total_heap_size());
-
   // Performance timings.
   Document* document = inspected_frames_->Root()->GetDocument();
   if (document) {
+    v8::HeapStatistics heap_statistics;
+    document->GetAgent().isolate()->GetHeapStatistics(&heap_statistics);
+    AppendMetric(result.get(), "JSHeapUsedSize",
+                 heap_statistics.used_heap_size());
+    AppendMetric(result.get(), "JSHeapTotalSize",
+                 heap_statistics.total_heap_size());
+
     AppendMetric(result.get(), "FirstMeaningfulPaint",
                  PaintTiming::From(*document)
                      .FirstMeaningfulPaint()

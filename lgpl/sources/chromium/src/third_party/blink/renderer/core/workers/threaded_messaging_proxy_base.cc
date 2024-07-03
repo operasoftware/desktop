@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/devtools_agent.h"
-#include "third_party/blink/renderer/core/inspector/worker_devtools_params.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
@@ -39,13 +38,7 @@ ThreadedMessagingProxyBase::ThreadedMessagingProxyBase(
       parent_agent_group_task_runner_(parent_agent_group_task_runner),
       terminate_sync_load_event_(
           base::WaitableEvent::ResetPolicy::MANUAL,
-          base::WaitableEvent::InitialState::NOT_SIGNALED),
-      feature_handle_for_scheduler_(
-          !execution_context
-              ? FrameOrWorkerScheduler::SchedulingAffectingFeatureHandle()
-              : execution_context->GetScheduler()->RegisterFeature(
-                    SchedulingPolicy::Feature::kDedicatedWorkerOrWorklet,
-                    {SchedulingPolicy::DisableBackForwardCache()})) {
+          base::WaitableEvent::InitialState::NOT_SIGNALED) {
   DCHECK((parent_execution_context_task_runners_ &&
           !parent_agent_group_task_runner_) ||
          (!parent_execution_context_task_runners_ &&
@@ -69,8 +62,9 @@ void ThreadedMessagingProxyBase::Trace(Visitor* visitor) const {
 
 void ThreadedMessagingProxyBase::InitializeWorkerThread(
     std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params,
-    const absl::optional<WorkerBackingThreadStartupData>& thread_startup_data,
-    const absl::optional<const blink::DedicatedWorkerToken>& token) {
+    const std::optional<WorkerBackingThreadStartupData>& thread_startup_data,
+    const std::optional<const blink::DedicatedWorkerToken>& token,
+    std::unique_ptr<WorkerDevToolsParams> client_provided_devtools_params) {
   DCHECK(IsParentContextThread());
 
   KURL script_url = global_scope_creation_params->script_url;
@@ -82,9 +76,12 @@ void ThreadedMessagingProxyBase::InitializeWorkerThread(
 
   worker_thread_ = CreateWorkerThread();
 
-  auto devtools_params = DevToolsAgent::WorkerThreadCreated(
-      execution_context_.Get(), worker_thread_.get(), script_url,
-      global_scope_creation_params->global_scope_name, token);
+  auto devtools_params =
+      client_provided_devtools_params
+          ? std::move(client_provided_devtools_params)
+          : DevToolsAgent::WorkerThreadCreated(
+                execution_context_.Get(), worker_thread_.get(), script_url,
+                global_scope_creation_params->global_scope_name, token);
 
   worker_thread_->Start(std::move(global_scope_creation_params),
                         thread_startup_data, std::move(devtools_params));
@@ -162,8 +159,6 @@ void ThreadedMessagingProxyBase::TerminateGlobalScope() {
     return;
   asked_to_terminate_ = true;
 
-  feature_handle_for_scheduler_.reset();
-
   terminate_sync_load_event_.Signal();
 
   if (!worker_thread_) {
@@ -179,7 +174,7 @@ void ThreadedMessagingProxyBase::TerminateGlobalScope() {
 
 ExecutionContext* ThreadedMessagingProxyBase::GetExecutionContext() const {
   DCHECK(IsParentContextThread());
-  return execution_context_;
+  return execution_context_.Get();
 }
 
 ParentExecutionContextTaskRunners*

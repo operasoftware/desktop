@@ -28,7 +28,7 @@ class HeapHashMap final
   DISALLOW_NEW();
 
  public:
-  HeapHashMap() { CheckType(); }
+  HeapHashMap() = default;
 
   void Trace(Visitor* visitor) const {
     HashMap<KeyArg, MappedArg, KeyTraitsArg, MappedTraitsArg,
@@ -36,25 +36,33 @@ class HeapHashMap final
   }
 
  private:
-  static constexpr void CheckType() {
-    static_assert(std::is_trivially_destructible<HeapHashMap>::value,
-                  "HeapHashMap must be trivially destructible.");
-    static_assert(
-        WTF::IsTraceable<KeyArg>::value || WTF::IsTraceable<MappedArg>::value,
-        "For hash maps without traceable elements, use HashMap<> "
-        "instead of HeapHashMap<>.");
-    static_assert(WTF::IsMemberOrWeakMemberType<KeyArg>::value ||
-                      !WTF::IsTraceable<KeyArg>::value,
-                  "HeapHashMap supports only Member, WeakMember and "
-                  "non-traceable types as keys.");
-    static_assert(
-        WTF::IsMemberOrWeakMemberType<MappedArg>::value ||
-            !WTF::IsTraceable<MappedArg>::value ||
-            WTF::IsSubclassOfTemplate<MappedArg, v8::TracedReference>::value,
-        "HeapHashMap supports only Member, WeakMember, "
-        "TraceWrapperV8Reference and "
-        "non-traceable types as values.");
+  template <typename T>
+  static constexpr bool IsValidNonTraceableType() {
+    return !WTF::IsTraceable<T>::value && !WTF::IsPointerToGced<T>::value;
   }
+
+  struct TypeConstraints {
+    constexpr TypeConstraints() {
+      static_assert(std::is_trivially_destructible_v<HeapHashMap>,
+                    "HeapHashMap must be trivially destructible.");
+      static_assert(
+          WTF::IsTraceable<KeyArg>::value || WTF::IsTraceable<MappedArg>::value,
+          "For hash maps without traceable elements, use HashMap<> "
+          "instead of HeapHashMap<>.");
+      static_assert(WTF::IsMemberOrWeakMemberType<KeyArg>::value ||
+                        IsValidNonTraceableType<KeyArg>(),
+                    "HeapHashMap supports only Member, WeakMember and "
+                    "non-traceable types as keys.");
+      static_assert(
+          WTF::IsMemberOrWeakMemberType<MappedArg>::value ||
+              IsValidNonTraceableType<MappedArg>() ||
+              WTF::IsSubclassOfTemplate<MappedArg, v8::TracedReference>::value,
+          "HeapHashMap supports only Member, WeakMember, "
+          "TraceWrapperV8Reference and "
+          "non-traceable types as values.");
+    }
+  };
+  // NO_UNIQUE_ADDRESS TypeConstraints type_constraints_;
 };
 
 }  // namespace blink

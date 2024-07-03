@@ -19,8 +19,9 @@ namespace blink {
 
 GPURenderPassEncoder::GPURenderPassEncoder(
     GPUDevice* device,
-    WGPURenderPassEncoder render_pass_encoder)
-    : DawnObject<WGPURenderPassEncoder>(device, render_pass_encoder) {}
+    WGPURenderPassEncoder render_pass_encoder,
+    const String& label)
+    : DawnObject<WGPURenderPassEncoder>(device, render_pass_encoder, label) {}
 
 void GPURenderPassEncoder::setBindGroup(
     uint32_t index,
@@ -75,7 +76,7 @@ void GPURenderPassEncoder::writeTimestamp(
     uint32_t queryIndex,
     ExceptionState& exception_state) {
   V8GPUFeatureName::Enum requiredFeatureEnum =
-      V8GPUFeatureName::Enum::kTimestampQueryInsidePasses;
+      V8GPUFeatureName::Enum::kChromiumExperimentalTimestampQueryInsidePasses;
 
   if (!device_->features()->has(requiredFeatureEnum)) {
     exception_state.ThrowTypeError(String::Format(

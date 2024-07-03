@@ -263,12 +263,15 @@ class MockFileSystem(object):
                         directories.append(directory)
                 else:
                     files.append(remaining)
-        file_system_tuples = [(top[:-1], directories, files)]
+        # The real `os.walk(...)` [0] gives the caller a chance to modify which
+        # subdirectories to traverse by mutating the `directories` list, so we
+        # should yield here instead of returning a precomputed list.
+        #
+        # [0]: https://docs.python.org/3/library/os.html#os.walk
+        yield (top[:-1], directories, files)
         for directory in directories:
             directory = top + directory
-            tuples_from_subdirs = self.walk(directory)
-            file_system_tuples += tuples_from_subdirs
-        return file_system_tuples
+            yield from self.walk(directory)
 
     def mtime(self, path):
         if self.exists(path):
@@ -432,7 +435,7 @@ class MockFileSystem(object):
         return dot_dot + rel_path
 
     def remove(self, path, retry=True):
-        if self.files[path] is None:
+        if self.files.get(path) is None:
             self._raise_not_found(path)
         self.files[path] = None
         self.written_files[path] = None
@@ -515,6 +518,9 @@ class MockFileSystem(object):
             stack.enter_context(
                 patch('tempfile.TemporaryFile',
                       lambda *args, **kwargs: self.open_text_tempfile()[0]))
+            stack.enter_context(
+                patch('tempfile.NamedTemporaryFile',
+                      lambda *args, **kwargs: self.open_text_tempfile()[0]))
             yield
 
 
@@ -522,7 +528,6 @@ class BufferedReader(io.BufferedReader):
     def __init__(self, raw, **options):
         super().__init__(raw, **options)
         self.fs = raw.fs
-        self.path = raw.path
 
 
 class TextIOWrapper(io.TextIOWrapper):
@@ -538,30 +543,29 @@ class TextIOWrapper(io.TextIOWrapper):
                          newline=newline,
                          **options)
         self.fs = raw.fs
-        self.path = raw.path
 
 
 class WriteThroughBinaryFile(io.BytesIO):
-    def __init__(self, fs, path):
+    def __init__(self, fs, name: str):
         self.fs = fs
-        self.path = path
-        super().__init__(self.fs.files[self.path])
+        self.name = name
+        super().__init__(self.fs.files[self.name])
 
     def write(self, buf):
         amount_written = super().write(buf)
-        self.fs.files[self.path] += buf
-        self.fs.written_files[self.path] = self.fs.files[self.path]
+        self.fs.files[self.name] += buf
+        self.fs.written_files[self.name] = self.fs.files[self.name]
         return amount_written
 
     def writelines(self, lines):
         super().writelines(lines)
         contents = b''.join(lines)
-        self.fs.files[self.path] = contents
-        self.fs.written_files[self.path] = contents
+        self.fs.files[self.name] = contents
+        self.fs.written_files[self.name] = contents
 
     def truncate(self, size=None):
         new_size = super().truncate(size)
-        self.fs.files[self.path] = self.getvalue()
+        self.fs.files[self.name] = self.getvalue()
         return new_size
 
 

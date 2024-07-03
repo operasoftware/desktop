@@ -4,7 +4,7 @@
 
 import 'chrome://diagnostics/input_list.js';
 import 'chrome://diagnostics/strings.m.js';
-import 'chrome://webui-test/mojo_webui_test_support.js';
+import 'chrome://webui-test/chromeos/mojo_webui_test_support.js';
 
 import {DiagnosticsBrowserProxyImpl} from 'chrome://diagnostics/diagnostics_browser_proxy.js';
 import {NavigationView} from 'chrome://diagnostics/diagnostics_types.js';
@@ -183,6 +183,34 @@ suite('inputListTestSuite', function() {
     const keyboardTester =
         inputListElement.shadowRoot.querySelector('keyboard-tester');
     assertTrue(keyboardTester.isOpen());
+  });
+
+  test('KeyboardTesterShowDirectlyWithOneKeyboard', async () => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('showDefaultKeyboardTester', '');
+    window.history.replaceState(
+        null, '', `${window.location.pathname}?${params.toString()}`);
+
+    await initializeInputList([fakeKeyboards[0]], []);
+    await flushTasks();
+
+    const keyboardTester =
+        inputListElement.shadowRoot.querySelector('keyboard-tester');
+    assertTrue(keyboardTester.isOpen());
+  });
+
+  test('KeyboardTesterShowDirectlyWithNoKeyboard', async () => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('showDefaultKeyboardTester', '');
+    window.history.replaceState(
+        null, '', `${window.location.pathname}?${params.toString()}`);
+
+    await initializeInputList([], []);
+    await flushTasks();
+
+    const keyboardTester =
+        inputListElement.shadowRoot.querySelector('keyboard-tester');
+    assertFalse(keyboardTester.isOpen());
   });
 
   test('KeyboardTesterCloseOnLidClosed', async () => {

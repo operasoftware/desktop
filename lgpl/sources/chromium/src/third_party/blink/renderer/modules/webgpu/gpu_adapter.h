@@ -8,6 +8,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "gpu/command_buffer/client/webgpu_interface.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -16,12 +17,14 @@
 namespace blink {
 
 class GPU;
+class GPUAdapterInfo;
+class GPUDevice;
 class GPUDeviceDescriptor;
 class GPUSupportedFeatures;
 class GPUSupportedLimits;
-class ScriptPromiseResolver;
+class GPUMemoryHeapInfo;
 
-class GPUAdapter final : public ScriptWrappable, public DawnObjectBase {
+class GPUAdapter final : public ScriptWrappable, DawnObject<WGPUAdapter> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -34,19 +37,18 @@ class GPUAdapter final : public ScriptWrappable, public DawnObjectBase {
 
   void Trace(Visitor* visitor) const override;
 
-  GPU* gpu() const { return gpu_; }
+  GPU* gpu() const { return gpu_.Get(); }
   GPUSupportedFeatures* features() const;
-  GPUSupportedLimits* limits() const { return limits_; }
+  GPUSupportedLimits* limits() const { return limits_.Get(); }
   bool isFallbackAdapter() const;
   WGPUBackendType backendType() const;
   bool SupportsMultiPlanarFormats() const;
   bool isCompatibilityMode() const;
 
-  ScriptPromise requestDevice(ScriptState* script_state,
-                              GPUDeviceDescriptor* descriptor);
+  ScriptPromise<GPUDevice> requestDevice(ScriptState* script_state,
+                                         GPUDeviceDescriptor* descriptor);
 
-  ScriptPromise requestAdapterInfo(ScriptState* script_state,
-                                   const Vector<String>& unmask_hints);
+  ScriptPromise<GPUAdapterInfo> requestAdapterInfo(ScriptState* script_state);
 
   // Console warnings should generally be attributed to a GPUDevice, but in
   // cases where there is no device warnings can be surfaced here. It's expected
@@ -57,8 +59,8 @@ class GPUAdapter final : public ScriptWrappable, public DawnObjectBase {
 
  private:
   void OnRequestDeviceCallback(ScriptState* script_state,
-                               ScriptPromiseResolver* resolver,
                                const GPUDeviceDescriptor* descriptor,
+                               ScriptPromiseResolver<GPUDevice>* resolver,
                                WGPURequestDeviceStatus status,
                                WGPUDevice dawn_device,
                                const char* error_message);
@@ -67,10 +69,10 @@ class GPUAdapter final : public ScriptWrappable, public DawnObjectBase {
     // There isn't a wgpu::Adapter::SetLabel, just skip.
   }
 
-  WGPUAdapter handle_;
   Member<GPU> gpu_;
   bool is_fallback_adapter_;
   WGPUBackendType backend_type_;
+  WGPUAdapterType adapter_type_;
   bool is_consumed_ = false;
   bool is_compatibility_mode_;
   Member<GPUSupportedLimits> limits_;
@@ -81,6 +83,9 @@ class GPUAdapter final : public ScriptWrappable, public DawnObjectBase {
   String device_;
   String description_;
   String driver_;
+  HeapVector<Member<GPUMemoryHeapInfo>> memory_heaps_;
+  std::optional<uint32_t> d3d_shader_model_;
+  std::optional<uint32_t> vk_driver_version_;
 
   static constexpr int kMaxAllowedConsoleWarnings = 50;
   int allowed_console_warnings_remaining_ = kMaxAllowedConsoleWarnings;

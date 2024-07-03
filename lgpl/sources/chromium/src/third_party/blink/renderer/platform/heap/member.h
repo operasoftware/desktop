@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_MEMBER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_MEMBER_H_
 
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/thread_state_storage.h"
 #include "third_party/blink/renderer/platform/heap/write_barrier.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -64,6 +65,12 @@ static constexpr bool kBlinkMemberGCHasDebugChecks =
     !std::is_same<cppgc::internal::DefaultMemberCheckingPolicy,
                   cppgc::internal::DisabledCheckingPolicy>::value;
 
+// We should never bloat the Member<> wrapper.
+// NOTE: The Member<void*> works as we never use this Member in a trace method.
+static_assert(kBlinkMemberGCHasDebugChecks ||
+                  sizeof(Member<void*>) <= sizeof(void*),
+              "Member<> should stay small!");
+
 }  // namespace blink
 
 namespace WTF {
@@ -81,6 +88,47 @@ template <typename T>
 struct IsTraceable<blink::WeakMember<T>> {
   STATIC_ONLY(IsTraceable);
   static const bool value = true;
+};
+
+// Peeker type that allows for using all kinds of Member, Persistent, and T*
+// interchangeably. This is necessary for collection methods that are called
+// directly with any of those types.
+template <typename T>
+class ValuePeeker final {
+  DISALLOW_NEW();
+
+ public:
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE ValuePeeker(T* ptr) : ptr_(ptr) {}
+  template <typename U>
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE ValuePeeker(const blink::Member<U>& m) : ptr_(m.Get()) {}
+  template <typename U>
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE ValuePeeker(const blink::WeakMember<U>& m) : ptr_(m.Get()) {}
+  template <typename U>
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE ValuePeeker(const blink::UntracedMember<U>& m)
+      : ptr_(m.Get()) {}
+  template <typename U>
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE ValuePeeker(const blink::Persistent<U>& p) : ptr_(p.Get()) {}
+  template <typename U>
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE ValuePeeker(const blink::WeakPersistent<U>& p)
+      : ptr_(p.Get()) {}
+
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE operator T*() const { return ptr_; }
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE operator blink::Member<T>() const { return ptr_; }
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE operator blink::WeakMember<T>() const { return ptr_; }
+  // NOLINTNEXTLINE
+  ALWAYS_INLINE operator blink::UntracedMember<T>() const { return ptr_; }
+
+ private:
+  T* ptr_;
 };
 
 // Default hash for hash tables with Member<>-derived elements.
@@ -110,14 +158,14 @@ struct BaseMemberHashTraits : SimpleClassHashTraits<MemberType> {
 
   static constexpr bool kEmptyValueIsZero = true;
 
-  using PeekInType = T*;
+  using PeekInType = ValuePeeker<T>;
   using PeekOutType = T*;
   using IteratorGetType = MemberType*;
   using IteratorConstGetType = const MemberType*;
   using IteratorReferenceType = MemberType&;
   using IteratorConstReferenceType = const MemberType&;
 
-  static PeekOutType Peek(const MemberType& value) { return value; }
+  static PeekOutType Peek(const MemberType& value) { return value.Get(); }
 
   static void ConstructDeletedValue(MemberType& slot) {
     slot = cppgc::kSentinelPointer;

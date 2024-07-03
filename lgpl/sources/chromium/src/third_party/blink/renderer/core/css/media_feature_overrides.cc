@@ -17,10 +17,10 @@ namespace blink {
 
 namespace {
 
-absl::optional<ColorSpaceGamut> ConvertColorGamut(
+std::optional<ColorSpaceGamut> ConvertColorGamut(
     const MediaQueryExpValue& value) {
   if (!value.IsValid()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   if (value.Id() == CSSValueID::kSRGB) {
     return ColorSpaceGamut::SRGB;
@@ -32,61 +32,65 @@ absl::optional<ColorSpaceGamut> ConvertColorGamut(
   if (value.Id() == CSSValueID::kRec2020) {
     return ColorSpaceGamut::BT2020;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-absl::optional<mojom::blink::PreferredColorScheme> ConvertPreferredColorScheme(
+std::optional<ForcedColors> ConvertForcedColors(
     const MediaQueryExpValue& value) {
   if (!value.IsValid()) {
-    return absl::nullopt;
-  }
-  return CSSValueIDToPreferredColorScheme(value.Id());
-}
-
-absl::optional<mojom::blink::PreferredContrast> ConvertPreferredContrast(
-    const MediaQueryExpValue& value) {
-  if (!value.IsValid()) {
-    return absl::nullopt;
-  }
-  return CSSValueIDToPreferredContrast(value.Id());
-}
-
-absl::optional<bool> ConvertPrefersReducedMotion(
-    const MediaQueryExpValue& value) {
-  if (!value.IsValid()) {
-    return absl::nullopt;
-  }
-  return value.Id() == CSSValueID::kReduce;
-}
-
-absl::optional<bool> ConvertPrefersReducedData(
-    const MediaQueryExpValue& value) {
-  if (!value.IsValid()) {
-    return absl::nullopt;
-  }
-  return value.Id() == CSSValueID::kReduce;
-}
-
-absl::optional<bool> ConvertPrefersReducedTransparency(
-    const MediaQueryExpValue& value) {
-  if (!value.IsValid()) {
-    return absl::nullopt;
-  }
-  return value.Id() == CSSValueID::kReduce;
-}
-
-absl::optional<ForcedColors> ConvertForcedColors(
-    const MediaQueryExpValue& value) {
-  if (!value.IsValid()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return CSSValueIDToForcedColors(value.Id());
 }
 
 }  // namespace
 
-void MediaFeatureOverrides::SetOverride(const AtomicString& feature,
-                                        const String& value_string) {
+std::optional<mojom::blink::PreferredColorScheme>
+MediaFeatureOverrides::ConvertPreferredColorScheme(
+    const MediaQueryExpValue& value) {
+  if (!value.IsValid()) {
+    return std::nullopt;
+  }
+  return CSSValueIDToPreferredColorScheme(value.Id());
+}
+
+std::optional<mojom::blink::PreferredContrast>
+MediaFeatureOverrides::ConvertPreferredContrast(
+    const MediaQueryExpValue& value) {
+  if (!value.IsValid()) {
+    return std::nullopt;
+  }
+  return CSSValueIDToPreferredContrast(value.Id());
+}
+
+std::optional<bool> MediaFeatureOverrides::ConvertPrefersReducedMotion(
+    const MediaQueryExpValue& value) {
+  if (!value.IsValid()) {
+    return std::nullopt;
+  }
+  return value.Id() == CSSValueID::kReduce;
+}
+
+std::optional<bool> MediaFeatureOverrides::ConvertPrefersReducedData(
+    const MediaQueryExpValue& value) {
+  if (!value.IsValid()) {
+    return std::nullopt;
+  }
+  return value.Id() == CSSValueID::kReduce;
+}
+
+std::optional<bool> MediaFeatureOverrides::ConvertPrefersReducedTransparency(
+    const MediaQueryExpValue& value) {
+  if (!value.IsValid()) {
+    return std::nullopt;
+  }
+  return value.Id() == CSSValueID::kReduce;
+}
+
+MediaQueryExpValue MediaFeatureOverrides::ParseMediaQueryValue(
+    const AtomicString& feature,
+    const String& value_string,
+    const Document* document) {
   CSSTokenizer tokenizer(value_string);
   auto [tokens, raw_offsets] = tokenizer.TokenizeToEOFWithOffsets();
   CSSParserTokenRange range(tokens);
@@ -96,7 +100,7 @@ void MediaFeatureOverrides::SetOverride(const AtomicString& feature,
   // down the CSSParserMode. Plumb the real CSSParserContext through, so that
   // web features can be counted correctly.
   const CSSParserContext* fake_context = MakeGarbageCollected<CSSParserContext>(
-      kHTMLStandardMode, SecureContextMode::kInsecureContext);
+      kHTMLStandardMode, SecureContextMode::kInsecureContext, document);
 
   // MediaFeatureOverrides are used to emulate various media feature values.
   // These don't need to pass an ExecutionContext, since the parsing of
@@ -109,7 +113,14 @@ void MediaFeatureOverrides::SetOverride(const AtomicString& feature,
   MediaQueryExpBounds bounds =
       MediaQueryExp::Create(feature, range, offsets, *fake_context).Bounds();
   DCHECK(!bounds.left.IsValid());
-  MediaQueryExpValue value = bounds.right.value;
+  return bounds.right.value;
+}
+
+void MediaFeatureOverrides::SetOverride(const AtomicString& feature,
+                                        const String& value_string,
+                                        const Document* document) {
+  MediaQueryExpValue value =
+      ParseMediaQueryValue(feature, value_string, document);
 
   if (feature == media_feature_names::kColorGamutMediaFeature) {
     color_gamut_ = ConvertColorGamut(value);

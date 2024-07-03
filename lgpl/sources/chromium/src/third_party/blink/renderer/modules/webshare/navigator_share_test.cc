@@ -21,6 +21,8 @@
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -96,8 +98,8 @@ class NavigatorShareTest : public testing::Test {
         &GetFrame(), mojom::UserActivationNotificationType::kTest);
     Navigator* navigator = GetFrame().DomWindow()->navigator();
     NonThrowableExceptionState exception_state;
-    ScriptPromise promise = NavigatorShare::share(GetScriptState(), *navigator,
-                                                  &share_data, exception_state);
+    ScriptPromiseUntyped promise = NavigatorShare::share(
+        GetScriptState(), *navigator, &share_data, exception_state);
     test::RunPendingTasks();
     EXPECT_EQ(mock_share_service_.error() == mojom::ShareError::OK
                   ? v8::Promise::kFulfilled
@@ -127,9 +129,12 @@ class NavigatorShareTest : public testing::Test {
     // See https://crbug.com/1010116 for more information.
     GetFrame().GetBrowserInterfaceBroker().SetBinderForTesting(
         ShareService::Name_, {});
+
+    MemoryCache::Get()->EvictResources();
   }
 
  public:
+  test::TaskEnvironment task_environment;
   MockShareService mock_share_service_;
 
   std::unique_ptr<DummyPageHolder> holder_;

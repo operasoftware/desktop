@@ -507,6 +507,30 @@ var availableTests = [
                result);
     }));
   },
+
+  function getDeviceStatesLacros() {
+    chrome.networkingPrivate.getDeviceStates(callbackPass(function(result) {
+      // Tether scanning value is flaky, ignore it in this test
+      tetherIdx = result.findIndex((element) => element.Type === 'Tether');
+      assertTrue(tetherIdx > -1);
+      delete result[tetherIdx].Scanning;
+
+      assertEq(
+          [
+            {Scanning: false, State: 'Enabled', Type: 'Ethernet'},
+            {
+              ManagedNetworkAvailable: false,
+              Scanning: false,
+              State: 'Enabled',
+              Type: 'WiFi'
+            },
+            {State: 'Enabled', Type: 'Tether'},
+            {State: 'Enabled', Type: 'Cellular'},
+          ],
+          result);
+    }));
+  },
+
   function requestNetworkScan() {
     // Connected or Connecting networks should be listed first, sorted by type.
     var expected = ['stub_ethernet_guid',
@@ -600,6 +624,7 @@ var availableTests = [
           GUID: kCellularGuid,
           IPAddressConfigType: chrome.networkingPrivate.IPConfigType.DHCP,
           Metered: true,
+          TrafficCounterResetTime: 0.0,
           Name: 'cellular1',
           NameServersConfigType: chrome.networkingPrivate.IPConfigType.DHCP,
           Source: 'User',

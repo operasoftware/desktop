@@ -70,6 +70,9 @@ class DummyMainThreadScheduler : public MainThreadScheduler {
   void AddRAILModeObserver(RAILModeObserver*) override {}
   void RemoveRAILModeObserver(RAILModeObserver const* observer) override {}
 
+  void ForEachMainThreadIsolate(
+      base::RepeatingCallback<void(v8::Isolate* isolate)> callback) override {}
+
   v8::Isolate* Isolate() override { return nullptr; }
 
   void Shutdown() override {}
@@ -93,6 +96,7 @@ class DummyMainThreadScheduler : public MainThreadScheduler {
   void RemoveTaskObserver(base::TaskObserver*) override {}
   void SetV8Isolate(v8::Isolate*) override {}
   void StartIdlePeriodForTesting() override {}
+  void SetRendererBackgroundedForTesting(bool) override {}
 };
 
 class UserLevelMemoryPressureSignalGeneratorTest : public testing::Test {

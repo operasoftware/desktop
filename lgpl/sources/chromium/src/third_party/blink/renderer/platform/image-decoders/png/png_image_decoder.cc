@@ -43,6 +43,7 @@
 #include "base/containers/adapters.h"
 #include "base/numerics/checked_math.h"
 #include "media/base/video_color_space.h"
+#include "third_party/blink/renderer/platform/image-decoders/exif_reader.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/modules/skcms/skcms.h"
 
@@ -262,7 +263,7 @@ static inline std::unique_ptr<ColorProfile> ReadColorProfile(png_structp png,
   png_bytep buffer;
   png_uint_32 length;
   if (png_get_iCCP(png, info, &name, &compression, &buffer, &length)) {
-    return ColorProfile::Create(buffer, length);
+    return ColorProfile::Create(base::as_bytes(base::span(buffer, length)));
   }
 
   png_fixed_point chrm[8];
@@ -314,6 +315,75 @@ static inline std::unique_ptr<ColorProfile> ReadColorProfile(png_structp png,
   return std::make_unique<ColorProfile>(profile);
 }
 
+static inline void ReadHDRMetadata(
+    png_structp png,
+    png_infop info,
+    std::optional<gfx::HDRMetadata>* hdr_metadata) {
+  std::optional<gfx::HdrMetadataCta861_3> clli;
+  std::optional<gfx::HdrMetadataSmpteSt2086> mdcv;
+  png_unknown_chunkp unknown_chunks;
+  size_t num_unknown_chunks =
+      png_get_unknown_chunks(png, info, &unknown_chunks);
+  for (size_t chunk_index = 0; chunk_index < num_unknown_chunks;
+       chunk_index++) {
+    const auto& chunk = unknown_chunks[chunk_index];
+    if (strcmp(reinterpret_cast<const char*>(chunk.name), "cLLi") == 0) {
+      if (chunk.size != 8) {
+        continue;
+      }
+      const uint32_t max_cll_times_10000 = (chunk.data[0] << 24) |
+                                           (chunk.data[1] << 16) |
+                                           (chunk.data[2] << 8) | chunk.data[3];
+      const uint32_t max_fall_times_10000 =
+          (chunk.data[4] << 24) | (chunk.data[5] << 16) | (chunk.data[6] << 8) |
+          chunk.data[7];
+      clli.emplace(max_cll_times_10000 / 10000, max_fall_times_10000 / 10000);
+      continue;
+    }
+    if (strcmp(reinterpret_cast<const char*>(chunk.name), "mDCv") == 0) {
+      if (chunk.size != 24) {
+        continue;
+      }
+      // Red, green, blue, white, each with x and y.
+      uint16_t chromaticities_times_50000[8];
+      for (int i = 0; i < 8; ++i) {
+        chromaticities_times_50000[i] =
+            (chunk.data[2 * i] << 8) | chunk.data[2 * i + 1];
+      }
+      const uint32_t max_luminance_times_10000 =
+          (chunk.data[16] << 24) | (chunk.data[17] << 16) |
+          (chunk.data[18] << 8) | chunk.data[19];
+      const uint32_t min_luminance_times_10000 =
+          (chunk.data[20] << 24) | (chunk.data[21] << 16) |
+          (chunk.data[22] << 8) | chunk.data[23];
+      SkColorSpacePrimaries primaries = {
+          chromaticities_times_50000[0] / 50000.f,
+          chromaticities_times_50000[1] / 50000.f,
+          chromaticities_times_50000[2] / 50000.f,
+          chromaticities_times_50000[3] / 50000.f,
+          chromaticities_times_50000[4] / 50000.f,
+          chromaticities_times_50000[5] / 50000.f,
+          chromaticities_times_50000[6] / 50000.f,
+          chromaticities_times_50000[7] / 50000.f,
+      };
+      mdcv.emplace(primaries, max_luminance_times_10000 * 1e-4f,
+                   min_luminance_times_10000 * 1e-4f);
+      continue;
+    }
+  }
+  if (clli || mdcv) {
+    if (!hdr_metadata->has_value()) {
+      hdr_metadata->emplace();
+    }
+    if (clli) {
+      (*hdr_metadata)->cta_861_3 = clli;
+    }
+    if (mdcv) {
+      (*hdr_metadata)->smpte_st_2086 = mdcv;
+    }
+  }
+}
+
 void PNGImageDecoder::SetColorSpace() {
   if (IgnoresColorSpace()) {
     return;
@@ -329,6 +399,7 @@ void PNGImageDecoder::SetColorSpace() {
   if (auto profile = ReadColorProfile(png, info)) {
     SetEmbeddedColorProfile(std::move(profile));
   }
+  ReadHDRMetadata(png, info, &hdr_metadata_);
 }
 
 void PNGImageDecoder::SetBitDepth() {
@@ -352,6 +423,10 @@ bool PNGImageDecoder::ImageIsHighBitDepth() {
          // TODO(crbug.com/874057): Implement support for 16-bit PNGs w/
          // ImageFrame::kBlendAtopPreviousFrame.
          repetition_count_ == kAnimationNone;
+}
+
+std::optional<gfx::HDRMetadata> PNGImageDecoder::GetHDRMetadata() const {
+  return hdr_metadata_;
 }
 
 bool PNGImageDecoder::SetSize(unsigned width, unsigned height) {
@@ -407,6 +482,19 @@ void PNGImageDecoder::HeaderAvailable() {
       png_set_gamma(png, kDefaultGamma, gamma);
     } else {
       png_set_gamma(png, kDefaultGamma, kInverseGamma);
+    }
+  }
+
+  // process eXIf chunk
+  png_uint_32 exif_size = 0;
+  png_bytep exif_buffer = nullptr;
+  if (png_get_eXIf_1(png, info, &exif_size, &exif_buffer) != 0) {
+    // exif data exists
+    if (exif_size != 0 && exif_buffer) {
+      DecodedImageMetaData metadata;
+      base::span<const uint8_t> exif_span(exif_buffer, exif_size);
+      ReadExif(exif_span, metadata);
+      ApplyMetadata(metadata, gfx::Size(width, height));
     }
   }
 

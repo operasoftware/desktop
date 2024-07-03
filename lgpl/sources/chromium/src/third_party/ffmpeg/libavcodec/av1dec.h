@@ -23,22 +23,22 @@
 
 #include <stdint.h>
 
-#include "libavutil/fifo.h"
 #include "libavutil/buffer.h"
+#include "libavutil/fifo.h"
 #include "libavutil/frame.h"
 #include "libavutil/pixfmt.h"
 #include "avcodec.h"
 #include "packet.h"
 #include "cbs.h"
 #include "cbs_av1.h"
+#include "dovi_rpu.h"
 
 typedef struct AV1Frame {
     AVFrame *f;
 
-    AVBufferRef *hwaccel_priv_buf;
-    void *hwaccel_picture_private;
+    void *hwaccel_picture_private; ///< RefStruct reference
 
-    AVBufferRef *header_ref;
+    AV1RawOBU *header_ref; ///< RefStruct reference backing raw_frame_header.
     AV1RawFrameHeader *raw_frame_header;
 
     int temporal_id;
@@ -71,16 +71,18 @@ typedef struct AV1DecContext {
     CodedBitstreamFragment current_obu;
     AVPacket *pkt;
 
-    AVBufferRef *seq_ref;
+    AVBufferRef *seq_data_ref;
+    AV1RawOBU *seq_ref;    ///< RefStruct reference backing raw_seq
     AV1RawSequenceHeader *raw_seq;
-    AVBufferRef *header_ref;
+    AV1RawOBU *header_ref; ///< RefStruct reference backing raw_frame_header
     AV1RawFrameHeader *raw_frame_header;
     TileGroupInfo *tile_group_info;
 
-    AVBufferRef *cll_ref;
+    AV1RawOBU *cll_ref;    ///< RefStruct reference backing cll
     AV1RawMetadataHDRCLL *cll;
-    AVBufferRef *mdcv_ref;
+    AV1RawOBU *mdcv_ref;   ///< RefStruct reference backing mdcv
     AV1RawMetadataHDRMDCV *mdcv;
+    DOVIContext dovi;
     AVFifo *itut_t35_fifo;
 
     uint16_t tile_num;

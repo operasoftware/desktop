@@ -31,10 +31,6 @@ FileSystemObserver* FileSystemObserver::Create(
     ExceptionState& exception_state) {
   auto* context = ExecutionContext::From(script_state);
 
-  if (!base::FeatureList::IsEnabled(blink::features::kFileSystemObserver)) {
-    return nullptr;
-  }
-
   SECURITY_CHECK(context->IsWindow() ||
                  context->IsDedicatedWorkerGlobalScope() ||
                  context->IsSharedWorkerGlobalScope());
@@ -71,24 +67,22 @@ FileSystemObserver::FileSystemObserver(
       callback_(callback),
       observer_receivers_(this, context),
       host_remote_(context) {
-  CHECK(base::FeatureList::IsEnabled(blink::features::kFileSystemObserver));
-
   host_remote_.Bind(std::move(host_remote),
                     execution_context_->GetTaskRunner(TaskType::kStorage));
 }
 
-ScriptPromise FileSystemObserver::observe(
+ScriptPromise<IDLUndefined> FileSystemObserver::observe(
     ScriptState* script_state,
     FileSystemHandle* handle,
     FileSystemObserverObserveOptions* options,
     ExceptionState& exception_state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // TODO(https://crbug.com/1019297): Add AllowStorageAccess checks.
+  // TODO(https://crbug.com/1489033): Add AllowStorageAccess checks.
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver<IDLUndefined>>(
       script_state, exception_state.GetContext());
-  ScriptPromise result = resolver->Promise();
+  auto result = resolver->Promise();
 
   host_remote_->Observe(
       handle->Transfer(), options->recursive(),
@@ -98,7 +92,7 @@ ScriptPromise FileSystemObserver::observe(
 }
 
 void FileSystemObserver::DidObserve(
-    ScriptPromiseResolver* resolver,
+    ScriptPromiseResolver<IDLUndefined>* resolver,
     mojom::blink::FileSystemAccessErrorPtr result,
     mojo::PendingReceiver<mojom::blink::FileSystemAccessObserver>
         observer_receiver) {
@@ -122,8 +116,9 @@ void FileSystemObserver::unobserve(FileSystemHandle* handle) {
     return;
   }
 
-  // TODO(https://crbug.com/1019297): Unqueue and pause records for this
-  // observation.
+  // TODO(https://crbug.com/1489029): Unqueue and pause records for this
+  // observation, or consider making observe() return a token which can be
+  // passed to this method.
 
   // Disconnects the receiver of an observer corresponding to `handle`, if such
   // an observer exists. This will remove it from our `observer_receivers_` set.
@@ -136,7 +131,6 @@ void FileSystemObserver::unobserve(FileSystemHandle* handle) {
 void FileSystemObserver::disconnect() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   observer_receivers_.Clear();
-  host_remote_.reset();
 }
 
 void FileSystemObserver::OnFileChanges(

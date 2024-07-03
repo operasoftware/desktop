@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/shape_clip_path_operation.h"
 #include "third_party/blink/renderer/core/style/shape_offset_path_operation.h"
 
@@ -56,11 +57,13 @@ void SetPath(const CSSProperty& property,
       return;
     case CSSPropertyID::kOffsetPath:
       // TODO(sakhapov): handle coord box.
-      builder.SetOffsetPath(ShapeOffsetPathOperation::Create(
+      builder.SetOffsetPath(MakeGarbageCollected<ShapeOffsetPathOperation>(
           std::move(path), CoordBox::kBorderBox));
       return;
     case CSSPropertyID::kClipPath:
-      builder.SetClipPath(ShapeClipPathOperation::Create(std::move(path)));
+      // TODO(pdr): Handle geometry box.
+      builder.SetClipPath(MakeGarbageCollected<ShapeClipPathOperation>(
+          std::move(path), GeometryBox::kBorderBox));
       return;
     default:
       NOTREACHED();
@@ -124,7 +127,7 @@ InterpolationValue CSSPathInterpolationType::MaybeConvertInherit(
   if (!state.ParentStyle())
     return nullptr;
 
-  conversion_checkers.push_back(std::make_unique<InheritedPathChecker>(
+  conversion_checkers.push_back(MakeGarbageCollected<InheritedPathChecker>(
       CssProperty(), GetPath(CssProperty(), *state.ParentStyle())));
   return PathInterpolationFunctions::ConvertValue(
       GetPath(CssProperty(), *state.ParentStyle()),

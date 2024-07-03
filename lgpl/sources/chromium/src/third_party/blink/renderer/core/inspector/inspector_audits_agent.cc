@@ -100,7 +100,7 @@ std::unique_ptr<protocol::Audits::InspectorIssue> CreateLowTextContrastIssue(
           .setFontWeight(info.font_weight)
           .setContrastRatio(info.contrast_ratio)
           .setViolatingNodeSelector(sb.ToString())
-          .setViolatingNodeId(DOMNodeIds::IdForNode(element))
+          .setViolatingNodeId(element->GetDomNodeId())
           .build();
   issue_details.setLowTextContrastIssueDetails(std::move(low_contrast_details));
 
@@ -217,24 +217,8 @@ protocol::Response InspectorAuditsAgent::checkFormsIssues(
   *out_formIssues = std::make_unique<
       protocol::Array<protocol::Audits::GenericIssueDetails>>();
   if (web_autofill_client_) {
-    std::vector<WebAutofillClient::FormIssue> form_issues =
-        web_autofill_client_->ProccessFormsAndReturnIssues();
-    for (const WebAutofillClient::FormIssue& form_issue : form_issues) {
-      std::unique_ptr<protocol::Audits::GenericIssueDetails>
-          generic_issue_details =
-              protocol::Audits::GenericIssueDetails::create()
-                  .setErrorType(AuditsIssue::GenericIssueErrorTypeToProtocol(
-                      form_issue.issue_type))
-                  .setFrameId(form_issue.frame_id)
-                  .setViolatingNodeAttribute(
-                      form_issue.violating_node_attribute)
-                  .setViolatingNodeId(form_issue.violating_node)
-                  .build();
-
-      (*out_formIssues)->emplace_back(std::move(generic_issue_details));
-    }
+    web_autofill_client_->EmitFormIssuesToDevtools();
   }
-
   return protocol::Response::Success();
 }
 

@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/paint/clip_paint_property_node.h"
 
-#include "third_party/blink/renderer/platform/geometry/layout_rect.h"
+#include "third_party/blink/renderer/platform/geometry/infinite_int_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/effect_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
 
@@ -40,15 +40,18 @@ bool ClipPaintPropertyNodeOrAlias::Changed(
     const TransformPaintPropertyNodeOrAlias* transform_not_to_check) const {
   for (const auto* node = this; node && node != &relative_to_state.Clip();
        node = node->Parent()) {
-    if (node->NodeChanged() >= change)
+    if (node->NodeChanged() >= change) {
       return true;
-    if (node->IsParentAlias())
+    }
+    if (node->IsParentAlias()) {
       continue;
+    }
     const auto* unaliased = static_cast<const ClipPaintPropertyNode*>(node);
     if (&unaliased->LocalTransformSpace() != transform_not_to_check &&
-        unaliased->LocalTransformSpace().Changed(change,
-                                                 relative_to_state.Transform()))
+        unaliased->LocalTransformSpace().Changed(
+            change, relative_to_state.Transform())) {
       return true;
+    }
   }
 
   return false;
@@ -68,13 +71,15 @@ void ClipPaintPropertyNodeOrAlias::ClearChangedToRoot(
 }
 
 std::unique_ptr<JSONObject> ClipPaintPropertyNode::ToJSON() const {
-  auto json = ToJSONBase();
+  auto json = ClipPaintPropertyNodeOrAlias::ToJSON();
   if (NodeChanged() != PaintPropertyChangeType::kUnchanged)
     json->SetString("changed", PaintPropertyChangeTypeToString(NodeChanged()));
   json->SetString("localTransformSpace",
                   String::Format("%p", state_.local_transform_space.get()));
   json->SetString("rect", String(state_.paint_clip_rect_.Rect().ToString()));
-  if (state_.layout_clip_rect_excluding_overlay_scrollbars) {
+  if (state_.layout_clip_rect_excluding_overlay_scrollbars &&
+      *state_.layout_clip_rect_excluding_overlay_scrollbars !=
+          state_.layout_clip_rect_) {
     json->SetString(
         "rectExcludingOverlayScrollbars",
         String(state_.layout_clip_rect_excluding_overlay_scrollbars->Rect()

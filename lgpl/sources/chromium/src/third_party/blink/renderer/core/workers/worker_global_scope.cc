@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 
 #include "base/memory/scoped_refptr.h"
+#include "base/trace_event/typed_macros.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/metrics/public/cpp/mojo_ukm_recorder.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
@@ -52,6 +53,7 @@
 #include "third_party/blink/renderer/core/inspector/console_message_storage.h"
 #include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
 #include "third_party/blink/renderer/core/inspector/inspector_issue_storage.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/inspector/worker_inspector_controller.h"
 #include "third_party/blink/renderer/core/inspector/worker_thread_debugger.h"
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
@@ -87,6 +89,7 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 
 namespace blink {
 namespace {
@@ -125,16 +128,25 @@ scoped_refptr<SecurityOrigin> CreateSecurityOrigin(
   DCHECK(!is_service_worker_global_scope ||
          !KURL(creation_params->script_url).ProtocolIsData());
 
-  // TODO(https://crbug.com/1058305) Inherit |agent_cluster_id_| for dedicated
-  // workers. DO NOT inherit for shared workers and service workers.
-  //
-  // Create a new SecurityOrigin via CreateFromUrlOrigin() so that worker's
-  // origin can avoid inheriting unnecessary capabilities from the starter
-  // origin, while the worker's origin inherits url:Origin's internal nonce.
   scoped_refptr<SecurityOrigin> security_origin;
   if (KURL(creation_params->script_url).ProtocolIsData()) {
-    security_origin = SecurityOrigin::CreateUniqueOpaque();
+    // Workers with data: URL should use a new, unique opaque origin per spec:
+    // https://html.spec.whatwg.org/multipage/workers.html#script-settings-for-workers:concept-settings-object-origin-2
+    // We derive the new opaque origin from the starter origin because of a bug
+    // where the browser thinks the worker's origin is the starter origin (see
+    // https://crbug.com/1058759). With `DeriveNewOpaqueOrigin()`, the precursor
+    // origin of the new opaque origin will be the starter origin. This way, if
+    // the browser needs to verify that the browser and renderer origin matches,
+    // it can just compare the browser-side origin with the precursor of the
+    // renderer-side origin.
+    security_origin = creation_params->starter_origin->DeriveNewOpaqueOrigin();
   } else {
+    // TODO(https://crbug.com/1058305) Inherit |agent_cluster_id_| for dedicated
+    // workers. DO NOT inherit for shared workers and service workers.
+    //
+    // Create a new SecurityOrigin via CreateFromUrlOrigin() so that worker's
+    // origin can avoid inheriting unnecessary capabilities from the starter
+    // origin, while the worker's origin inherits url:Origin's internal nonce.
     security_origin = SecurityOrigin::CreateFromUrlOrigin(
         creation_params->starter_origin->ToUrlOrigin());
   }
@@ -391,16 +403,10 @@ void WorkerGlobalScope::AddConsoleMessageImpl(ConsoleMessage* console_message,
                                               bool discard_duplicates) {
   DCHECK(IsContextThread());
   ReportingProxy().ReportConsoleMessage(
-      console_message->Source(), console_message->Level(),
+      console_message->GetSource(), console_message->GetLevel(),
       console_message->Message(), console_message->Location());
   GetThread()->GetConsoleMessageStorage()->AddConsoleMessage(
       this, console_message, discard_duplicates);
-}
-
-void WorkerGlobalScope::AddInspectorIssue(
-    mojom::blink::InspectorIssueInfoPtr info) {
-  GetThread()->GetInspectorIssueStorage()->AddInspectorIssue(this,
-                                                             std::move(info));
 }
 
 void WorkerGlobalScope::AddInspectorIssue(AuditsIssue issue) {
@@ -457,7 +463,7 @@ void WorkerGlobalScope::EvaluateClassicScript(
 
 void WorkerGlobalScope::WorkerScriptFetchFinished(
     Script& worker_script,
-    absl::optional<v8_inspector::V8StackTraceId> stack_id) {
+    std::optional<v8_inspector::V8StackTraceId> stack_id) {
   DCHECK(IsContextThread());
 
   DCHECK_NE(ScriptEvalState::kEvaluated, script_eval_state_);
@@ -564,9 +570,9 @@ void WorkerGlobalScope::ReceiveMessage(BlinkTransferableMessage message) {
       MessagePort::EntanglePorts(*this, std::move(message.ports));
   WorkerThreadDebugger* debugger =
       WorkerThreadDebugger::From(GetThread()->GetIsolate());
-  if (debugger)
+  if (debugger) {
     debugger->ExternalAsyncTaskStarted(message.sender_stack_trace_id);
-
+  }
   if (message.message->CanDeserializeIn(this)) {
     UserActivation* user_activation = nullptr;
     if (message.user_activation) {
@@ -574,8 +580,17 @@ void WorkerGlobalScope::ReceiveMessage(BlinkTransferableMessage message) {
           message.user_activation->has_been_active,
           message.user_activation->was_active);
     }
-    DispatchEvent(*MessageEvent::Create(ports, std::move(message.message),
-                                        user_activation));
+    MessageEvent* message_event = MessageEvent::Create(
+        ports, std::move(message.message), user_activation);
+    message_event->SetTraceId(message.trace_id);
+    TRACE_EVENT(
+        "devtools.timeline", "HandlePostMessage", "data",
+        [&](perfetto::TracedValue context) {
+          inspector_handle_post_message_event::Data(
+              std::move(context), GetExecutionContext(), *message_event);
+        },
+        perfetto::Flow::Global(message_event->GetTraceId()));
+    DispatchEvent(*message_event);
   } else {
     DispatchEvent(*MessageEvent::CreateError());
   }
@@ -599,11 +614,8 @@ WorkerGlobalScope::WorkerGlobalScope(
               (creation_params->agent_cluster_id.is_empty()
                    ? base::UnguessableToken::Create()
                    : creation_params->agent_cluster_id),
-              base::FeatureList::IsEnabled(
-                  scheduler::kMicrotaskQueuePerWorkerAgent)
-                  ? v8::MicrotaskQueue::New(thread->GetIsolate(),
-                                            v8::MicrotasksPolicy::kScoped)
-                  : nullptr),
+              v8::MicrotaskQueue::New(thread->GetIsolate(),
+                                      v8::MicrotasksPolicy::kScoped)),
           creation_params->global_scope_name,
           creation_params->parent_devtools_token,
           creation_params->v8_cache_options,
@@ -611,7 +623,9 @@ WorkerGlobalScope::WorkerGlobalScope(
           std::move(creation_params->content_settings_client),
           std::move(creation_params->web_worker_fetch_context),
           thread->GetWorkerReportingProxy(),
-          creation_params->script_url.ProtocolIsData()),
+          creation_params->script_url.ProtocolIsData(),
+          /*is_default_world_of_isolate=*/
+          creation_params->is_default_world_of_isolate),
       ActiveScriptWrappable<WorkerGlobalScope>({}),
       script_type_(creation_params->script_type),
       user_agent_(creation_params->user_agent),
@@ -625,6 +639,9 @@ WorkerGlobalScope::WorkerGlobalScope(
       ukm_source_id_(creation_params->ukm_source_id),
       top_level_frame_security_origin_(
           std::move(creation_params->top_level_frame_security_origin)) {
+  // Workers should always maintain the default world of an isolate.
+  CHECK(creation_params->is_default_world_of_isolate);
+
   InstanceCounters::IncrementCounter(
       InstanceCounters::kWorkerGlobalScopeCounter);
 
@@ -752,6 +769,10 @@ void WorkerGlobalScope::Trace(Visitor* visitor) const {
   visitor->Trace(worker_script_);
   WorkerOrWorkletGlobalScope::Trace(visitor);
   Supplementable<WorkerGlobalScope>::Trace(visitor);
+}
+
+bool WorkerGlobalScope::HasPendingActivity() const {
+  return !ExecutionContext::IsContextDestroyed();
 }
 
 FontMatchingMetrics* WorkerGlobalScope::GetFontMatchingMetrics() {

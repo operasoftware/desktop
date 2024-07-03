@@ -373,9 +373,7 @@ void WebFrameSerializerImpl::OpenTagToString(Element* element,
   String added_contents = PostActionAfterSerializeOpenTag(element, param);
   // Complete the open tag for element when it has child/children.
   if (element->HasChildren() || param->have_added_contents_before_end ||
-      (element->AuthorShadowRoot() &&
-       RuntimeEnabledFeatures::StreamingDeclarativeShadowDOMEnabled() &&
-       RuntimeEnabledFeatures::SaveAsWithDeclarativeShadowDOMEnabled())) {
+      element->AuthorShadowRoot()) {
     result.Append('>');
   }
   // Append the added contents generate in  post action of open tag.
@@ -395,9 +393,7 @@ void WebFrameSerializerImpl::EndTagToString(Element* element,
     return;
   // Write end tag when element has child/children.
   if (element->HasChildren() || param->have_added_contents_before_end ||
-      (element->AuthorShadowRoot() &&
-       RuntimeEnabledFeatures::StreamingDeclarativeShadowDOMEnabled() &&
-       RuntimeEnabledFeatures::SaveAsWithDeclarativeShadowDOMEnabled())) {
+      element->AuthorShadowRoot()) {
     result.Append("</");
     result.Append(element->nodeName().DeprecatedLower());
     result.Append('>');
@@ -427,7 +423,6 @@ void WebFrameSerializerImpl::EndTagToString(Element* element,
 void WebFrameSerializerImpl::ShadowRootTagToString(ShadowRoot* shadow_root,
                                                    SerializeDomParam* param) {
   CHECK(!shadow_root->IsUserAgent());
-  DCHECK(RuntimeEnabledFeatures::StreamingDeclarativeShadowDOMEnabled());
 
   StringBuilder result;
   result.Append("<template shadowrootmode=");
@@ -451,10 +446,7 @@ void WebFrameSerializerImpl::BuildContentForNode(Node* node,
       OpenTagToString(element, param);
 
       // Process the ShadowRoot into a <template> if present.
-      auto* shadow_root = element->AuthorShadowRoot();
-      if (shadow_root &&
-          RuntimeEnabledFeatures::StreamingDeclarativeShadowDOMEnabled() &&
-          RuntimeEnabledFeatures::SaveAsWithDeclarativeShadowDOMEnabled()) {
+      if (auto* shadow_root = element->AuthorShadowRoot()) {
         ShadowRootTagToString(shadow_root, param);
         for (Node* child = shadow_root->firstChild(); child;
              child = child->nextSibling()) {

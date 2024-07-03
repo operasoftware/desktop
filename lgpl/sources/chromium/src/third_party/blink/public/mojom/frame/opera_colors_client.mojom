@@ -9,8 +9,8 @@ struct OperaColor {
 };
 
 struct OperaColors {
-  OperaColor? opera_gx_accent;
-  OperaColor? opera_gx_base;
+  OperaColor? opera_accent;
+  OperaColor? opera_background;
 };
 
 [EnableIf=opera_feature_blink_browser_colors]

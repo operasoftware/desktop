@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,6 +82,7 @@ void AudioTrackMojoEncoder::OnSetFormat(
   media::AudioEncoder::Options options = {};
   if (codec_ == AudioTrackRecorder::CodecId::kAac) {
     options.codec = media::AudioCodec::kAAC;
+    options.aac = std::move(aac_options_);
   } else {
     DVLOG(1) << "Unsupported codec: " << static_cast<int>(codec_);
     return;
@@ -124,6 +125,12 @@ void AudioTrackMojoEncoder::EncodeAudio(
     return;
   }
 
+  DoEncodeAudio(std::move(input_bus), capture_time);
+}
+
+void AudioTrackMojoEncoder::DoEncodeAudio(
+    std::unique_ptr<media::AudioBus> input_bus,
+    base::TimeTicks capture_time) {
   auto done_cb = base::BindPostTask(
       encoder_task_runner_, WTF::BindOnce(&AudioTrackMojoEncoder::OnEncodeDone,
                                           weak_factory_.GetWeakPtr()));
@@ -145,8 +152,8 @@ void AudioTrackMojoEncoder::OnInitializeDone(media::EncoderStatus status) {
   }
 
   while (!input_queue_.empty()) {
-    EncodeAudio(std::move(input_queue_.front().audio_bus),
-                input_queue_.front().capture_time);
+    DoEncodeAudio(std::move(input_queue_.front().audio_bus),
+                  input_queue_.front().capture_time);
     input_queue_.pop();
   }
 }
@@ -163,15 +170,17 @@ void AudioTrackMojoEncoder::OnEncodeDone(media::EncoderStatus status) {
 
 void AudioTrackMojoEncoder::OnEncodeOutput(
     media::EncodedAudioBuffer encoded_buffer,
-    absl::optional<media::AudioEncoder::CodecDescription> codec_desc) {
+    std::optional<media::AudioEncoder::CodecDescription> codec_desc) {
   if (!current_status_.is_ok()) {
     LogError("Refusing to output when in error state: ", current_status_);
     return;
   }
 
+  // Don't use encoded_buffer.encoded_data.end() as the encoded data size could
+  // be smaller than the allocated encoded_data.
   std::string encoded_data(
-      reinterpret_cast<char*>(encoded_buffer.encoded_data.get()),
-      encoded_buffer.encoded_data_size);
+      encoded_buffer.encoded_data.begin(),
+      encoded_buffer.encoded_data.begin() + encoded_buffer.encoded_data_size);
   on_encoded_audio_cb_.Run(encoded_buffer.params, encoded_data,
                            std::move(codec_desc), encoded_buffer.timestamp);
 }

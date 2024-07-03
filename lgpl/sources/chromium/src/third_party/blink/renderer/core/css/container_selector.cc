@@ -15,22 +15,25 @@ ContainerSelector::ContainerSelector(AtomicString name,
   MediaQueryExpNode::FeatureFlags feature_flags = query.CollectFeatureFlags();
 
   if (feature_flags & MediaQueryExpNode::kFeatureInlineSize) {
-    logical_axes_ |= kLogicalAxisInline;
+    logical_axes_ |= kLogicalAxesInline;
   }
   if (feature_flags & MediaQueryExpNode::kFeatureBlockSize) {
-    logical_axes_ |= kLogicalAxisBlock;
+    logical_axes_ |= kLogicalAxesBlock;
   }
   if (feature_flags & MediaQueryExpNode::kFeatureWidth) {
-    physical_axes_ |= kPhysicalAxisHorizontal;
+    physical_axes_ |= kPhysicalAxesHorizontal;
   }
   if (feature_flags & MediaQueryExpNode::kFeatureHeight) {
-    physical_axes_ |= kPhysicalAxisVertical;
+    physical_axes_ |= kPhysicalAxesVertical;
   }
   if (feature_flags & MediaQueryExpNode::kFeatureStyle) {
     has_style_query_ = true;
   }
-  if (feature_flags & MediaQueryExpNode::kFeatureState) {
+  if (feature_flags & MediaQueryExpNode::kFeatureSticky) {
     has_sticky_query_ = true;
+  }
+  if (feature_flags & MediaQueryExpNode::kFeatureSnap) {
+    has_snap_query_ = true;
   }
   if (feature_flags & MediaQueryExpNode::kFeatureUnknown) {
     has_unknown_feature_ = true;
@@ -52,14 +55,14 @@ unsigned ContainerSelector::Type(WritingMode writing_mode) const {
   LogicalAxes axes =
       logical_axes_ | ToLogicalAxes(physical_axes_, writing_mode);
 
-  if ((axes & kLogicalAxisInline).value()) {
+  if ((axes & kLogicalAxesInline).value()) {
     type |= kContainerTypeInlineSize;
   }
-  if ((axes & kLogicalAxisBlock).value()) {
+  if ((axes & kLogicalAxesBlock).value()) {
     type |= kContainerTypeBlockSize;
   }
-  if (has_sticky_query_) {
-    type |= kContainerTypeSticky;
+  if (has_sticky_query_ || has_snap_query_) {
+    type |= kContainerTypeScrollState;
   }
   return type;
 }

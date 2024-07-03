@@ -6,7 +6,7 @@ import 'chrome://os-settings/lazy_load.js';
 
 import {SettingsDisplayAndMagnificationSubpageElement} from 'chrome://os-settings/lazy_load.js';
 import {CrSettingsPrefs, Router, routes, SettingsDropdownMenuElement, SettingsPrefsElement, SettingsSliderElement, SettingsToggleButtonElement} from 'chrome://os-settings/os_settings.js';
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {pressAndReleaseKeyOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
@@ -33,8 +33,6 @@ suite('<settings-display-and-magnification-subpage>', () => {
   }
 
   setup(() => {
-    loadTimeData.overrideValues(
-        {isAccessibilityOSSettingsVisibilityEnabled: true});
     Router.getInstance().navigateTo(routes.A11Y_DISPLAY_AND_MAGNIFICATION);
   });
 
@@ -89,8 +87,6 @@ suite('<settings-display-and-magnification-subpage>', () => {
 
   test('Turns on color enhancement filters', async () => {
     // Enabled in os_settings_v3_browsertest.js.
-    assertTrue(loadTimeData.getBoolean(
-        'areExperimentalAccessibilityColorEnhancementSettingsEnabled'));
     await initPage();
 
     assertFalse(page.prefs.settings.a11y.color_filtering.enabled.value);
@@ -156,5 +152,32 @@ suite('<settings-display-and-magnification-subpage>', () => {
     const new_filter = page.prefs.settings.a11y.color_filtering
                            .color_vision_deficiency_type.value;
     assertEquals(new_filter, GREYSCALE_VALUE);
+  });
+
+  test('Turns on reduced animations', async () => {
+    await initPage();
+
+    if (loadTimeData.getBoolean('isAccessibilityReducedAnimationsEnabled')) {
+      // If the flag is enabled, check that the UI works.
+      assertFalse(page.prefs.settings.a11y.reduced_animations.enabled.value);
+
+      const enableReducedAnimationsToggle =
+          page.shadowRoot!.querySelector<SettingsToggleButtonElement>(
+              '#enableReducedAnimations');
+      assert(enableReducedAnimationsToggle);
+      assertTrue(isVisible(enableReducedAnimationsToggle));
+
+      enableReducedAnimationsToggle.click();
+      await waitBeforeNextRender(page);
+      flush();
+
+      assertTrue(page.prefs.settings.a11y.reduced_animations.enabled.value);
+    } else {
+      // Toggle shouldn't be available if flag is disabled.
+      const enableReducedAnimationsToggle =
+          page.shadowRoot!.querySelector<SettingsToggleButtonElement>(
+              '#enableReducedAnimations');
+      assert(!enableReducedAnimationsToggle);
+    }
   });
 });

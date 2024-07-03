@@ -30,8 +30,8 @@ BASIC_EMAIL_REGEXP = r'^[\w\-\+\%\.]+\@[\w\-\+\%\.]+$'
 
 class WPTDirMetadata(NamedTuple):
     team_email: Optional[str] = None
-    component: Optional[str] = None
     should_notify: bool = False
+    buganizer_public_component: Optional[str] = None
 
 
 class DirectoryOwnersExtractor:
@@ -145,16 +145,15 @@ class DirectoryOwnersExtractor:
 
         The output of `dirmd` in JSON format looks like:
             {
-                "dirs":{
-                    "tools/binary_size/libsupersize/testdata":{
-                        "monorail":{
-                            "project":"chromium",
-                            "component":"Blink>Internal"
+                "dirs": {
+                    "tools/binary_size/libsupersize/testdata": {
+                        "teamEmail": "team@chromium.org",
+                        "os": "LINUX",
+                        "wpt": {
+                            "notify": "YES"
                         },
-                        "teamEmail":"team@chromium.org",
-                        "os":"LINUX",
-                        "wpt":{
-                            "notify":"YES"
+                        "buganizerPublic": {
+                            "componentId": "12345"
                         }
                     }
                 }
@@ -186,10 +185,9 @@ class DirectoryOwnersExtractor:
             return None
 
         # The value of `notify` is one of ['TRINARY_UNSPECIFIED', 'YES', 'NO'].
-        # Assume that users opt out by default; return True only when notify is
-        # 'YES'.
-        #
-        # TODO(crbug.com/1454853): Consider opt-in by default.
-        return WPTDirMetadata(data.get('teamEmail'),
-                              data.get('monorail', {}).get('component'),
-                              data.get('wpt', {}).get('notify') == 'YES')
+        # Assume that users opt in by default; return False only when notify is
+        # 'NO'.
+        return WPTDirMetadata(
+            data.get('teamEmail'),
+            data.get('wpt', {}).get('notify') != 'NO',
+            data.get('buganizerPublic', {}).get('componentId'))

@@ -14,6 +14,7 @@
 #include "third_party/blink/public/platform/web_callbacks.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_sink.h"
 #include "third_party/blink/renderer/bindings/core/v8/callback_promise_adapter.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
 class SkImage;
@@ -30,7 +31,8 @@ class MediaStreamComponent;
 //   1. Your WebCallbacks implementation requires either onSuccess or onError to
 //      be called before it's destroyed. This is the case with
 //      CallbackPromiseAdapter for example, because its underlying
-//      ScriptPromiseResolver must be resolved or rejected before destruction.
+//      ScriptPromiseResolverBase must be resolved or rejected before
+//      destruction.
 //
 //   2. You are passing ownership of the WebCallbacks to code which may
 //      silently drop it. A common way for this to happen is to bind the
@@ -60,11 +62,11 @@ class MediaStreamComponent;
 //   // Blink client implementation
 //   void FooClientImpl::doMagic(std::unique_ptr<FooCallbacks> callbacks) {
 //     auto scoped_callbacks = make_scoped_web_callbacks(
-//         std::move(callbacks), base::BindOnce(&OnCallbacksDropped));
+//         std::move(callbacks), WTF::BindOnce(&OnCallbacksDropped));
 //
 //     // Call to some lower-level service which may never run the callback we
 //     // give it.
-//     foo_service_->DoMagic(base::BindOnce(&RespondWithSuccess,
+//     foo_service_->DoMagic(WTF::BindOnce(&RespondWithSuccess,
 //                                          std::move(scoped_callbacks)));
 //   }
 //
@@ -126,7 +128,7 @@ using ImageCaptureGrabFrameCallbacks =
 // OnSkBitmap(). This class is single threaded throughout.
 class ImageCaptureFrameGrabber final : public MediaStreamVideoSink {
  public:
-  ImageCaptureFrameGrabber();
+  ImageCaptureFrameGrabber() = default;
 
   ImageCaptureFrameGrabber(const ImageCaptureFrameGrabber&) = delete;
   ImageCaptureFrameGrabber& operator=(const ImageCaptureFrameGrabber&) = delete;
@@ -135,7 +137,8 @@ class ImageCaptureFrameGrabber final : public MediaStreamVideoSink {
 
   void GrabFrame(MediaStreamComponent* component,
                  std::unique_ptr<ImageCaptureGrabFrameCallbacks> callbacks,
-                 scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+                 scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+                 base::TimeDelta timeout);
 
  private:
   // Internal class to receive, convert and forward one frame.
@@ -143,9 +146,11 @@ class ImageCaptureFrameGrabber final : public MediaStreamVideoSink {
 
   void OnSkImage(ScopedWebCallbacks<ImageCaptureGrabFrameCallbacks> callbacks,
                  sk_sp<SkImage> image);
+  void OnTimeout();
 
   // Flag to indicate that there is a frame grabbing in progress.
-  bool frame_grab_in_progress_;
+  bool frame_grab_in_progress_ = false;
+  TaskHandle timeout_task_handle_;
 
   THREAD_CHECKER(thread_checker_);
   base::WeakPtrFactory<ImageCaptureFrameGrabber> weak_factory_{this};

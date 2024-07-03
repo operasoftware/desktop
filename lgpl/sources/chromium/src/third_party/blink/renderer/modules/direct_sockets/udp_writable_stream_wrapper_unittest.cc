@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/gc_plugin.h"
@@ -85,7 +86,7 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
         script_state,
         WTF::BindOnce(&StreamCreator::Close, WrapWeakPersistent(this)),
         udp_socket, network::mojom::RestrictedUDPSocketMode::CONNECTED);
-    return stream_wrapper_;
+    return stream_wrapper_.Get();
   }
 
   void Trace(Visitor* visitor) const {
@@ -105,7 +106,7 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
     close_called_with_ = !exception.IsEmpty();
   }
 
-  absl::optional<bool> close_called_with_;
+  std::optional<bool> close_called_with_;
   Member<FakeRestrictedUDPSocket> fake_udp_socket_;
   HeapMojoReceiver<network::mojom::blink::RestrictedUDPSocket,
                    FakeRestrictedUDPSocket>
@@ -127,6 +128,7 @@ class ScopedStreamCreator {
 };
 
 TEST(UDPWritableStreamWrapperTest, Create) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
   ScopedStreamCreator stream_creator(
@@ -137,6 +139,7 @@ TEST(UDPWritableStreamWrapperTest, Create) {
 }
 
 TEST(UDPWritableStreamWrapperTest, WriteUdpMessage) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
   ScopedStreamCreator stream_creator(
@@ -153,7 +156,7 @@ TEST(UDPWritableStreamWrapperTest, WriteUdpMessage) {
   message->setData(
       MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(chunk));
 
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, message),
                     ASSERT_NO_EXCEPTION);
 
@@ -167,6 +170,7 @@ TEST(UDPWritableStreamWrapperTest, WriteUdpMessage) {
 }
 
 TEST(UDPWritableStreamWrapperTest, WriteUdpMessageFromTypedArray) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
   ScopedStreamCreator stream_creator(
@@ -185,7 +189,7 @@ TEST(UDPWritableStreamWrapperTest, WriteUdpMessageFromTypedArray) {
   message->setData(MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(
       NotShared<DOMUint8Array>(chunk)));
 
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, message),
                     ASSERT_NO_EXCEPTION);
 
@@ -200,6 +204,7 @@ TEST(UDPWritableStreamWrapperTest, WriteUdpMessageFromTypedArray) {
 }
 
 TEST(UDPWritableStreamWrapperTest, WriteUdpMessageWithEmptyDataField) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
   ScopedStreamCreator stream_creator(
@@ -218,7 +223,7 @@ TEST(UDPWritableStreamWrapperTest, WriteUdpMessageWithEmptyDataField) {
   message->setData(
       MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(chunk));
 
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, message),
                     ASSERT_NO_EXCEPTION);
 
@@ -233,6 +238,7 @@ TEST(UDPWritableStreamWrapperTest, WriteUdpMessageWithEmptyDataField) {
 }
 
 TEST(UDPWritableStreamWrapperTest, WriteAfterFinishedWrite) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
   ScopedStreamCreator stream_creator(
@@ -250,7 +256,7 @@ TEST(UDPWritableStreamWrapperTest, WriteAfterFinishedWrite) {
     message->setData(
         MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(chunk));
 
-    ScriptPromise result =
+    ScriptPromiseUntyped result =
         writer->write(script_state, ScriptValue::From(script_state, message),
                       ASSERT_NO_EXCEPTION);
 
@@ -266,6 +272,7 @@ TEST(UDPWritableStreamWrapperTest, WriteAfterFinishedWrite) {
 }
 
 TEST(UDPWritableStreamWrapperTest, WriteAfterClose) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
   ScopedStreamCreator stream_creator(
@@ -282,7 +289,7 @@ TEST(UDPWritableStreamWrapperTest, WriteAfterClose) {
   message->setData(
       MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(chunk));
 
-  ScriptPromise write_result =
+  ScriptPromiseUntyped write_result =
       writer->write(script_state, ScriptValue::From(script_state, message),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester write_tester(script_state, write_result);
@@ -290,7 +297,8 @@ TEST(UDPWritableStreamWrapperTest, WriteAfterClose) {
 
   ASSERT_TRUE(write_tester.IsFulfilled());
 
-  ScriptPromise close_result = writer->close(script_state, ASSERT_NO_EXCEPTION);
+  ScriptPromiseUntyped close_result =
+      writer->close(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester close_tester(script_state, close_result);
   close_tester.WaitUntilSettled();
 
@@ -299,7 +307,7 @@ TEST(UDPWritableStreamWrapperTest, WriteAfterClose) {
   ASSERT_EQ(udp_writable_stream_wrapper->GetState(),
             StreamWrapper::State::kClosed);
 
-  ScriptPromise write_after_close_result =
+  ScriptPromiseUntyped write_after_close_result =
       writer->write(script_state, ScriptValue::From(script_state, message),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester write_after_close_tester(script_state,
@@ -317,6 +325,7 @@ TEST(UDPWritableStreamWrapperTest, WriteFailed) {
     }
   };
 
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
   ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>(
@@ -332,7 +341,7 @@ TEST(UDPWritableStreamWrapperTest, WriteFailed) {
   message->setData(
       MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(chunk));
 
-  ScriptPromise write_result =
+  ScriptPromiseUntyped write_result =
       writer->write(script_state, ScriptValue::From(script_state, message),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester write_tester(script_state, write_result);

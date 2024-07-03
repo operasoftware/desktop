@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/numerics/checked_math.h"
 #include "build/build_config.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/graphics/cpu/arm/webgl_image_conversion_neon.h"
 #include "third_party/blink/renderer/platform/graphics/cpu/loongarch64/webgl_image_conversion_lsx.h"
 #include "third_party/blink/renderer/platform/graphics/cpu/mips/webgl_image_conversion_msa.h"
@@ -3534,11 +3535,6 @@ void FormatConverter::Convert() {
   return;
 }
 
-bool FrameIsValid(const SkBitmap& frame_bitmap) {
-  return !frame_bitmap.isNull() && !frame_bitmap.empty() &&
-         frame_bitmap.colorType() == kN32_SkColorType;
-}
-
 }  // anonymous namespace
 
 WebGLImageConversion::PixelStoreParams::PixelStoreParams()
@@ -3782,73 +3778,6 @@ GLenum WebGLImageConversion::ComputeImageSizeInBytes(
   if (!checked_value.IsValid())
     return GL_INVALID_VALUE;
   return GL_NO_ERROR;
-}
-
-WebGLImageConversion::ImageExtractor::ImageExtractor(
-    Image* image,
-    bool premultiply_alpha,
-    sk_sp<SkColorSpace> target_color_space) {
-  if (!image)
-    return;
-
-  sk_sp<SkImage> skia_image = image->PaintImageForCurrentFrame().GetSwSkImage();
-  if (skia_image && !skia_image->colorSpace())
-    skia_image = skia_image->reinterpretColorSpace(SkColorSpace::MakeSRGB());
-
-  if (image->HasData()) {
-    bool has_alpha = skia_image ? !skia_image->isOpaque() : true;
-    bool need_unpremultiplied = has_alpha && !premultiply_alpha;
-    bool need_color_conversion =
-        skia_image && target_color_space &&
-        !SkColorSpace::Equals(skia_image->colorSpace(),
-                              target_color_space.get());
-    if (!skia_image || !target_color_space || need_unpremultiplied ||
-        need_color_conversion) {
-      // Attempt to get raw unpremultiplied image data.
-      const bool data_complete = true;
-      // Always decode as unpremultiplied. If premultiplication is desired, it
-      // will be applied later.
-      const auto alpha_option = ImageDecoder::kAlphaNotPremultiplied;
-      // Decode to the default 8-bit depth (as opposed to floating-point).
-      // TODO(1320812): This is not always the correct choice.
-      auto bit_depth = ImageDecoder::kDefaultBitDepth;
-      // If we are not ignoring the color space, then tag the image with the
-      // target color space. It will be converted later on.
-      auto color_behavior =
-          target_color_space ? ColorBehavior::kTag : ColorBehavior::kIgnore;
-      std::unique_ptr<ImageDecoder> decoder(
-          ImageDecoder::Create(image->Data(), data_complete, alpha_option,
-                               bit_depth, color_behavior));
-      if (!decoder || !decoder->FrameCount())
-        return;
-      ImageFrame* frame = decoder->DecodeFrameBufferAtIndex(0);
-      if (!frame || frame->GetStatus() != ImageFrame::kFrameComplete)
-        return;
-      has_alpha = frame->HasAlpha();
-      SkBitmap bitmap = frame->Bitmap();
-      if (!FrameIsValid(bitmap))
-        return;
-
-      // TODO(fmalita): Partial frames are not supported currently: only fully
-      // decoded frames make it through.  We could potentially relax this and
-      // use SkImages::RasterFromBitmap(bitmap) to make a copy.
-      skia_image = frame->FinalizePixelsAndGetImage();
-    }
-  }
-
-  if (!skia_image)
-    return;
-
-  DCHECK(skia_image->width());
-  DCHECK(skia_image->height());
-
-  // Fail if the image was downsampled because of memory limits.
-  if (skia_image->width() != image->width() ||
-      skia_image->height() != image->height()) {
-    return;
-  }
-
-  sk_image_ = std::move(skia_image);
 }
 
 unsigned WebGLImageConversion::GetChannelBitsByFormat(GLenum format) {

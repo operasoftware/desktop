@@ -7,10 +7,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <initializer_list>
 
-#include "base/bits.h"
 #include "base/check_op.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
@@ -49,6 +49,10 @@ class CORE_EXPORT CSSBitsetBase {
 
   bool operator==(const CSSBitsetBase& o) const { return chunks_ == o.chunks_; }
   bool operator!=(const CSSBitsetBase& o) const { return !(*this == o); }
+
+  inline uint64_t HighPriorityBits() const {
+    return chunks_.data()[0] & HighPriorityBitMask();
+  }
 
   inline void Set(CSSPropertyID id) {
     size_t bit = static_cast<size_t>(static_cast<unsigned>(id));
@@ -94,6 +98,13 @@ class CORE_EXPORT CSSBitsetBase {
       }
     }
 
+    // See BeginAfterHighPriority().
+    struct FirstNonHighPriorityTag {};
+    Iterator(const uint64_t* chunks, FirstNonHighPriorityTag)
+        : chunks_(chunks), chunk_(chunks_[0] & ~HighPriorityBitMask()) {
+      ++*this;  // Go to the first set bit.
+    }
+
     inline void operator++() {
       // If there are no more bits set in this chunk,
       // skip to the next nonzero chunk (if any exists).
@@ -104,7 +115,7 @@ class CORE_EXPORT CSSBitsetBase {
         }
         chunk_ = chunks_[chunk_index_];
       }
-      index_ = chunk_index_ * 64 + base::bits::CountTrailingZeroBits(chunk_);
+      index_ = chunk_index_ * 64 + std::countr_zero(chunk_);
       chunk_ &= chunk_ - 1;  // Clear the lowest bit.
     }
 
@@ -140,6 +151,13 @@ class CORE_EXPORT CSSBitsetBase {
   Iterator begin() const { return Iterator(chunks_.data(), 0, 0); }
   Iterator end() const { return Iterator(chunks_.data(), kChunks, kBits); }
 
+  // Like begin(), except that it skips all high-priority properties
+  // (so starts at the first set bit after kLastHighPriorityCSSProperty).
+  Iterator BeginAfterHighPriority() const {
+    return Iterator(chunks_.data(),
+                    typename Iterator::FirstNonHighPriorityTag());
+  }
+
  private:
   std::array<uint64_t, kChunks> chunks_;
 
@@ -152,6 +170,21 @@ class CORE_EXPORT CSSBitsetBase {
       chunks[bit / 64] |= uint64_t{1} << (bit % 64);
     }
     return chunks;
+  }
+
+  static constexpr uint64_t HighPriorityBitMask() {
+    constexpr int from = static_cast<int>(kFirstHighPriorityCSSProperty);
+    constexpr int to_exclusive =
+        static_cast<int>(kLastHighPriorityCSSProperty) + 1;
+    static_assert(
+        from >= 0,
+        "This function assumes all high-priority properties fit in 64 bits");
+    static_assert(
+        to_exclusive < 64,
+        "This function assumes all high-priority properties fit in 64 bits");
+
+    // NOTE: We need to_exclusive < 64 to have defined shifts.
+    return ((uint64_t{1} << to_exclusive) - 1) & ~((uint64_t{1} << from) - 1);
   }
 };
 

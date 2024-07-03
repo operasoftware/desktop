@@ -35,7 +35,8 @@ String ScriptUrlForFunction(const probe::CallFunction& probe) {
       probe.context->GetIsolate()->GetCurrentContext());
   if (resource_name_string.IsEmpty())
     return String();
-  return ToCoreString(resource_name_string.ToLocalChecked());
+  return ToCoreString(probe.context->GetIsolate(),
+                      resource_name_string.ToLocalChecked());
 }
 
 }  // namespace

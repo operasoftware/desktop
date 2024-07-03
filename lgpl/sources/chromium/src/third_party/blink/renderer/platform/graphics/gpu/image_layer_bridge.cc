@@ -48,7 +48,6 @@ scoped_refptr<StaticBitmapImage> MakeAccelerated(
   const auto paint_image = source->PaintImageForCurrentFrame();
   const auto image_info = paint_image.GetSkImageInfo().makeWH(
       source->Size().width(), source->Size().height());
-  constexpr bool kIsOriginTopLeft = true;
   // Always request gpu::SHARED_IMAGE_USAGE_SCANOUT when using gpu compositing,
   // if possible. This is safe because the prerequisite capabilities are checked
   // downstream in CanvasResourceProvider::CreateSharedImageProvider.
@@ -57,14 +56,14 @@ scoped_refptr<StaticBitmapImage> MakeAccelerated(
   auto provider = CanvasResourceProvider::CreateSharedImageProvider(
       image_info, cc::PaintFlags::FilterQuality::kLow,
       CanvasResourceProvider::ShouldInitialize::kNo, context_provider_wrapper,
-      RasterMode::kGPU, kIsOriginTopLeft, kSharedImageUsageFlags);
+      RasterMode::kGPU, kSharedImageUsageFlags);
   if (!provider || !provider->IsAccelerated())
     return nullptr;
 
   cc::PaintFlags paint;
   paint.setBlendMode(SkBlendMode::kSrc);
-  provider->Canvas()->drawImage(paint_image, 0, 0, SkSamplingOptions(), &paint);
-  return provider->Snapshot(CanvasResourceProvider::FlushReason::kNon2DCanvas);
+  provider->Canvas().drawImage(paint_image, 0, 0, SkSamplingOptions(), &paint);
+  return provider->Snapshot(FlushReason::kNon2DCanvas);
 }
 
 }  // namespace
@@ -74,8 +73,7 @@ ImageLayerBridge::ImageLayerBridge(OpacityMode opacity_mode)
   layer_ = cc::TextureLayer::CreateForMailbox(this);
   layer_->SetIsDrawable(true);
   layer_->SetHitTestable(true);
-  layer_->SetNearestNeighbor(filter_quality_ ==
-                             cc::PaintFlags::FilterQuality::kNone);
+  layer_->SetNearestNeighbor(false);
   if (opacity_mode_ == kOpaque) {
     layer_->SetContentsOpaque(true);
     layer_->SetBlendBackgroundColor(false);
@@ -117,6 +115,16 @@ void ImageLayerBridge::SetImage(scoped_refptr<StaticBitmapImage> image) {
     }
   }
   has_presented_since_last_set_image_ = false;
+}
+
+void ImageLayerBridge::SetFilterQuality(
+    cc::PaintFlags::FilterQuality filter_quality) {
+  if (disposed_) {
+    return;
+  }
+
+  layer_->SetNearestNeighbor(filter_quality ==
+                             cc::PaintFlags::FilterQuality::kNone);
 }
 
 void ImageLayerBridge::SetUV(const gfx::PointF& left_top,
@@ -197,7 +205,8 @@ bool ImageLayerBridge::PrepareTransferableResource(
         mailbox_holder.mailbox, mailbox_holder.texture_target,
         mailbox_holder.sync_token, size,
         viz::SkColorTypeToSinglePlaneSharedImageFormat(color_type),
-        is_overlay_candidate);
+        is_overlay_candidate,
+        viz::TransferableResource::ResourceSource::kImageLayerBridge);
 
     auto func = WTF::BindOnce(&ImageLayerBridge::ResourceReleasedGpu,
                               WrapWeakPersistent(this),
@@ -235,7 +244,8 @@ bool ImageLayerBridge::PrepareTransferableResource(
       return false;
 
     *out_resource = viz::TransferableResource::MakeSoftware(
-        registered.bitmap->id(), size, format);
+        registered.bitmap->id(), gpu::SyncToken(), size, format,
+        viz::TransferableResource::ResourceSource::kImageLayerBridge);
     out_resource->color_space = sk_image->colorSpace()
                                     ? gfx::ColorSpace(*sk_image->colorSpace())
                                     : gfx::ColorSpace::CreateSRGB();

@@ -6,6 +6,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 
 namespace blink {
 
@@ -15,6 +16,7 @@ class CanvasPathTest : public testing::Test {
   ~CanvasPathTest() override { context_->NotifyContextDestroyed(); }
 
  protected:
+  test::TaskEnvironment task_environment_;
   Persistent<ExecutionContext> context_ =
       MakeGarbageCollected<NullExecutionContext>();
 };
@@ -26,7 +28,7 @@ class TestCanvasPath : public GarbageCollected<TestCanvasPath>,
       : execution_context_(context) {}
 
   ExecutionContext* GetTopExecutionContext() const override {
-    return execution_context_;
+    return execution_context_.Get();
   }
 
   void Trace(Visitor* v) const override {
@@ -228,6 +230,38 @@ TEST_F(CanvasPathTest, MoveToLineClosePath) {
   path.MoveTo(p1);
   path.AddLineTo(p2);
   path.CloseSubpath();
+  EXPECT_EQ(canvas_path->GetPath(), path);
+}
+
+TEST_F(CanvasPathTest, Arc) {
+  CanvasPath* canvas_path = MakeGarbageCollected<TestCanvasPath>(context_);
+  NonThrowableExceptionState exception_state;
+  canvas_path->arc(0, 1, 5, 2, 3, false, exception_state);
+  EXPECT_TRUE(canvas_path->IsArc());
+
+  Path path;
+  path.AddArc(gfx::PointF(0, 1), 5, 2, 3);
+  EXPECT_EQ(canvas_path->GetPath(), path);
+  EXPECT_TRUE(canvas_path->IsArc());
+
+  canvas_path->closePath();
+  path.CloseSubpath();
+  EXPECT_EQ(canvas_path->GetPath(), path);
+  EXPECT_TRUE(canvas_path->IsArc());
+}
+
+TEST_F(CanvasPathTest, ArcThenLine) {
+  CanvasPath* canvas_path = MakeGarbageCollected<TestCanvasPath>(context_);
+  NonThrowableExceptionState exception_state;
+  canvas_path->arc(0, 1, 5, 2, 3, false, exception_state);
+  EXPECT_TRUE(canvas_path->IsArc());
+  canvas_path->lineTo(8, 9);
+  EXPECT_FALSE(canvas_path->IsArc());
+  EXPECT_FALSE(canvas_path->IsLine());
+
+  Path path;
+  path.AddArc(gfx::PointF(0, 1), 5, 2, 3);
+  path.AddLineTo(gfx::PointF(8, 9));
   EXPECT_EQ(canvas_path->GetPath(), path);
 }
 

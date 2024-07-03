@@ -75,7 +75,7 @@ typedef struct SmoothStreamingContext {
     int nb_fragments;
 } SmoothStreamingContext;
 
-static int ism_write(void *opaque, uint8_t *buf, int buf_size)
+static int ism_write(void *opaque, const uint8_t *buf, int buf_size)
 {
     OutputStream *os = opaque;
     if (os->out)

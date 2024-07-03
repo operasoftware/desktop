@@ -6,7 +6,7 @@ fate-vsynth%: CODEC = $(word 3, $(subst -, ,$(@)))
 fate-vsynth%: FMT = avi
 fate-vsynth%: DEFAULT_SIZE = -s 352x288
 fate-vsynth3-%: DEFAULT_SIZE = -s $(FATEW)x$(FATEH)
-fate-vsynth%: CMD = enc_dec "rawvideo $(DEFAULT_SIZE) -pix_fmt yuv420p $(RAWDECOPTS)" $(SRC) $(FMT) "-c $(CODEC) $(ENCOPTS)" rawvideo "-pix_fmt yuv420p -vsync passthrough $(DECOPTS)" "" "" ${TWOPASS}
+fate-vsynth%: CMD = enc_dec "rawvideo $(DEFAULT_SIZE) -pix_fmt yuv420p $(RAWDECOPTS)" $(SRC) $(FMT) "-c $(CODEC) $(ENCOPTS)" rawvideo "-pix_fmt yuv420p -fps_mode passthrough $(DECOPTS)" "" "" ${TWOPASS}
 fate-vsynth%: CMP_UNIT = 1
 fate-vsynth%: REF = $(SRC_PATH)/tests/ref/vsynth/$(@:fate-%=%)
 
@@ -395,6 +395,10 @@ fate-vsynth%-roqvideo:           CODEC   = roqvideo
 fate-vsynth%-roqvideo:           ENCOPTS = -frames 5
 fate-vsynth%-roqvideo:           RAWDECOPTS = -r 30
 fate-vsynth%-roqvideo:           FMT     = roq
+
+FATE_VCODEC_SCALE-$(call ENCDEC, RPZA, MOV) += rpza
+fate-vsynth%-rpza:               CODEC   = rpza
+fate-vsynth%-rpza:               FMT     = mov
 
 FATE_VCODEC-$(call ENCDEC, RV10, RM)    += rv10
 fate-vsynth%-rv10:               ENCOPTS = -qscale 10

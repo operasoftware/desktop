@@ -16,6 +16,7 @@
 #include "third_party/blink/public/web/web_embedded_worker.h"
 #include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -98,7 +99,7 @@ class BrowserSideSender
                     const mojo::DataPipeProducerHandle& handle) {
     // Send |data| with null terminator.
     ASSERT_TRUE(handle.is_valid());
-    uint32_t written_bytes = static_cast<uint32_t>(data.size() + 1);
+    size_t written_bytes = data.size() + 1;
     MojoResult rv = handle.WriteData(data.c_str(), &written_bytes,
                                      MOJO_WRITE_DATA_FLAG_NONE);
     ASSERT_EQ(MOJO_RESULT_OK, rv);
@@ -200,6 +201,7 @@ class ServiceWorkerInstalledScriptsManagerTest : public testing::Test {
     waiter->Signal();
   }
 
+  test::TaskEnvironment task_environment_;
   std::unique_ptr<NonMainThread> io_thread_;
   std::unique_ptr<NonMainThread> worker_thread_;
 

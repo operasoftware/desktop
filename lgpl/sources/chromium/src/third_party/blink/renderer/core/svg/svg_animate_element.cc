@@ -60,7 +60,7 @@ String ComputeCSSPropertyValue(SVGElement* element, CSSPropertyID id) {
   // Refer to comment in Element::computedStyle.
   DCHECK(element->InActiveDocument());
 
-  element->GetDocument().UpdateStyleAndLayoutTreeForNode(
+  element->GetDocument().UpdateStyleAndLayoutTreeForElement(
       element, DocumentUpdateReason::kSMILAnimation);
 
   // Don't include any properties resulting from CSS Transitions/Animations or
@@ -69,7 +69,7 @@ String ComputeCSSPropertyValue(SVGElement* element, CSSPropertyID id) {
   if (!style)
     return "";
   const CSSValue* value = CSSProperty::Get(id).CSSValueFromComputedStyle(
-      *style, element->GetLayoutObject(), false);
+      *style, element->GetLayoutObject(), false, CSSValuePhase::kResolvedValue);
   return value ? value->CssText() : "";
 }
 
@@ -216,10 +216,11 @@ void SVGAnimateElement::ClearTargetProperty() {
 }
 
 void SVGAnimateElement::UpdateTargetProperty() {
-  if (SVGElement* target = targetElement())
+  if (targetElement()) {
     ResolveTargetProperty();
-  else
+  } else {
     ClearTargetProperty();
+  }
 }
 
 bool SVGAnimateElement::HasValidAnimation() const {
@@ -440,6 +441,18 @@ void SVGAnimateElement::CalculateAnimationValue(
       to_at_end_of_duration_value, targetElement());
 }
 
+AnimationMode SVGAnimateElement::CalculateAnimationMode() {
+  AnimationMode animation_mode = SVGAnimationElement::CalculateAnimationMode();
+  if (animation_mode == kByAnimation || animation_mode == kFromByAnimation) {
+    // by/from-by animation may only be used with attributes that support addition
+    // (e.g. most numeric attributes).
+    if (!AnimatedPropertyTypeSupportsAddition()) {
+      return kNoAnimation;
+    }
+  }
+  return animation_mode;
+}
+
 bool SVGAnimateElement::CalculateToAtEndOfDurationValue(
     const String& to_at_end_of_duration_string) {
   if (to_at_end_of_duration_string.empty())
@@ -463,12 +476,7 @@ bool SVGAnimateElement::CalculateFromAndByValues(const String& from_string,
   DCHECK(targetElement());
   DCHECK(GetAnimationMode() == kByAnimation ||
          GetAnimationMode() == kFromByAnimation);
-
-  // by/from-by animation may only be used with attributes that support addition
-  // (e.g. most numeric attributes).
-  if (!AnimatedPropertyTypeSupportsAddition())
-    return false;
-
+  DCHECK(AnimatedPropertyTypeSupportsAddition());
   DCHECK(!IsA<SVGSetElement>(*this));
 
   from_property_ = ParseValue(from_string);

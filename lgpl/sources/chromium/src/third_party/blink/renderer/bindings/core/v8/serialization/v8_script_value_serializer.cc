@@ -6,13 +6,12 @@
 
 #include "base/auto_reset.h"
 #include "base/feature_list.h"
-#include "base/sys_byteorder.h"
+#include "base/numerics/byte_conversions.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialization_tag.h"
-#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_blob.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
@@ -297,21 +296,26 @@ scoped_refptr<SerializedScriptValue> V8ScriptValueSerializer::Serialize(
   }
 
   // Finalize the results.
-  std::pair<uint8_t*, size_t> buffer = serializer_.Release();
+  auto [buffer_ptr, buffer_size] = serializer_.Release();
+  auto buffer =
+      // SAFETY: The size from Release() is promised to be the size of the
+      // allocation for the returned pointer. The pointer is allocated by the
+      // serializer_ delegate which is `this` and `ReallocateBufferMemory`
+      // allocates memory such that it can be deleted by the DataBufferPtr's
+      // Deleter.
+      UNSAFE_BUFFERS(SerializedScriptValue::DataBufferPtr::FromOwningPointer(
+          buffer_ptr, buffer_size));
   if (!trailer.empty()) {
     CHECK(base::FeatureList::IsEnabled(features::kSSVTrailerWriteNewVersion));
-    CHECK_GT(buffer.second, kTrailerOffsetPosition + sizeof(uint64_t) +
-                                sizeof(uint32_t) + trailer.size());
-    const uint64_t trailer_offset =
-        base::HostToNet64(buffer.second - trailer.size());
-    const uint32_t trailer_size = base::HostToNet32(trailer.size());
-    memcpy(buffer.first + kTrailerOffsetPosition, &trailer_offset,
-           sizeof(uint64_t));
-    memcpy(buffer.first + kTrailerOffsetPosition + sizeof(uint64_t),
-           &trailer_size, sizeof(uint32_t));
+    buffer.as_span()
+        .subspan<kTrailerOffsetPosition, sizeof(uint64_t)>()
+        .copy_from(
+            base::numerics::U64ToBigEndian(buffer.size() - trailer.size()));
+    buffer.as_span()
+        .subspan<kTrailerOffsetPosition + sizeof(uint64_t), sizeof(uint32_t)>()
+        .copy_from(base::numerics::U32ToBigEndian(trailer.size()));
   }
-  serialized_script_value_->SetData(
-      SerializedScriptValue::DataBufferPtr(buffer.first), buffer.second);
+  serialized_script_value_->SetData(std::move(buffer));
   return std::move(serialized_script_value_);
 }
 
@@ -323,10 +327,8 @@ void V8ScriptValueSerializer::PrepareTransfer(ExceptionState& exception_state) {
   for (uint32_t i = 0; i < transferables_->array_buffers.size(); i++) {
     DOMArrayBufferBase* array_buffer = transferables_->array_buffers[i].Get();
     if (!array_buffer->IsShared()) {
-      v8::Local<v8::Value> wrapper =
-          ToV8Traits<DOMArrayBuffer>::ToV8(
-              script_state_, static_cast<DOMArrayBuffer*>(array_buffer))
-              .ToLocalChecked();
+      v8::Local<v8::Value> wrapper = ToV8Traits<DOMArrayBuffer>::ToV8(
+          script_state_, static_cast<DOMArrayBuffer*>(array_buffer));
       serializer_.TransferArrayBuffer(
           i, v8::Local<v8::ArrayBuffer>::Cast(wrapper));
     } else {
@@ -840,7 +842,7 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
         config->GetAttributeVisibility<FencedFrameConfig::Attribute::kWidth>(
             PassKey())));
     WriteUint32(config->deprecated_should_freeze_initial_size(PassKey()));
-    absl::optional<KURL> urn_uuid = config->urn_uuid(PassKey());
+    std::optional<KURL> urn_uuid = config->urn_uuid(PassKey());
     WriteUTF8String(urn_uuid ? urn_uuid->GetString() : g_empty_string);
 
     // The serialization process does not distinguish between null and empty
@@ -851,15 +853,14 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
       WriteUTF8String(config->GetSharedStorageContext());
     }
 
-    absl::optional<gfx::Size> container_size =
-        config->container_size(PassKey());
+    std::optional<gfx::Size> container_size = config->container_size(PassKey());
     WriteUint32(container_size.has_value());
     if (container_size.has_value()) {
       WriteUint32(container_size ? container_size->width() : 0);
       WriteUint32(container_size ? container_size->height() : 0);
     }
 
-    absl::optional<gfx::Size> content_size = config->content_size(PassKey());
+    std::optional<gfx::Size> content_size = config->content_size(PassKey());
     WriteUint32(content_size.has_value());
     if (content_size.has_value()) {
       WriteUint32(content_size ? content_size->width() : 0);
@@ -893,10 +894,11 @@ bool V8ScriptValueSerializer::WriteFile(File* file,
     // hence always have this hardcoded 1.
     WriteUint32(1);
     WriteUint64(file->size());
-    absl::optional<base::Time> last_modified =
+    std::optional<base::Time> last_modified =
         file->LastModifiedTimeForSerialization();
-    WriteDouble(last_modified ? last_modified->ToJsTimeIgnoringNull()
-                              : std::numeric_limits<double>::quiet_NaN());
+    WriteDouble(last_modified
+                    ? last_modified->InMillisecondsFSinceUnixEpochIgnoringNull()
+                    : std::numeric_limits<double>::quiet_NaN());
     WriteUint32(file->GetUserVisibility() == File::kIsUserVisible ? 1 : 0);
   }
   return true;
@@ -909,7 +911,8 @@ void V8ScriptValueSerializer::ThrowDataCloneError(
                                  exception_state_->GetContext());
   exception_state.ThrowDOMException(
       DOMExceptionCode::kDataCloneError,
-      ToBlinkString<String>(v8_message, kDoNotExternalize));
+      ToBlinkString<String>(script_state_->GetIsolate(), v8_message,
+                            kDoNotExternalize));
 }
 
 v8::Maybe<bool> V8ScriptValueSerializer::WriteHostObject(
@@ -924,7 +927,7 @@ v8::Maybe<bool> V8ScriptValueSerializer::WriteHostObject(
                                       "An object could not be cloned.");
     return v8::Nothing<bool>();
   }
-  ScriptWrappable* wrappable = ToScriptWrappable(object);
+  ScriptWrappable* wrappable = ToScriptWrappable(isolate, object);
   // TODO(crbug.com/1353299): Remove this CHECK after an investigation.
   CHECK(wrappable);
   bool wrote_dom_object = WriteDOMObject(wrappable, exception_state);
@@ -954,10 +957,9 @@ DOMSharedArrayBuffer* ToSharedArrayBuffer(v8::Isolate* isolate,
 
   v8::Local<v8::SharedArrayBuffer> v8_shared_array_buffer =
       value.As<v8::SharedArrayBuffer>();
-  if (DOMSharedArrayBuffer* shared_array_buffer =
-          ToScriptWrappable(v8_shared_array_buffer)
-              ->ToImpl<DOMSharedArrayBuffer>()) {
-    return shared_array_buffer;
+  if (ScriptWrappable* shared_array_buffer =
+          ToScriptWrappable(isolate, v8_shared_array_buffer)) {
+    return shared_array_buffer->ToImpl<DOMSharedArrayBuffer>();
   }
 
   // Transfer the ownership of the allocated memory to a DOMArrayBuffer without

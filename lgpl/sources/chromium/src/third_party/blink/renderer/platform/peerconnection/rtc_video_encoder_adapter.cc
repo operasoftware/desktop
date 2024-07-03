@@ -76,8 +76,9 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
   encoder_options_.avc.produce_annexb = true;
   encoder_options_.latency_mode = media::VideoEncoder::LatencyMode::Realtime;
 
-  if (codec_settings->GetScalabilityMode().has_value()) {
-    switch (codec_settings->GetScalabilityMode().value()) {
+  scalability_mode_ = codec_settings->GetScalabilityMode();
+  if (scalability_mode_.has_value()) {
+    switch (scalability_mode_.value()) {
       case webrtc::ScalabilityMode::kL1T1:
         encoder_options_.scalability_mode = media::SVCScalabilityMode::kL1T1;
         break;
@@ -89,8 +90,7 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
         break;
       default:
         DVLOG(1) << "Unsupported scalability mode: "
-                 << webrtc::ScalabilityModeToString(
-                        codec_settings->GetScalabilityMode().value());
+                 << webrtc::ScalabilityModeToString(scalability_mode_.value());
         return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
     }
   }
@@ -325,9 +325,9 @@ void RTCVideoEncoderAdapter::OnEncodedFrameReady(
   input_frames_.erase(it);
 
   webrtc::EncodedImage encoded_image;
-  encoded_image.SetTimestamp(input_frame.timestamp());
+  encoded_image.SetRtpTimestamp(input_frame.timestamp());
   encoded_image.SetEncodedData(
-      webrtc::EncodedImageBuffer::Create(output.data.get(), output.size));
+      webrtc::EncodedImageBuffer::Create(output.data.data(), output.size));
   encoded_image._encodedWidth = input_frame.width();
   encoded_image._encodedHeight = input_frame.height();
   encoded_image._frameType = output.key_frame
@@ -336,6 +336,7 @@ void RTCVideoEncoderAdapter::OnEncodedFrameReady(
 
   webrtc::CodecSpecificInfo codec_specific_info;
   codec_specific_info.codecType = webrtc::kVideoCodecH264;
+  codec_specific_info.scalability_mode = scalability_mode_;
   webrtc::CodecSpecificInfoH264& h264 = codec_specific_info.codecSpecific.H264;
   h264.packetization_mode = webrtc::H264PacketizationMode::NonInterleaved;
   h264.idr_frame = output.key_frame;

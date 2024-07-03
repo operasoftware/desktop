@@ -1,0 +1,71 @@
+{
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwZiVKc/GXvUrqf0jHTXgNG8UQDSwdSUnrGl/CFvcA+/0K9GtuTwSTdvqPrnw9ACqX6QOIa6I36TruaB842sG+LtGvvgFeEwVuMbbmXuyYNgcfbf6IhVCZZPD7t5ygHkF1USHnw7sGCXfJ0aS4xIRlH7lA6eBYiFlz8ngMEmn2aZnxUWTVTOFpPHEwLLrlZwxngfYuyTzOaemygsi102UVDd+O5G/clRUQeam0A7hnYOu2HzmmmMQuWU0F95WpSniiDf5bUWY3OmI8dwgVei9MCHlEx6/D715PPczmfq/R5dqQ/Dj7nin+U89wNIBpGyk1HzkeYEkMu/ypm5t8V8xwwIDAQAB",
+  "name": "Aria",
+  "description": "Aria",
+  "version": "2.5",
+  "author": "Opera Norway AS",
+  "developer": {
+    "name": "Opera Norway AS",
+    "url": "https://opera.com"
+  },
+  "homepage_url": "https://opera.com",
+  "sidebar_action": {
+    "default_icon": "icons/512/icon_512_black.png",
+    "default_panel": "aria.html",
+    "default_title": "",
+    "default_panel_width": 604,
+    "minimum_panel_width": 604,
+    "maximum_panel_width": 755,
+    "panel_width": 604
+  },
+  "manifest_version": 2,
+  "background": {
+    "scripts": [
+      "background_worker.js"
+    ],
+    "persistent": true
+  },
+  "permissions": [
+    "browserSidebarPrivate",
+    "feedbackPopupPrivate",
+    "operaAccountPrivate",
+    "operaBrowserPrivate",
+    "operaIdentityPrivate",
+    "palette",
+    "shodanPrivate",
+    "statsPrivate",
+    "storage",
+    "tabs",
+    "windows",
+    "topSites",
+    "tabsPrivate",
+    "bookmarks"
+  ],
+  "page_action": {
+    "default_icon": {
+      "16": "icons/512/icon_512_black.png",
+      "32": "icons/512/icon_512_black.png"
+    },
+    "theme_icons": [
+      {
+        "light": "icons/512/icon_512_black.png",
+        "dark": "icons/512/icon_512_white.png",
+        "size": 16
+      },
+      {
+        "light": "icons/512/icon_512_black.png",
+        "dark": "icons/512/icon_512_white.png",
+        "size": 32
+      }
+    ]
+  },
+  "icons": {
+    "32": "icons/512/icon_512_black.png",
+    "128": "icons/512/icon_512_black.png"
+  },
+  "externally_connectable": {
+    "matches": [
+      "https://aria.op-test.net/*"
+    ]
+  }
+}

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/style_engine.h"
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 
@@ -36,6 +37,7 @@
 #include "third_party/blink/renderer/core/css/resolver/scoped_style_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_stats.h"
+#include "third_party/blink/renderer/core/css/style_scope_frame.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
@@ -62,7 +64,8 @@
 #include "third_party/blink/renderer/core/layout/layout_custom_scrollbar_part.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
-#include "third_party/blink/renderer/core/layout/list_marker.h"
+#include "third_party/blink/renderer/core/layout/list/list_marker.h"
+#include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/core/testing/color_scheme_helper.h"
@@ -77,6 +80,7 @@
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/size_f.h"
 
 namespace blink {
@@ -87,12 +91,7 @@ class StyleEngineTest : public PageTestBase {
     return !GetStyleEngine().ShouldUpdateDocumentStyleSheetCollection();
   }
 
-  enum RuleSetInvalidation {
-    kRuleSetInvalidationsScheduled,
-    kRuleSetInvalidationFullRecalc
-  };
-  RuleSetInvalidation ScheduleInvalidationsForRules(TreeScope&,
-                                                    const String& css_text);
+  void ApplyRuleSetInvalidation(TreeScope&, const String& css_text);
 
   // A wrapper to add a reason for UpdateAllLifecyclePhases
   void UpdateAllLifecyclePhases() {
@@ -103,17 +102,13 @@ class StyleEngineTest : public PageTestBase {
     return GetStyleEngine().style_recalc_root_.GetRootNode();
   }
 
-  LayoutObject* GetParentForDetachedSubtree() {
-    return GetStyleEngine().parent_for_detached_subtree_.Get();
-  }
-
   const CSSValue* ComputedValue(Element* element, String property_name) {
     CSSPropertyRef ref(property_name, GetDocument());
     DCHECK(ref.IsValid());
     return ref.GetProperty().CSSValueFromComputedStyle(
         element->ComputedStyleRef(),
         /* layout_object */ nullptr,
-        /* allow_visited_style */ false);
+        /* allow_visited_style */ false, CSSValuePhase::kResolvedValue);
   }
 
   void InjectSheet(String key, WebCssOrigin origin, String text) {
@@ -134,7 +129,7 @@ class StyleEngineTest : public PageTestBase {
 
   String GetListMarkerText(LayoutObject* list_item) {
     LayoutObject* marker = ListMarker::MarkerFromListItem(list_item);
-    return ListMarker::Get(marker)->GetTextChild(*marker).GetText();
+    return ListMarker::Get(marker)->GetTextChild(*marker).TransformedText();
   }
 
   size_t FillOrClipPathCacheSize() {
@@ -156,8 +151,7 @@ class StyleEngineTest : public PageTestBase {
 
 class StyleEngineContainerQueryTest : public StyleEngineTest {};
 
-StyleEngineTest::RuleSetInvalidation
-StyleEngineTest::ScheduleInvalidationsForRules(TreeScope& tree_scope,
+void StyleEngineTest::ApplyRuleSetInvalidation(TreeScope& tree_scope,
                                                const String& css_text) {
   auto* sheet = MakeGarbageCollected<StyleSheetContents>(
       MakeGarbageCollected<CSSParserContext>(
@@ -167,12 +161,16 @@ StyleEngineTest::ScheduleInvalidationsForRules(TreeScope& tree_scope,
   RuleSet& rule_set =
       sheet->EnsureRuleSet(MediaQueryEvaluator(GetDocument().GetFrame()));
   rule_set.CompactRulesIfNeeded();
-  if (rule_set.NeedsFullRecalcForRuleSetInvalidation()) {
-    return kRuleSetInvalidationFullRecalc;
-  }
   rule_sets.insert(&rule_set);
-  GetStyleEngine().ScheduleInvalidationsForRuleSets(tree_scope, rule_sets);
-  return kRuleSetInvalidationsScheduled;
+  SelectorFilter selector_filter;
+  selector_filter.PushAllParentsOf(tree_scope);
+  StyleScopeFrame style_scope_frame(
+      IsA<ShadowRoot>(tree_scope)
+          ? To<ShadowRoot>(tree_scope).host()
+          : *tree_scope.GetDocument().documentElement());
+  GetStyleEngine().ApplyRuleSetInvalidationForTreeScope(
+      tree_scope, tree_scope.RootNode(), selector_filter, style_scope_frame,
+      rule_sets, /*changed_rule_flags=*/0);
 }
 
 TEST_F(StyleEngineTest, DocumentDirtyAfterInject) {
@@ -352,9 +350,9 @@ TEST_F(StyleEngineTest, AnalyzedInject) {
   FontSelectionCapabilities capabilities =
       font_face->GetFontSelectionCapabilities();
   ASSERT_EQ(capabilities.weight,
-            FontSelectionRange({BoldWeightValue(), BoldWeightValue()}));
+            FontSelectionRange({kBoldWeightValue, kBoldWeightValue}));
   ASSERT_EQ(capabilities.slope,
-            FontSelectionRange({NormalSlopeValue(), NormalSlopeValue()}));
+            FontSelectionRange({kNormalSlopeValue, kNormalSlopeValue}));
 
   auto* font_face_parsed_sheet = MakeGarbageCollected<StyleSheetContents>(
       MakeGarbageCollected<CSSParserContext>(GetDocument()));
@@ -381,12 +379,11 @@ TEST_F(StyleEngineTest, AnalyzedInject) {
   EXPECT_TRUE(font_face);
   capabilities = font_face->GetFontSelectionCapabilities();
   ASSERT_EQ(capabilities.weight,
-            FontSelectionRange({BoldWeightValue(), BoldWeightValue()}));
+            FontSelectionRange({kBoldWeightValue, kBoldWeightValue}));
   ASSERT_EQ(capabilities.slope,
-            FontSelectionRange({ItalicSlopeValue(), ItalicSlopeValue()}));
+            FontSelectionRange({kItalicSlopeValue, kItalicSlopeValue}));
 
-  auto* style_element = MakeGarbageCollected<HTMLStyleElement>(
-      GetDocument(), CreateElementFlags());
+  auto* style_element = MakeGarbageCollected<HTMLStyleElement>(GetDocument());
   style_element->setInnerHTML(
       "@font-face {"
       " font-family: 'Cool Font';"
@@ -408,9 +405,9 @@ TEST_F(StyleEngineTest, AnalyzedInject) {
   EXPECT_TRUE(font_face);
   capabilities = font_face->GetFontSelectionCapabilities();
   ASSERT_EQ(capabilities.weight,
-            FontSelectionRange({BoldWeightValue(), BoldWeightValue()}));
+            FontSelectionRange({kBoldWeightValue, kBoldWeightValue}));
   ASSERT_EQ(capabilities.slope,
-            FontSelectionRange({ItalicSlopeValue(), ItalicSlopeValue()}));
+            FontSelectionRange({kItalicSlopeValue, kItalicSlopeValue}));
 
   GetStyleEngine().RemoveInjectedSheet(font_face_key, WebCssOrigin::kUser);
   UpdateAllLifecyclePhases();
@@ -427,9 +424,9 @@ TEST_F(StyleEngineTest, AnalyzedInject) {
   EXPECT_TRUE(font_face);
   capabilities = font_face->GetFontSelectionCapabilities();
   ASSERT_EQ(capabilities.weight,
-            FontSelectionRange({NormalWeightValue(), NormalWeightValue()}));
+            FontSelectionRange({kNormalWeightValue, kNormalWeightValue}));
   ASSERT_EQ(capabilities.slope,
-            FontSelectionRange({ItalicSlopeValue(), ItalicSlopeValue()}));
+            FontSelectionRange({kItalicSlopeValue, kItalicSlopeValue}));
 
   // @keyframes rules
 
@@ -460,8 +457,7 @@ TEST_F(StyleEngineTest, AnalyzedInject) {
   ASSERT_TRUE(keyframes);
   EXPECT_EQ(1u, keyframes->Keyframes().size());
 
-  style_element = MakeGarbageCollected<HTMLStyleElement>(GetDocument(),
-                                                         CreateElementFlags());
+  style_element = MakeGarbageCollected<HTMLStyleElement>(GetDocument());
   style_element->setInnerHTML("@keyframes dummy-animation { from {} to {} }");
   GetDocument().body()->AppendChild(style_element);
   UpdateAllLifecyclePhases();
@@ -807,8 +803,7 @@ TEST_F(StyleEngineTest, IgnoreInvalidPropertyValue) {
 }
 
 TEST_F(StyleEngineTest, TextToSheetCache) {
-  auto* element = MakeGarbageCollected<HTMLStyleElement>(GetDocument(),
-                                                         CreateElementFlags());
+  auto* element = MakeGarbageCollected<HTMLStyleElement>(GetDocument());
 
   String sheet_text("div {}");
   TextPosition min_pos = TextPosition::MinimumPosition();
@@ -837,8 +832,7 @@ TEST_F(StyleEngineTest, TextToSheetCache) {
   // StyleSheetContents cache.
   ThreadState::Current()->CollectAllGarbageForTesting();
 
-  element = MakeGarbageCollected<HTMLStyleElement>(GetDocument(),
-                                                   CreateElementFlags());
+  element = MakeGarbageCollected<HTMLStyleElement>(GetDocument());
   sheet1 = GetStyleEngine().CreateSheet(*element, sheet_text, min_pos,
                                         PendingSheetType::kNonBlocking,
                                         RenderBlockingBehavior::kNonBlocking);
@@ -865,30 +859,25 @@ TEST_F(StyleEngineTest, RuleSetInvalidationTypeSelectors) {
   UpdateAllLifecyclePhases();
 
   unsigned before_count = GetStyleEngine().StyleForElementCount();
-  EXPECT_EQ(kRuleSetInvalidationsScheduled,
-            ScheduleInvalidationsForRules(GetDocument(),
-                                          "span { background: green}"));
+  ApplyRuleSetInvalidation(GetDocument(), "span { background: green}");
   UpdateAllLifecyclePhases();
   unsigned after_count = GetStyleEngine().StyleForElementCount();
   EXPECT_EQ(1u, after_count - before_count);
 
   before_count = after_count;
-  EXPECT_EQ(kRuleSetInvalidationsScheduled,
-            ScheduleInvalidationsForRules(GetDocument(),
-                                          "body div { background: green}"));
+  ApplyRuleSetInvalidation(GetDocument(), "body div { background: green}");
   UpdateAllLifecyclePhases();
   after_count = GetStyleEngine().StyleForElementCount();
   EXPECT_EQ(2u, after_count - before_count);
 
-  EXPECT_EQ(kRuleSetInvalidationFullRecalc,
-            ScheduleInvalidationsForRules(GetDocument(),
-                                          "div * { background: green}"));
+  before_count = after_count;
+  ApplyRuleSetInvalidation(GetDocument(), "div * { background: green}");
   UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(2u, after_count - before_count);
 
   before_count = GetStyleEngine().StyleForElementCount();
-  EXPECT_EQ(kRuleSetInvalidationsScheduled,
-            ScheduleInvalidationsForRules(GetDocument(),
-                                          "#i b { background: green}"));
+  ApplyRuleSetInvalidation(GetDocument(), "#i b { background: green}");
   UpdateAllLifecyclePhases();
   after_count = GetStyleEngine().StyleForElementCount();
   EXPECT_EQ(1u, after_count - before_count);
@@ -904,12 +893,11 @@ TEST_F(StyleEngineTest, RuleSetInvalidationCustomPseudo) {
   UpdateAllLifecyclePhases();
 
   unsigned before_count = GetStyleEngine().StyleForElementCount();
-  EXPECT_EQ(ScheduleInvalidationsForRules(
-                GetDocument(), "::-webkit-progress-bar { background: green }"),
-            kRuleSetInvalidationsScheduled);
+  ApplyRuleSetInvalidation(GetDocument(),
+                           "::-webkit-progress-bar { background: green }");
   UpdateAllLifecyclePhases();
   unsigned after_count = GetStyleEngine().StyleForElementCount();
-  EXPECT_EQ(3u, after_count - before_count);
+  EXPECT_EQ(1u, after_count - before_count);
 }
 
 TEST_F(StyleEngineTest, RuleSetInvalidationHost) {
@@ -919,36 +907,41 @@ TEST_F(StyleEngineTest, RuleSetInvalidationHost) {
   ASSERT_TRUE(host);
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   shadow_root.setInnerHTML("<div></div><div></div><div></div>");
   UpdateAllLifecyclePhases();
 
   unsigned before_count = GetStyleEngine().StyleForElementCount();
-  EXPECT_EQ(ScheduleInvalidationsForRules(
-                shadow_root, ":host(#nohost), #nohost { background: green}"),
-            kRuleSetInvalidationsScheduled);
+  ApplyRuleSetInvalidation(shadow_root,
+                           ":host(#nohost), #nohost { background: green}");
   UpdateAllLifecyclePhases();
   unsigned after_count = GetStyleEngine().StyleForElementCount();
   EXPECT_EQ(0u, after_count - before_count);
 
   before_count = after_count;
-  EXPECT_EQ(ScheduleInvalidationsForRules(shadow_root,
-                                          ":host(#host) { background: green}"),
-            kRuleSetInvalidationsScheduled);
+  ApplyRuleSetInvalidation(shadow_root, ":host(#host) { background: green}");
   UpdateAllLifecyclePhases();
   after_count = GetStyleEngine().StyleForElementCount();
   EXPECT_EQ(1u, after_count - before_count);
-  EXPECT_EQ(ScheduleInvalidationsForRules(shadow_root,
-                                          ":host(div) { background: green}"),
-            kRuleSetInvalidationsScheduled);
 
-  EXPECT_EQ(ScheduleInvalidationsForRules(shadow_root,
-                                          ":host(*) { background: green}"),
-            kRuleSetInvalidationFullRecalc);
-  EXPECT_EQ(ScheduleInvalidationsForRules(
-                shadow_root, ":host(*) :hover { background: green}"),
-            kRuleSetInvalidationFullRecalc);
+  before_count = after_count;
+  ApplyRuleSetInvalidation(shadow_root, ":host(div) { background: green}");
+  UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(1u, after_count - before_count);
+
+  before_count = after_count;
+  ApplyRuleSetInvalidation(shadow_root, ":host(*) { background: green}");
+  UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(1u, after_count - before_count);
+
+  before_count = after_count;
+  ApplyRuleSetInvalidation(shadow_root, ":host(*) :hover { background: green}");
+  UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(3u, after_count - before_count);
 }
 
 TEST_F(StyleEngineTest, RuleSetInvalidationSlotted) {
@@ -965,49 +958,63 @@ TEST_F(StyleEngineTest, RuleSetInvalidationSlotted) {
   ASSERT_TRUE(host);
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   shadow_root.setInnerHTML("<slot name=other></slot><slot></slot>");
   UpdateAllLifecyclePhases();
 
   unsigned before_count = GetStyleEngine().StyleForElementCount();
-  EXPECT_EQ(ScheduleInvalidationsForRules(
-                shadow_root, "::slotted(.s1) { background: green}"),
-            kRuleSetInvalidationsScheduled);
+  ApplyRuleSetInvalidation(shadow_root, "::slotted(.s1) { background: green}");
   UpdateAllLifecyclePhases();
   unsigned after_count = GetStyleEngine().StyleForElementCount();
   EXPECT_EQ(4u, after_count - before_count);
 
-  EXPECT_EQ(ScheduleInvalidationsForRules(shadow_root,
-                                          "::slotted(*) { background: green}"),
-            kRuleSetInvalidationFullRecalc);
+  before_count = GetStyleEngine().StyleForElementCount();
+  ApplyRuleSetInvalidation(shadow_root, "::slotted(*) { background: green}");
+  UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(4u, after_count - before_count);
 }
 
 TEST_F(StyleEngineTest, RuleSetInvalidationHostContext) {
-  GetDocument().body()->setInnerHTML("<div id=host></div>");
+  GetDocument().body()->setInnerHTML(
+      "<div class=match><div id=host></div></div>");
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ASSERT_TRUE(host);
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   shadow_root.setInnerHTML("<div></div><div class=a></div><div></div>");
   UpdateAllLifecyclePhases();
 
   unsigned before_count = GetStyleEngine().StyleForElementCount();
-  EXPECT_EQ(ScheduleInvalidationsForRules(
-                shadow_root, ":host-context(.nomatch) .a { background: green}"),
-            kRuleSetInvalidationsScheduled);
+  ApplyRuleSetInvalidation(shadow_root,
+                           ":host-context(.nomatch) .a { background: green}");
   UpdateAllLifecyclePhases();
   unsigned after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(0u, after_count - before_count);
+
+  before_count = after_count;
+  ApplyRuleSetInvalidation(shadow_root,
+                           ":host-context(.match) .a { background: green}");
+  UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
   EXPECT_EQ(1u, after_count - before_count);
 
-  EXPECT_EQ(ScheduleInvalidationsForRules(
-                shadow_root, ":host-context(:hover) { background: green}"),
-            kRuleSetInvalidationFullRecalc);
-  EXPECT_EQ(ScheduleInvalidationsForRules(
-                shadow_root, ":host-context(#host) { background: green}"),
-            kRuleSetInvalidationFullRecalc);
+  before_count = after_count;
+  ApplyRuleSetInvalidation(shadow_root,
+                           ":host-context(:hover) { background: green}");
+  UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(1u, after_count - before_count);
+
+  before_count = after_count;
+  ApplyRuleSetInvalidation(shadow_root,
+                           ":host-context(#host) { background: green}");
+  UpdateAllLifecyclePhases();
+  after_count = GetStyleEngine().StyleForElementCount();
+  EXPECT_EQ(1u, after_count - before_count);
 }
 
 TEST_F(StyleEngineTest, HasViewportDependentMediaQueries) {
@@ -1156,7 +1163,7 @@ TEST_F(StyleEngineTest, VisitedExplicitInheritanceMatchedPropertiesCache) {
   const ComputedStyle* style = span->GetComputedStyle();
   EXPECT_FALSE(style->ChildHasExplicitInheritance());
 
-  style = span->firstChild()->GetComputedStyle();
+  style = span->firstElementChild()->GetComputedStyle();
 
   ComputedStyleBuilder builder(*style);
   EXPECT_TRUE(MatchedPropertiesCache::IsStyleCacheable(builder));
@@ -1184,15 +1191,9 @@ TEST_F(StyleEngineTest, ScheduleInvalidationAfterSubtreeRecalc) {
   ASSERT_TRUE(t1);
   ASSERT_TRUE(t2);
 
-  // Sanity test.
-  t1->setAttribute(blink::html_names::kClassAttr, AtomicString("t1"));
-  EXPECT_FALSE(GetDocument().NeedsStyleInvalidation());
-  EXPECT_TRUE(GetDocument().ChildNeedsStyleInvalidation());
-  EXPECT_TRUE(t1->NeedsStyleInvalidation());
-
   UpdateAllLifecyclePhases();
 
-  // platformColorsChanged() triggers SubtreeStyleChange on document(). If that
+  // PlatformColorsChanged() triggers SubtreeStyleChange on document(). If that
   // for some reason should change, this test will start failing and the
   // SubtreeStyleChange must be set another way.
   // Calling setNeedsStyleRecalc() explicitly with an arbitrary reason instead
@@ -1202,68 +1203,50 @@ TEST_F(StyleEngineTest, ScheduleInvalidationAfterSubtreeRecalc) {
   // Check that no invalidations sets are scheduled when the document node is
   // already SubtreeStyleChange.
   t2->setAttribute(blink::html_names::kClassAttr, AtomicString("t2"));
-  EXPECT_FALSE(GetDocument().NeedsStyleInvalidation());
-  EXPECT_FALSE(GetDocument().ChildNeedsStyleInvalidation());
+  EXPECT_FALSE(GetDocument().NeedsStyleRecalc());
+  EXPECT_FALSE(GetDocument().ChildNeedsStyleRecalc());
+  UpdateAllLifecyclePhases();  // Mark everything as clean.
 
-  UpdateAllLifecyclePhases();
+  // Toggling the s2 style sheet should normally touch t1 and t2...
   auto* s2 =
       To<HTMLStyleElement>(GetDocument().getElementById(AtomicString("s2")));
   ASSERT_TRUE(s2);
   s2->setDisabled(true);
   GetStyleEngine().UpdateActiveStyle();
-  EXPECT_FALSE(GetDocument().ChildNeedsStyleInvalidation());
-  EXPECT_TRUE(GetDocument().NeedsStyleInvalidation());
+  EXPECT_TRUE(GetDocument().documentElement()->ChildNeedsStyleRecalc());
+  EXPECT_TRUE(t1->NeedsStyleRecalc());
+  EXPECT_TRUE(t2->NeedsStyleRecalc());
+  UpdateAllLifecyclePhases();  // Mark everything as clean.
 
-  UpdateAllLifecyclePhases();
+  // ...but if the root is marked as kSubtreeRecalc, it should not visit them,
+  // and thus not mark them for recalc.
   GetStyleEngine().PlatformColorsChanged();
   s2->setDisabled(false);
   GetStyleEngine().UpdateActiveStyle();
-  EXPECT_FALSE(GetDocument().ChildNeedsStyleInvalidation());
-  EXPECT_FALSE(GetDocument().NeedsStyleInvalidation());
+  EXPECT_FALSE(GetDocument().documentElement()->ChildNeedsStyleRecalc());
+  EXPECT_FALSE(t1->NeedsStyleRecalc());
+  EXPECT_FALSE(t2->NeedsStyleRecalc());
+  UpdateAllLifecyclePhases();  // Mark everything as clean.
 
-  UpdateAllLifecyclePhases();
+  // Toggling the s1 stylesheet shouldn't touch either, since it matches
+  // nothing.
   auto* s1 =
       To<HTMLStyleElement>(GetDocument().getElementById(AtomicString("s1")));
   ASSERT_TRUE(s1);
   s1->setDisabled(true);
   GetStyleEngine().UpdateActiveStyle();
-  EXPECT_TRUE(GetDocument().ChildNeedsStyleInvalidation());
-  EXPECT_FALSE(GetDocument().NeedsStyleInvalidation());
-  EXPECT_TRUE(t1->NeedsStyleInvalidation());
-  EXPECT_TRUE(t2->NeedsStyleInvalidation());
+  EXPECT_FALSE(GetDocument().documentElement()->ChildNeedsStyleRecalc());
+  EXPECT_FALSE(t1->NeedsStyleRecalc());
+  EXPECT_FALSE(t2->NeedsStyleRecalc());
+  UpdateAllLifecyclePhases();  // Mark everything as clean.
 
-  UpdateAllLifecyclePhases();
+  // And thus, kSubtreeRecalc on the root shouldn't make any difference.
   GetStyleEngine().PlatformColorsChanged();
   s1->setDisabled(false);
   GetStyleEngine().UpdateActiveStyle();
-  EXPECT_FALSE(GetDocument().ChildNeedsStyleInvalidation());
-  EXPECT_FALSE(GetDocument().NeedsStyleInvalidation());
-  EXPECT_FALSE(t1->NeedsStyleInvalidation());
-  EXPECT_FALSE(t2->NeedsStyleInvalidation());
-}
-
-TEST_F(StyleEngineTest, ScheduleRuleSetInvalidationsOnNewShadow) {
-  GetDocument().body()->setInnerHTML("<div id='host'></div>");
-  Element* host = GetDocument().getElementById(AtomicString("host"));
-  ASSERT_TRUE(host);
-
-  UpdateAllLifecyclePhases();
-  ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
-
-  shadow_root.setInnerHTML(R"HTML(
-    <style>
-      span { color: green }
-      t1 { color: green }
-    </style>
-    <div id='t1'></div>
-    <span></span>
-  )HTML");
-
-  GetStyleEngine().UpdateActiveStyle();
-  EXPECT_TRUE(GetDocument().ChildNeedsStyleInvalidation());
-  EXPECT_FALSE(GetDocument().NeedsStyleInvalidation());
-  EXPECT_TRUE(shadow_root.NeedsStyleInvalidation());
+  EXPECT_FALSE(GetDocument().documentElement()->ChildNeedsStyleRecalc());
+  EXPECT_FALSE(t1->NeedsStyleRecalc());
+  EXPECT_FALSE(t2->NeedsStyleRecalc());
 }
 
 TEST_F(StyleEngineTest, EmptyHttpEquivDefaultStyle) {
@@ -1309,7 +1292,7 @@ TEST_F(StyleEngineTest, StyleSheetsForStyleSheetList_ShadowRoot) {
 
   UpdateAllLifecyclePhases();
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   shadow_root.setInnerHTML("<style>span { color: green }</style>");
   EXPECT_TRUE(GetStyleEngine().NeedsActiveStyleUpdate());
@@ -1810,6 +1793,65 @@ TEST_F(StyleEngineTest, MediaQueriesChangePrefersContrastOverride) {
   EXPECT_EQ(Color::FromRGB(255, 0, 0),
             GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
                 GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersContrastMediaFeature, "more");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 0, 255),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersContrastMediaFeature, "no-preference");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersContrastMediaFeature, "less");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 165, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersContrastMediaFeature, "less");
+
+  UpdateAllLifecyclePhases();
+
+  // Invalid value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersContrastMediaFeature, "invalid");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersContrastMediaFeature, "less");
+
+  UpdateAllLifecyclePhases();
+
+  // Empty value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersContrastMediaFeature, "");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
 }
 
 TEST_F(StyleEngineTest, MediaQueriesChangePrefersReducedMotion) {
@@ -1923,7 +1965,7 @@ TEST_F(StyleEngineTest, MediaQueriesChangeForcedColors) {
                 GetCSSPropertyColor()));
 
   ColorSchemeHelper color_scheme_helper(GetDocument());
-  color_scheme_helper.SetForcedColors(GetDocument(), ForcedColors::kActive);
+  color_scheme_helper.SetInForcedColors(/*in_forced_colors=*/true);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(Color::FromRGB(0, 128, 0),
             GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
@@ -1953,9 +1995,9 @@ TEST_F(StyleEngineTest, MediaQueriesChangeForcedColorsAndPreferredColorScheme) {
     <body></body>
   )HTML");
 
-  // ForcedColors = kNone, PreferredColorScheme = kLight
+  // InForcedColors = false, PreferredColorScheme = kLight
   ColorSchemeHelper color_scheme_helper(GetDocument());
-  color_scheme_helper.SetForcedColors(GetDocument(), ForcedColors::kNone);
+  color_scheme_helper.SetInForcedColors(/*in_forced_colors=*/false);
   color_scheme_helper.SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kLight);
   UpdateAllLifecyclePhases();
@@ -1971,14 +2013,14 @@ TEST_F(StyleEngineTest, MediaQueriesChangeForcedColorsAndPreferredColorScheme) {
             GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
                 GetCSSPropertyColor()));
 
-  // ForcedColors = kActive, PreferredColorScheme = kDark
-  color_scheme_helper.SetForcedColors(GetDocument(), ForcedColors::kActive);
+  // InForcedColors = true, PreferredColorScheme = kDark
+  color_scheme_helper.SetInForcedColors(/*in_forced_colors=*/true);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(Color::FromRGB(255, 165, 0),
             GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
                 GetCSSPropertyColor()));
 
-  // ForcedColors = kActive, PreferredColorScheme = kLight
+  // InForcedColors = true, PreferredColorScheme = kLight
   color_scheme_helper.SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kLight);
   UpdateAllLifecyclePhases();
@@ -2061,6 +2103,221 @@ TEST_F(StyleEngineTest, MediaQueriesColorSchemeOverride) {
                 GetCSSPropertyColor()));
 
   GetDocument().GetPage()->ClearMediaFeatureOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "dark");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "dark");
+  UpdateAllLifecyclePhases();
+
+  // Invalid value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "invalid");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "dark");
+
+  UpdateAllLifecyclePhases();
+
+  // Empty value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+}
+
+TEST_F(StyleEngineTest, MediaQueriesReducedTransparencyOverride) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body { color: red }
+      @media (prefers-reduced-transparency: reduce) {
+        body { color: green }
+      }
+    </style>
+    <body></body>
+  )HTML");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetMediaFeatureOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearMediaFeatureOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetMediaFeatureOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature, "reduce");
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature,
+      "no-preference");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearMediaFeatureOverrides();
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+
+  // Invalid value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature, "invalid");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature, "reduce");
+
+  UpdateAllLifecyclePhases();
+
+  // Empty value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedTransparencyMediaFeature, "");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+}
+
+TEST_F(StyleEngineTest, MediaQueriesReducedDataOverride) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body { color: red }
+      @media (prefers-reduced-data: reduce) {
+        body { color: green }
+      }
+    </style>
+    <body></body>
+  )HTML");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetMediaFeatureOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearMediaFeatureOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetMediaFeatureOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "reduce");
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "no-preference");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearMediaFeatureOverrides();
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+
+  // Invalid value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "invalid");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "reduce");
+
+  UpdateAllLifecyclePhases();
+
+  // Empty value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedDataMediaFeature, "");
+
   UpdateAllLifecyclePhases();
   EXPECT_EQ(Color::FromRGB(255, 0, 0),
             GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
@@ -2192,6 +2449,64 @@ TEST_F(StyleEngineTest, MediaQueriesReducedMotionOverride) {
   EXPECT_EQ(Color::FromRGB(255, 0, 0),
             GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
                 GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedMotionMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+
+  GetDocument().GetPage()->SetMediaFeatureOverride(
+      media_feature_names::kPrefersReducedMotionMediaFeature, "reduce");
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedMotionMediaFeature, "no-preference");
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(0, 128, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->ClearMediaFeatureOverrides();
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedMotionMediaFeature, "reduce");
+  UpdateAllLifecyclePhases();
+
+  // Invalid value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedMotionMediaFeature, "invalid");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedMotionMediaFeature, "reduce");
+
+  UpdateAllLifecyclePhases();
+
+  // Empty value resets override
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersReducedMotionMediaFeature, "");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(255, 0, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyColor()));
 }
 
 TEST_F(StyleEngineTest, MediaQueriesChangeNavigationControls) {
@@ -2251,7 +2566,7 @@ TEST_F(StyleEngineTest, ShadowRootStyleRecalcCrash) {
   ASSERT_TRUE(host);
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   shadow_root.setInnerHTML(R"HTML(
     <span id=span></span>
@@ -2281,7 +2596,7 @@ TEST_F(StyleEngineTest, GetComputedStyleOutsideFlatTreeCrash) {
 
   GetDocument()
       .getElementById(AtomicString("host"))
-      ->AttachShadowRootInternal(ShadowRootType::kOpen);
+      ->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   UpdateAllLifecyclePhases();
   GetDocument().body()->EnsureComputedStyle();
   GetDocument()
@@ -2460,7 +2775,7 @@ TEST_F(StyleEngineTest, EnsuredComputedStyleRecalc) {
 
   Element* computed = GetDocument().getElementById(AtomicString("computed"));
   Element* span_outer = GetDocument().getElementById(AtomicString("span"));
-  Node* span_inner = span_outer->firstChild();
+  Element* span_inner = span_outer->firstElementChild();
 
   // Initially all null in display:none subtree.
   EXPECT_FALSE(computed->GetComputedStyle());
@@ -2531,9 +2846,11 @@ TEST_F(StyleEngineTest, EnsureCustomComputedStyle) {
   // IsEnsuredInDisplayNone==true
   for (Node* node = progress; node;
        node = FlatTreeTraversal::Next(*node, progress)) {
-    ASSERT_TRUE(!node->GetComputedStyle() ||
-                !node->ComputedStyleRef().IsEnsuredInDisplayNone() ||
-                !node->GetLayoutObject());
+    if (auto* element = DynamicTo<Element>(node)) {
+      ASSERT_TRUE(!element->GetComputedStyle() ||
+                  !element->ComputedStyleRef().IsEnsuredInDisplayNone() ||
+                  !element->GetLayoutObject());
+    }
   }
 }
 
@@ -2587,10 +2904,12 @@ TEST_F(StyleEngineTest, ColorSchemeBaseBackgroundChange) {
   EXPECT_EQ(Color(0x12, 0x12, 0x12),
             GetDocument().View()->BaseBackgroundColor());
 
-  color_scheme_helper.SetForcedColors(GetDocument(), ForcedColors::kActive);
+  color_scheme_helper.SetInForcedColors(/*in_forced_colors=*/true);
   UpdateAllLifecyclePhases();
+  mojom::blink::ColorScheme color_scheme = mojom::blink::ColorScheme::kLight;
   Color system_background_color = LayoutTheme::GetTheme().SystemColor(
-      CSSValueID::kCanvas, mojom::blink::ColorScheme::kLight);
+      CSSValueID::kCanvas, color_scheme,
+      GetDocument().GetColorProviderForPainting(color_scheme));
 
   EXPECT_EQ(system_background_color,
             GetDocument().View()->BaseBackgroundColor());
@@ -2612,6 +2931,38 @@ TEST_F(StyleEngineTest, ColorSchemeOverride) {
   GetDocument().GetPage()->SetMediaFeatureOverride(
       media_feature_names::kPrefersColorSchemeMediaFeature, "dark");
 
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(
+      mojom::blink::ColorScheme::kDark,
+      GetDocument().documentElement()->GetComputedStyle()->UsedColorScheme());
+
+  GetDocument().GetPage()->ClearMediaFeatureOverrides();
+  UpdateAllLifecyclePhases();
+
+  EXPECT_EQ(
+      mojom::blink::ColorScheme::kLight,
+      GetDocument().documentElement()->GetComputedStyle()->UsedColorScheme());
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "dark");
+
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(
+      mojom::blink::ColorScheme::kDark,
+      GetDocument().documentElement()->GetComputedStyle()->UsedColorScheme());
+
+  GetDocument().GetPage()->ClearPreferenceOverrides();
+  UpdateAllLifecyclePhases();
+
+  EXPECT_EQ(
+      mojom::blink::ColorScheme::kLight,
+      GetDocument().documentElement()->GetComputedStyle()->UsedColorScheme());
+
+  GetDocument().GetPage()->SetMediaFeatureOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "dark");
+
+  GetDocument().GetPage()->SetPreferenceOverride(
+      media_feature_names::kPrefersColorSchemeMediaFeature, "light");
   UpdateAllLifecyclePhases();
   EXPECT_EQ(
       mojom::blink::ColorScheme::kDark,
@@ -2742,7 +3093,7 @@ TEST_F(StyleEngineTest, GetComputedStyleOutsideFlatTree) {
   auto* inner = GetDocument().getElementById(AtomicString("inner"));
   auto* innermost = GetDocument().getElementById(AtomicString("innermost"));
 
-  host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(host->GetComputedStyle());
@@ -2752,8 +3103,8 @@ TEST_F(StyleEngineTest, GetComputedStyleOutsideFlatTree) {
   EXPECT_FALSE(innermost->GetComputedStyle());
 
   inner->EnsureComputedStyle();
-  scoped_refptr<const ComputedStyle> outer_style = outer->GetComputedStyle();
-  scoped_refptr<const ComputedStyle> inner_style = inner->GetComputedStyle();
+  const ComputedStyle* outer_style = outer->GetComputedStyle();
+  const ComputedStyle* inner_style = inner->GetComputedStyle();
 
   ASSERT_TRUE(outer_style);
   ASSERT_TRUE(inner_style);
@@ -2811,9 +3162,9 @@ TEST_F(StyleEngineTest, MoveSlottedOutsideFlatTree) {
   auto* span = host1->firstChild();
 
   ShadowRoot& shadow_root =
-      host1->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host1->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML("<slot></slot>");
-  host2->AttachShadowRootInternal(ShadowRootType::kOpen);
+  host2->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   UpdateAllLifecyclePhases();
 
@@ -2830,7 +3181,7 @@ TEST_F(StyleEngineTest, StyleRecalcRootInShadowTree) {
   )HTML");
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML("<div><span></span></div>");
   UpdateAllLifecyclePhases();
 
@@ -2852,7 +3203,7 @@ TEST_F(StyleEngineTest, StyleRecalcRootOutsideFlatTree) {
   auto* ensured = GetDocument().getElementById(AtomicString("ensured"));
   auto* span = To<Element>(ensured->firstChild());
 
-  host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   UpdateAllLifecyclePhases();
 
@@ -2881,7 +3232,7 @@ TEST_F(StyleEngineTest, RemoveStyleRecalcRootFromFlatTree) {
   auto* span = To<Element>(host->firstChild());
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML("<div><slot></slot></div>");
 
   UpdateAllLifecyclePhases();
@@ -2915,7 +3266,7 @@ TEST_F(StyleEngineTest, SlottedWithEnsuredStyleOutsideFlatTree) {
   auto* span = To<Element>(host->firstChild());
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML(R"HTML(
     <div><slot name="default"></slot></div>
   )HTML");
@@ -2948,9 +3299,9 @@ TEST_F(StyleEngineTest, ForceReattachRecalcRootAttachShadow) {
   EXPECT_FALSE(reattach->NeedsStyleRecalc());
   EXPECT_EQ(reattach, GetStyleRecalcRoot());
 
-  // Attaching the shadow root will call RemovedFromFlatTree() on the span child
-  // of the host. The style recalc root should still be #reattach.
-  host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  // Attaching the shadow root will call FlatTreePositionChanged() on the span
+  // child of the host. The style recalc root should still be #reattach.
+  host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   EXPECT_EQ(reattach, GetStyleRecalcRoot());
 }
 
@@ -3166,7 +3517,7 @@ TEST_F(StyleEngineTest, NoRevertUseCountForForcedColors) {
   EXPECT_EQ("rgb(255, 0, 0)", ComputedValue(elem, "color")->CssText());
 
   ColorSchemeHelper color_scheme_helper(GetDocument());
-  color_scheme_helper.SetForcedColors(GetDocument(), ForcedColors::kActive);
+  color_scheme_helper.SetInForcedColors(/*in_forced_colors=*/true);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(ComputedValue(ref, "color")->CssText(),
             ComputedValue(elem, "color")->CssText());
@@ -3257,6 +3608,73 @@ TEST_F(StyleEngineTest, PrintNoForceDarkMode) {
   EXPECT_EQ(frame_view->DocumentBackgroundColor(), Color(18, 18, 18));
   EXPECT_EQ(GetDocument().documentElement()->GetComputedStyle()->ForceDark(),
             true);
+}
+
+TEST_F(StyleEngineTest, PrintScriptingEnabled) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+      <style>
+        @media (scripting) {
+          body { color: green; }
+        }
+        @media (scripting: none) {
+          body { color: red; }
+        }
+      </style>
+    )HTML");
+  GetFrame().GetSettings()->SetScriptEnabled(true);
+  UpdateAllLifecyclePhases();
+  Element* body = GetDocument().body();
+
+  EXPECT_EQ(true,
+            GetDocument().GetExecutionContext()->CanExecuteScripts(
+                ReasonForCallingCanExecuteScripts::kNotAboutToExecuteScript));
+
+  EXPECT_EQ(
+      Color::FromRGB(0, 128, 0),
+      body->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
+
+  gfx::SizeF page_size(400, 400);
+  GetDocument().GetFrame()->StartPrinting(page_size, 1);
+  EXPECT_EQ(
+      Color::FromRGB(0, 128, 0),
+      body->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
+
+  GetDocument().GetFrame()->EndPrinting();
+}
+
+TEST_F(StyleEngineTest, MediaQueriesChangeScripting) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+        <style>
+          @media (scripting) {
+            body { color: green; }
+          }
+          @media (scripting: none) {
+            body { color: red; }
+          }
+        </style>
+      )HTML");
+  GetFrame().GetSettings()->SetScriptEnabled(true);
+  UpdateAllLifecyclePhases();
+  Element* body = GetDocument().body();
+
+  EXPECT_EQ(true,
+            GetDocument().GetExecutionContext()->CanExecuteScripts(
+                ReasonForCallingCanExecuteScripts::kNotAboutToExecuteScript));
+
+  EXPECT_EQ(
+      Color::FromRGB(0, 128, 0),
+      body->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
+
+  GetFrame().GetSettings()->SetScriptEnabled(false);
+  UpdateAllLifecyclePhases();
+
+  EXPECT_EQ(false,
+            GetDocument().GetExecutionContext()->CanExecuteScripts(
+                ReasonForCallingCanExecuteScripts::kNotAboutToExecuteScript));
+
+  EXPECT_EQ(
+      Color::FromRGB(255, 0, 0),
+      body->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
 }
 
 TEST_F(StyleEngineTest, AtPropertyUseCount) {
@@ -3402,8 +3820,6 @@ TEST_F(StyleEngineTest, InternalForcedProperties) {
 }
 
 TEST_F(StyleEngineTest, HasViewportUnitFlags) {
-  ScopedCSSViewportUnits4ForTest flag(true);
-
   struct {
     const char* value;
     bool has_static;
@@ -3472,8 +3888,6 @@ TEST_F(StyleEngineTest, HasViewportUnitFlags) {
 }
 
 TEST_F(StyleEngineTest, DynamicViewportUnitInvalidation) {
-  ScopedCSSViewportUnits4ForTest flag(true);
-
   GetDocument().body()->setInnerHTML(R"HTML(
   <style>
     #target_px { width: 1px; }
@@ -3523,8 +3937,6 @@ TEST_F(StyleEngineTest, DynamicViewportUnitInvalidation) {
 }
 
 TEST_F(StyleEngineTest, DynamicViewportUnitsInMediaQuery) {
-  ScopedCSSViewportUnits4ForTest flag(true);
-
   // Changes in the dynamic viewport should not affect NeedsActiveStyleUpdate
   // when we don't use dynamic viewport units.
   {
@@ -3587,6 +3999,94 @@ TEST_F(StyleEngineTest, DynamicViewportUnitsInMediaQuery) {
   }
 }
 
+TEST_F(StyleEngineTest, MediaQueriesChangeDisplayState) {
+  ScopedDesktopPWAsAdditionalWindowingControlsForTest scoped_feature(true);
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body {
+        background-color: white;
+      }
+      @media (display-state: normal) {
+        body {
+          background-color: yellow;
+        }
+      }
+      @media (display-state: minimized) {
+        body {
+          background-color: cyan;
+        }
+      }
+      @media (display-state: maximized) {
+        body {
+          background-color: red;
+        }
+      }
+      @media (display-state: fullscreen) {
+        body {
+          background-color: blue;
+        }
+      }
+    </style>
+    <body></body>
+  )HTML");
+
+  // display-state: normal
+  // Default is set in /third_party/blink/renderer/core/frame/settings.json5.
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(/*yellow*/ 255, 255, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyBackgroundColor()));
+
+  WTF::Vector<std::pair<ui::WindowShowState, Color>> test_cases = {
+      {ui::SHOW_STATE_MINIMIZED, Color::FromRGB(/*cyan*/ 0, 255, 255)},
+      {ui::SHOW_STATE_MAXIMIZED, Color::FromRGB(/*red*/ 255, 0, 0)},
+      {ui::SHOW_STATE_FULLSCREEN, Color::FromRGB(/*blue*/ 0, 0, 255)}};
+
+  for (const auto& [show_state, color] : test_cases) {
+    GetFrame().GetSettings()->SetWindowShowState(show_state);
+    UpdateAllLifecyclePhases();
+    EXPECT_EQ(color,
+              GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                  GetCSSPropertyBackgroundColor()));
+  }
+}
+
+TEST_F(StyleEngineTest, MediaQueriesChangeResizable) {
+  ScopedDesktopPWAsAdditionalWindowingControlsForTest scoped_feature(true);
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body {
+        background-color: white;
+      }
+      @media (resizable: true) {
+        body {
+          background-color: yellow;
+        }
+      }
+      @media (resizable: false) {
+        body {
+          background-color: cyan;
+        }
+      }
+    </style>
+    <body></body>
+  )HTML");
+
+  // resizable: true
+  // Default is set in /third_party/blink/renderer/core/frame/settings.json5.
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(/*yellow*/ 255, 255, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyBackgroundColor()));
+
+  // resizable: false
+  GetFrame().GetSettings()->SetResizable(false);
+  UpdateAllLifecyclePhases();
+  EXPECT_EQ(Color::FromRGB(/*cyan*/ 0, 255, 255),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyBackgroundColor()));
+}
+
 namespace {
 
 class TestMediaQueryListListener : public MediaQueryListListener {
@@ -3598,8 +4098,6 @@ class TestMediaQueryListListener : public MediaQueryListListener {
 }  // namespace
 
 TEST_F(StyleEngineTest, DynamicViewportUnitsInMediaQueryMatcher) {
-  ScopedCSSViewportUnits4ForTest flag(true);
-
   auto& matcher = GetDocument().GetMediaQueryMatcher();
   auto* listener = MakeGarbageCollected<TestMediaQueryListListener>();
   matcher.AddViewportListener(listener);
@@ -3801,14 +4299,14 @@ TEST_F(StyleEngineContainerQueryTest, UpdateStyleAndLayoutTreeForContainer) {
 
   unsigned start_count = GetStyleEngine().StyleForElementCount();
   GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-      *container1, LogicalSize(200, 100), kLogicalAxisBoth);
+      *container1, LogicalSize(200, 100), kLogicalAxesBoth);
 
   // The first span.affected child and #container2
   EXPECT_EQ(2u, GetStyleEngine().StyleForElementCount() - start_count);
 
   start_count = GetStyleEngine().StyleForElementCount();
   GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-      *container2, LogicalSize(200, 100), kLogicalAxisBoth);
+      *container2, LogicalSize(200, 100), kLogicalAxesBoth);
 
   // Three direct span.affected children, and the two display:none elements.
   EXPECT_EQ(6u, GetStyleEngine().StyleForElementCount() - start_count);
@@ -3865,7 +4363,7 @@ TEST_F(StyleEngineContainerQueryTest, ContainerQueriesContainmentNotApplying) {
   unsigned start_count = GetStyleEngine().StyleForElementCount();
 
   GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-      *container, LogicalSize(200, 100), kLogicalAxisBoth);
+      *container, LogicalSize(200, 100), kLogicalAxesBoth);
 
   // Even though none of the inner containers are eligible for containment,
   // they are still containers for the purposes of evaluating container
@@ -3901,7 +4399,7 @@ TEST_F(StyleEngineContainerQueryTest, PseudoElementContainerQueryRecalc) {
 
   unsigned start_count = GetStyleEngine().StyleForElementCount();
   GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-      *container, LogicalSize(200, 100), kLogicalAxisBoth);
+      *container, LogicalSize(200, 100), kLogicalAxesBoth);
 
   // The two ::before elements + #span.
   EXPECT_EQ(3u, GetStyleEngine().StyleForElementCount() - start_count);
@@ -3933,13 +4431,12 @@ TEST_F(StyleEngineContainerQueryTest, MarkStyleDirtyFromContainerRecalc) {
   auto* inner_editor = DynamicTo<HTMLInputElement>(input)->InnerEditorElement();
   ASSERT_TRUE(inner_editor);
 
-  scoped_refptr<const ComputedStyle> old_inner_style =
-      inner_editor->GetComputedStyle();
+  const ComputedStyle* old_inner_style = inner_editor->GetComputedStyle();
   EXPECT_TRUE(old_inner_style);
 
   unsigned start_count = GetStyleEngine().StyleForElementCount();
   GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-      *container, LogicalSize(200, 100), kLogicalAxisBoth);
+      *container, LogicalSize(200, 100), kLogicalAxesBoth);
 
   // Input elements mark their InnerEditorElement() style-dirty when they are
   // recalculated. That means the UpdateStyleAndLayoutTreeForContainer() call
@@ -4060,41 +4557,149 @@ TEST_F(StyleEngineContainerQueryTest,
   // do a layout upgrade for elements that are 1) in display:none, and 2)
   // inside a container query container.
   //
-  // See implementation of `NodeLayoutUpgrade::ShouldUpgrade` for more
+  // See implementation of `ElementLayoutUpgrade::ShouldUpgrade` for more
   // information.
-  GetDocument().UpdateStyleAndLayoutTreeForNode(a, DocumentUpdateReason::kTest);
+  GetDocument().UpdateStyleAndLayoutTreeForElement(a,
+                                                   DocumentUpdateReason::kTest);
   EXPECT_FALSE(GetStyleEngine().StyleAffectedByLayout());
   EXPECT_FALSE(GetDocument().View()->NeedsLayout());
   EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*a));
 }
 
-TEST_F(StyleEngineTest, CSSViewportUnits4RuntimeFlag) {
-  Vector<String> units = {"vi",  "vb",    "svi",   "svb",   "svw",
-                          "svh", "svmin", "svmax", "lvi",   "lvb",
-                          "lvw", "lvh",   "lvmin", "lvmax", "dvi",
-                          "dvb", "dvw",   "dvh",   "dvmin", "dvmax"};
+TEST_F(StyleEngineTest, UpdateStyleAndLayoutTreeWithAnchorQuery) {
+  GetDocument().documentElement()->setInnerHTML(R"HTML(
+    <style>
+      #anchored {
+        position: absolute;
+        left: anchor(--a left, 42px);
+      }
+      #anchored.toggle {
+        left: anchor(--a left, 84px);
+      }
 
-  for (const String& unit : units) {
-    String css = "top: 1" + unit;
-    SCOPED_TRACE(testing::Message() << unit);
+      #inner { left: inherit; }
+    </style>
+    <main id=anchored>
+      <div id=inner></div>
+    </main>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(GetDocument().View()->NeedsLayout());
 
-    {
-      ScopedCSSViewportUnits4ForTest flag(false);
-      const CSSPropertyValueSet* set =
-          css_test_helpers::ParseDeclarationBlock(css);
-      ASSERT_TRUE(set);
-      EXPECT_EQ(0u, set->PropertyCount());
-    }
+  Element* anchored = GetDocument().getElementById(AtomicString("anchored"));
+  ASSERT_TRUE(anchored);
+  anchored->classList().Add(AtomicString("toggle"));
 
-    {
-      ScopedCSSViewportUnits4ForTest flag(true);
-      const CSSPropertyValueSet* set =
-          css_test_helpers::ParseDeclarationBlock(css);
-      ASSERT_TRUE(set);
-      EXPECT_EQ(1u, set->PropertyCount());
-      EXPECT_TRUE(set->HasProperty(CSSPropertyID::kTop));
-    }
-  }
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_FALSE(GetDocument().View()->NeedsLayout())
+      << "Layout should happen as part of UpdateStyleAndLayoutTree";
+
+  Element* inner = GetDocument().getElementById(AtomicString("inner"));
+  ASSERT_TRUE(inner);
+  EXPECT_EQ("84px", ComputedValue(inner, "left")->CssText());
+}
+
+TEST_F(StyleEngineTest, UpdateStyleAndLayoutTreeForElementWithAnchorQuery) {
+  GetDocument().documentElement()->setInnerHTML(R"HTML(
+    <style>
+      #anchored {
+        position: absolute;
+        left: anchor(--a left, 42px);
+      }
+      #anchored.toggle {
+        left: anchor(--a left, 84px);
+      }
+
+      #inner { left: inherit; }
+    </style>
+    <main id=anchored>
+      <div id=inner></div>
+    </main>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(GetDocument().View()->NeedsLayout());
+
+  Element* anchored = GetDocument().getElementById(AtomicString("anchored"));
+  ASSERT_TRUE(anchored);
+  anchored->classList().Add(AtomicString("toggle"));
+
+  Element* inner = GetDocument().getElementById(AtomicString("inner"));
+  ASSERT_TRUE(inner);
+
+  GetDocument().UpdateStyleAndLayoutTreeForElement(inner,
+                                                   DocumentUpdateReason::kTest);
+  EXPECT_FALSE(GetDocument().View()->NeedsLayout())
+      << "Layout should happen as part of UpdateStyleAndLayoutTreeForElement";
+
+  EXPECT_EQ("84px", ComputedValue(inner, "left")->CssText());
+}
+
+TEST_F(StyleEngineTest, AnchorQueryComputed) {
+  GetDocument().documentElement()->setInnerHTML(R"HTML(
+    <style>
+      #anchor {
+        anchor-name: --a;
+        position: absolute;
+        width: 100px;
+        height: 100px;
+        left: 200px;
+        top: 300px;
+      }
+      #anchored {
+        position: absolute;
+        width: anchor-size(--a width);
+        height: anchor-size(--unknown height, 42px);
+        left: anchor(--a right);
+        top: anchor(--a bottom);
+      }
+    </style>
+    <div id=anchor>Anchor</div>
+    <div id=anchored>Anchored</div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* anchored = GetDocument().getElementById(AtomicString("anchored"));
+  ASSERT_TRUE(anchored);
+
+  EXPECT_EQ("300px", ComputedValue(anchored, "left")->CssText());
+  EXPECT_EQ("400px", ComputedValue(anchored, "top")->CssText());
+  EXPECT_EQ("100px", ComputedValue(anchored, "width")->CssText());
+  EXPECT_EQ("42px", ComputedValue(anchored, "height")->CssText());
+}
+
+TEST_F(StyleEngineTest, AnchorQueryComputedChild) {
+  GetDocument().documentElement()->setInnerHTML(R"HTML(
+    <style>
+      #anchor {
+        anchor-name: --a;
+        position: absolute;
+        width: 100px;
+        height: 100px;
+        left: 200px;
+        top: 300px;
+      }
+      #anchored {
+        position: absolute;
+        width: anchor-size(--a width);
+        height: width: anchor-size(--a height);
+      }
+      #child {
+        width: anchor-size(--a width, 42px);
+        height: inherit;
+      }
+    </style>
+    <div id=anchor>Anchor</div>
+    <div id=anchored>
+      <div id=child>Child</div>
+    </div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* child = GetDocument().getElementById(AtomicString("child"));
+  ASSERT_TRUE(child);
+
+  // Non-absolutely positioned child may not evaluate queries.
+  EXPECT_EQ("42px", ComputedValue(child, "width")->CssText());
 }
 
 TEST_F(StyleEngineTest, VideoControlsReject) {
@@ -4140,7 +4745,7 @@ TEST_F(StyleEngineTest, FastRejectForHostChild) {
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ASSERT_TRUE(host);
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML(R"HTML(
     <slot></slot>
   )HTML");
@@ -4175,7 +4780,7 @@ TEST_F(StyleEngineTest, RejectSlottedSelector) {
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ASSERT_TRUE(host);
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML(R"HTML(
     <style>
       .notfound ::slotted(span) {
@@ -4338,9 +4943,10 @@ TEST_F(StyleEngineTest, ScrollbarPartPseudoDoesNotMatchElement) {
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
   GetStyleEngine().RecalcStyle();
 
-  // We have one UA rule for <div> that matches.
-  // None of the ::-webkit-scrollbar-* rules should match.
-  EXPECT_EQ(1u, stats->rules_matched);
+  // We have two UA rule for <div> that match:
+  //  div { display: block; }
+  //  div { unicode-bidi: isolate; }
+  EXPECT_EQ(stats->rules_matched, 2u);
 }
 
 TEST_F(StyleEngineTest, AudioUAStyleNameSpace) {
@@ -4402,7 +5008,7 @@ TEST_F(StyleEngineTest, NonDirtyStyleRecalcRoot) {
   auto* slotted = GetDocument().getElementById(AtomicString("slotted"));
 
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   shadow_root.setInnerHTML("<slot></slot>");
   UpdateAllLifecyclePhases();
 
@@ -4487,6 +5093,74 @@ TEST_F(StyleEngineTest, NestingUseCount) {
   EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kCSSNesting));
 }
 
+TEST_F(StyleEngineTest, NestingUseCountUnsupportedDeclaration) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body { unsupported: 100px; }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kCSSNesting));
+}
+
+TEST_F(StyleEngineTest, NestingUseCountSupportedDeclaration) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body { width: 100px; }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kCSSNesting));
+}
+
+TEST_F(StyleEngineTest, NestingUseCountDimensionToken) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body { 500px: 300px; }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kCSSNesting));
+}
+
+TEST_F(StyleEngineTest, NestingUseCountInvalidSelector) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body { & !!! { color: fuchsia; } }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kCSSNesting));
+}
+
+TEST_F(StyleEngineTest, NestingUseCountUnknownAtRule) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body {
+        @unsupported {
+          color: fuchsia;
+        }
+      }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kCSSNesting));
+}
+
+TEST_F(StyleEngineTest, NestingUseCountAtRule) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      body {
+        @media {
+          color: fuchsia;
+        }
+      }
+    </style>
+  )HTML");
+  UpdateAllLifecyclePhases();
+  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kCSSNesting));
+}
+
 TEST_F(StyleEngineTest, NestingUseCountNotStartingWithAmpersand) {
   GetDocument().body()->setInnerHTML(R"HTML(
     <style>
@@ -4523,31 +5197,37 @@ TEST_F(StyleEngineTest, SystemFontsObeyDefaultFontSize) {
 
   // Now test degenerate cases
   GetDocument().GetSettings()->SetDefaultFontSize(-1);
+  GetDocument().GetStyleResolver().InvalidateMatchedPropertiesCache();
   UpdateAllLifecyclePhases();
   EXPECT_EQ(1, body->GetComputedStyle()->FontSize());
   EXPECT_EQ(1, input->GetComputedStyle()->FontSize());
 
   GetDocument().GetSettings()->SetDefaultFontSize(0);
+  GetDocument().GetStyleResolver().InvalidateMatchedPropertiesCache();
   UpdateAllLifecyclePhases();
   EXPECT_EQ(1, body->GetComputedStyle()->FontSize());
   EXPECT_EQ(13, input->GetComputedStyle()->FontSize());
 
   GetDocument().GetSettings()->SetDefaultFontSize(1);
+  GetDocument().GetStyleResolver().InvalidateMatchedPropertiesCache();
   UpdateAllLifecyclePhases();
   EXPECT_EQ(1, body->GetComputedStyle()->FontSize());
   EXPECT_EQ(1, input->GetComputedStyle()->FontSize());
 
   GetDocument().GetSettings()->SetDefaultFontSize(2);
+  GetDocument().GetStyleResolver().InvalidateMatchedPropertiesCache();
   UpdateAllLifecyclePhases();
   EXPECT_EQ(2, body->GetComputedStyle()->FontSize());
   EXPECT_EQ(2, input->GetComputedStyle()->FontSize());
 
   GetDocument().GetSettings()->SetDefaultFontSize(3);
+  GetDocument().GetStyleResolver().InvalidateMatchedPropertiesCache();
   UpdateAllLifecyclePhases();
   EXPECT_EQ(3, body->GetComputedStyle()->FontSize());
   EXPECT_EQ(0, input->GetComputedStyle()->FontSize());
 
   GetDocument().GetSettings()->SetDefaultFontSize(12345);
+  GetDocument().GetStyleResolver().InvalidateMatchedPropertiesCache();
   UpdateAllLifecyclePhases();
   EXPECT_EQ(10000, body->GetComputedStyle()->FontSize());
   EXPECT_EQ(10000, input->GetComputedStyle()->FontSize());
@@ -4563,12 +5243,12 @@ TEST_F(StyleEngineTest, CascadeLayersInOriginsAndTreeScopes) {
   StyleSheetKey user_key("user_layers");
   GetStyleEngine().InjectSheet(user_key, user_sheet, WebCssOrigin::kUser);
 
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <style>
       @layer bar, foo;
     </style>
     <div id="host">
-      <template shadowroot="open">
+      <template shadowrootmode="open">
         <style>
           @layer foo, bar, foo.baz;
         </style>
@@ -4735,12 +5415,12 @@ TEST_F(StyleEngineTest, CascadeLayersNotExplicitlyDeclared) {
 }
 
 TEST_F(StyleEngineTest, CascadeLayersSheetsRemoved) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <style>
       @layer bar, foo;
     </style>
     <div id="host">
-      <template shadowroot="open">
+      <template shadowrootmode="open">
         <style>
           @layer foo, bar, foo.baz;
         </style>
@@ -4775,7 +5455,7 @@ TEST_F(StyleEngineTest, NonSlottedStyleDirty) {
   GetDocument().body()->setInnerHTML("<div id=host></div>");
   auto* host = GetDocument().getElementById(AtomicString("host"));
   ASSERT_TRUE(host);
-  host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   UpdateAllLifecyclePhases();
 
   // Add a child element to a shadow host with no slots. The inserted element is
@@ -4800,14 +5480,14 @@ TEST_F(StyleEngineTest, NonSlottedStyleDirty) {
   // with ChildNeedsStyleRecalc(), but the child needs to be marked dirty to
   // make sure the next EnsureComputedStyle updates the style to reflect the
   // changes.
-  scoped_refptr<const ComputedStyle> old_style = span->EnsureComputedStyle();
+  const ComputedStyle* old_style = span->EnsureComputedStyle();
   span->SetInlineStyleProperty(CSSPropertyID::kColor, "green");
   EXPECT_FALSE(host->ChildNeedsStyleRecalc());
   EXPECT_TRUE(span->NeedsStyleRecalc());
   UpdateAllLifecyclePhases();
 
   EXPECT_EQ(span->GetComputedStyle(), old_style);
-  scoped_refptr<const ComputedStyle> new_style = span->EnsureComputedStyle();
+  const ComputedStyle* new_style = span->EnsureComputedStyle();
   EXPECT_NE(new_style, old_style);
 
   EXPECT_EQ(Color::FromRGB(255, 0, 0),
@@ -5113,17 +5793,6 @@ TEST_F(StyleEngineTest, CascadeLayerActiveStyleSheetVectorNullRuleSetCrash) {
 
   // Should not crash
   UpdateAllLifecyclePhases();
-}
-
-TEST_F(StyleEngineTest, ChangeRenderingForHTMLSelect_DetachParent) {
-  GetDocument().body()->setInnerHTML(R"HTML(
-    <select id="select"></select>
-  )HTML");
-  UpdateAllLifecyclePhases();
-  EXPECT_FALSE(GetParentForDetachedSubtree());
-  GetStyleEngine().ChangeRenderingForHTMLSelect(To<HTMLSelectElement>(
-      *GetDocument().getElementById(AtomicString("select"))));
-  EXPECT_FALSE(GetParentForDetachedSubtree());
 }
 
 TEST_F(StyleEngineTest, EmptyDetachParent) {
@@ -5775,6 +6444,49 @@ TEST_F(StyleEngineSimTest, ResizeWithBlockingSheetTransition) {
       Color::FromRGB(0, 128, 0));
 }
 
+TEST_F(StyleEngineSimTest, FocusWithBlockingSheetTransition) {
+  WebView().MainFrameWidget()->Resize(gfx::Size(500, 500));
+
+  SimRequest html_request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest css_request("https://example.com/slow.css", "text/css");
+
+  LoadURL("https://example.com/test.html");
+  html_request.Complete(R"HTML(
+      <!DOCTYPE html>
+      <style>
+        #trans {
+          transition-duration: 30s;
+          color: red;
+        }
+      </style>
+      <link rel="stylesheet" href="slow.css">
+      <div id="trans"></div>
+  )HTML");
+
+  css_request.Start();
+
+  GetDocument().GetPage()->GetFocusController().SetActive(true);
+  GetDocument().GetPage()->GetFocusController().SetFocused(true);
+  GetDocument().GetPage()->GetFocusController().SetFocusedFrame(
+      GetDocument().GetFrame());
+
+  css_request.Complete(R"CSS(
+    #trans { color: green; }
+  )CSS");
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  Element* trans = GetDocument().getElementById(AtomicString("trans"));
+  ASSERT_TRUE(trans);
+
+  // Completing the linked stylesheet should not start a transition since the
+  // sheet is render-blocking.
+  EXPECT_EQ(
+      trans->ComputedStyleRef().VisitedDependentColor(GetCSSPropertyColor()),
+      Color::FromRGB(0, 128, 0));
+}
+
 TEST_F(StyleEngineSimTest,
        ShouldInvalidateSubjectPseudoHasAfterChildrenParsingFinished) {
   SimRequest main_resource("https://example.com/", "text/html");
@@ -5919,9 +6631,6 @@ TEST_F(StyleEngineTest, SVGURIValueCacheFill) {
 TEST_F(StyleEngineTest, BorderWidthsAreRecalculatedWhenZoomChanges) {
   // Tests that Border Widths are recalculated as expected
   // when Zoom and Device Scale Factor are changed.
-
-  ScopedSnapBorderWidthsBeforeLayoutForTest
-      enableSnapBorderWidthsBeforeLayoutForTest(true);
 
   frame_test_helpers::WebViewHelper web_view_helper;
   WebViewImpl* web_view_impl = web_view_helper.Initialize();
@@ -6245,8 +6954,512 @@ TEST_F(StyleEngineTest, UseCountCSSAnchorPositioning) {
   EXPECT_TRUE(IsUseCounted(WebFeature::kCSSAnchorPositioning));
 
   ClearUseCounter(WebFeature::kCSSAnchorPositioning);
-  SetBodyInnerHTML("<style>@position-fallback --pf {}</style>");
+  SetBodyInnerHTML("<style>@position-try --pf {}</style>");
   EXPECT_TRUE(IsUseCounted(WebFeature::kCSSAnchorPositioning));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSDeclarationAfterNestedRule) {
+  //
+  // The use-counter should not trigger for the following cases:
+  //
+
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    </style>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+      }
+    </style>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        & {
+          top: 10px;
+        }
+      }
+    </style>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Relative selector.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        > .a {
+          top: 10px;
+        }
+      }
+    </style>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Relaxed nesting.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        div {
+          top: 10px;
+        }
+      }
+    </style>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Nested group rule.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        @media (width) {
+          top: 10px;
+        }
+      }
+    </style>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Deep nesting.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        .a {
+          .b {
+            left: 10px;
+          }
+        }
+      }
+    </style>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  //
+  // The use-counter should trigger for the following cases:
+  //
+
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        & {
+          top: 10px;
+        }
+        background-color: red;
+      }
+    </style>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Relative selector.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        > .a {
+          top: 10px;
+        }
+        background-color: red;
+      }
+    </style>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Nested group rule.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        @media (width) {
+          top: 10px;
+        }
+        background-color: red;
+      }
+    </style>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Relaxed nesting.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        span {
+          top: 10px;
+        }
+        background-color: red;
+      }
+    </style>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+
+  // Deep nesting.
+  ClearUseCounter(WebFeature::kCSSDeclarationAfterNestedRule);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+        .a {
+          .b {
+            left: 10px;
+          }
+          top: 10px;
+        }
+      }
+    </style>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSDeclarationAfterNestedRule));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSBareDeclarationRequiresShift_Empty) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSBareDeclarationRequiresShift_NoNesting) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        color: green;
+      }
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSBareDeclarationRequiresShift_TrailingUncontested) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        & { color: pink; }
+        width: 100px;
+      }
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSBareDeclarationRequiresShift_TrailingDuplicate) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        width: 50px;
+        & { color: pink; }
+        width: 100px;
+      }
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSBareDeclarationRequiresShift_LaterRuleWins) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        & { color: red; }
+        width: 100px;
+      }
+      div {
+        width: 42px;
+      }
+    </style>
+    <div id=a></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSBareDeclarationRequiresShift_HigherSpecificityWins) {
+  // Rule with higher specificity overwrites the invisible rule.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      #a {
+        width: 42px;
+      }
+      div {
+        & { width: 33px; }
+        width: 100px;
+      }
+    </style>
+    <div id=a></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSBareDeclarationRequiresShift_ExplicitAmpersand) {
+  // The explicit '&' rule matches with specificity equal to :is(.a,.x.y.z),
+  // but the invisible rule expanded into the full/unwrapped selector list
+  // at parse time, and matches with the specificity of just '.a'.
+  // Therefore the invisible rule doesn't make a difference here.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .a, .x.y.z {
+        & { width: 33px; }
+        width: 100px;
+      }
+    </style>
+    <div class=a></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSBareDeclarationRequiresShift_TrailingWin) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        & { width: 33px; }
+        width: 100px;
+      }
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSBareDeclarationRequiresShift_TrailingWinMedia) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div {
+        @media (width) {
+          width: 33px;
+        }
+        width: 100px;
+      }
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSBareDeclarationRequiresShift_TrailingWinSelectorList) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      h1, h2, h3, div {
+        & { width: 33px; }
+        width: 100px;
+      }
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSBareDeclarationRequiresShift_DeeplyNested) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .a {
+        &.b {
+          &.c {
+            & { width: 33px; }
+            width: 100px;
+          }
+        }
+      }
+    </style>
+    <div class="a b c"></div>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSNestedGroupRuleSpecificity_NoNesting) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSNestedGroupRuleSpecificity));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSNestedGroupRuleSpecificity_NoContest) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div, .x.y.z {
+        @media (width) {
+          width: 33px;
+        }
+      }
+    </style>
+    <div></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSNestedGroupRuleSpecificity));
+}
+
+TEST_F(StyleEngineTest, UseCountCSSNestedGroupRuleSpecificity_LaterRuleWins) {
+  // Lowering the specificity of the implicit &-rule does not matter here,
+  // because there is anyway another rule with even higher specificity that
+  // wins the cascade.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div, .x.y.z {
+        @media (width) {
+          width: 33px;
+        }
+      }
+      :is(div, .x.y.z.w) {
+        width: 100px;
+      }
+    </style>
+    <div class=a></div>
+  )HTML");
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSNestedGroupRuleSpecificity));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSNestedGroupRuleSpecificity_LaterRuleIsAffected) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div, .x.y.z {
+        @media (width) {
+          width: 33px;
+        }
+      }
+      div {
+        width: 100px;
+      }
+    </style>
+    <div class=a></div>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSNestedGroupRuleSpecificity));
+}
+
+TEST_F(StyleEngineTest,
+       UseCountCSSNestedGroupRuleSpecificity_NoBareDeclarationShift) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      div, .x.y.z {
+        @media (width) {
+          width: 33px;
+          div:where(&) {
+            width: 100px;
+          }
+        }
+      }
+    </style>
+    <div class=a></div>
+  )HTML");
+  EXPECT_TRUE(IsUseCounted(WebFeature::kCSSNestedGroupRuleSpecificity));
+
+  // The kBareDeclarationShift should at no point have been set
+  // by nested group rules.
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSBareDeclarationShift));
+}
+
+TEST_F(StyleEngineTest, EnsureDraggableRegionTriggersRelayout) {
+  frame_test_helpers::WebViewHelper web_view_helper;
+  WebViewImpl* web_view_impl = web_view_helper.Initialize();
+  web_view_impl->SetSupportsDraggableRegions(true);
+  web_view_impl->MainFrameWidget()->UpdateAllLifecyclePhases(
+      DocumentUpdateReason::kTest);
+
+  Document* document =
+      To<LocalFrame>(web_view_impl->GetPage()->MainFrame())->GetDocument();
+  document->body()->setInnerHTML(R"HTML(
+    <head>
+    <style>
+      .drag {
+        app-region: drag
+      }
+      .no-drag {
+        app-region: no-drag
+      }
+    </style>
+    </head>
+    <body>
+       <div id="drag-region"></div>
+    </body>
+  )HTML");
+
+  Element* drag_element = document->getElementById(AtomicString("drag-region"));
+
+  auto regions = document->DraggableRegions();
+  auto* it =
+      std::find_if(regions.begin(), regions.end(),
+                   [](blink::DraggableRegionValue s) { return s.draggable; });
+  EXPECT_EQ(it, regions.end()) << "There should be no drag regions";
+
+  drag_element->classList().Add(AtomicString("drag"));
+  web_view_impl->MainFrameWidget()->UpdateAllLifecyclePhases(
+      DocumentUpdateReason::kTest);
+
+  regions = document->DraggableRegions();
+  it = std::find_if(regions.begin(), regions.end(),
+                    [](blink::DraggableRegionValue s) { return s.draggable; });
+  EXPECT_NE(it, regions.end()) << "There should be one drag region";
+
+  drag_element->classList().Add(AtomicString("no-drag"));
+  web_view_impl->MainFrameWidget()->UpdateAllLifecyclePhases(
+      DocumentUpdateReason::kTest);
+
+  regions = document->DraggableRegions();
+  it = std::find_if(regions.begin(), regions.end(),
+                    [](blink::DraggableRegionValue s) { return s.draggable; });
+
+  EXPECT_EQ(it, regions.end()) << "There should be no drag regions";
+}
+
+TEST_F(StyleEngineTest, ForcedColorsLightDark) {
+  ScopedForcedColorsForTest scoped_feature(true);
+  ColorSchemeHelper color_scheme_helper(GetDocument());
+  color_scheme_helper.SetInForcedColors(/*in_forced_colors=*/true);
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      :root { color-scheme: light only; }
+      #light-dark {
+        color: light-dark(GrayText, red);
+      }
+      #reference {
+        color: GrayText;
+      }
+    </style>
+    <div id="light-dark"></div>
+    <div id="reference"></div>
+  )HTML");
+  UpdateAllLifecyclePhases();
+
+  const ComputedStyle& light_dark =
+      GetDocument()
+          .getElementById(AtomicString("light-dark"))
+          ->ComputedStyleRef();
+  const ComputedStyle& reference =
+      GetDocument()
+          .getElementById(AtomicString("reference"))
+          ->ComputedStyleRef();
+
+  EXPECT_EQ(light_dark.VisitedDependentColor(GetCSSPropertyColor()),
+            reference.VisitedDependentColor(GetCSSPropertyColor()));
 }
 
 }  // namespace blink

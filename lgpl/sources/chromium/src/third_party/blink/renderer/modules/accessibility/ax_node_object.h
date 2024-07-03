@@ -45,16 +45,26 @@ class Node;
 
 class MODULES_EXPORT AXNodeObject : public AXObject {
  public:
+  // Note: when constructed with a Node, the LayoutObject will be ignored
+  // in property computations.
   AXNodeObject(Node*, AXObjectCacheImpl&);
+  AXNodeObject(LayoutObject*, AXObjectCacheImpl&);
 
   AXNodeObject(const AXNodeObject&) = delete;
   AXNodeObject& operator=(const AXNodeObject&) = delete;
 
   ~AXNodeObject() override;
 
-  static absl::optional<String> GetCSSAltText(const Node*);
+  static std::optional<String> GetCSSAltText(const Element*);
 
   void Trace(Visitor*) const override;
+
+  // Call to force-load inline text boxes for the current subtree.
+  void LoadInlineTextBoxes() override;
+  // Should inline text boxes be considered when adding chldren to this node.
+  bool ShouldLoadInlineTextBoxes() const override;
+
+  ScrollableArea* GetScrollableAreaIfScrollable() const final;
 
  protected:
 #if DCHECK_IS_ON()
@@ -63,19 +73,15 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
 #endif
 
   // The accessibility role, not taking the ARIA role into account.
-  ax::mojom::blink::Role native_role_;
+  ax::mojom::blink::Role native_role_ = ax::mojom::blink::Role::kUnknown;
 
   // The ARIA role, not taking the native role into account.
-  ax::mojom::blink::Role aria_role_;
+  ax::mojom::blink::Role aria_role_ = ax::mojom::blink::Role::kUnknown;
 
   AXObjectInclusion ShouldIncludeBasedOnSemantics(
       IgnoredReasons* = nullptr) const;
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
-  ax::mojom::blink::Role DetermineTableSectionRole() const;
-  ax::mojom::blink::Role DetermineTableCellRole() const;
-  ax::mojom::blink::Role DetermineTableRowRole() const;
-  bool IsDataTable() const override;
-  ax::mojom::blink::Role DetermineAccessibilityRole() override;
+  ax::mojom::blink::Role DetermineRoleValue() override;
   ax::mojom::blink::Role NativeRoleIgnoringAria() const override;
   void AlterSliderOrSpinButtonValue(bool increase);
   AXObject* ActiveDescendant() override;
@@ -83,6 +89,27 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   String AutoComplete() const override;
   void AccessibilityChildrenFromAOMProperty(AOMRelationListProperty,
                                             AXObject::AXObjectVector&) const;
+
+  // For table objects.
+  bool IsDataTable() const override;
+  unsigned ColumnCount() const override;
+  unsigned RowCount() const override;
+  void ColumnHeaders(AXObjectVector&) const override;
+  void RowHeaders(AXObjectVector&) const override;
+  AXObject* CellForColumnAndRow(unsigned column, unsigned row) const override;
+  // For table cells.
+  unsigned ColumnIndex() const override;
+  unsigned RowIndex() const override;  // Also for a table row.
+  unsigned ColumnSpan() const override;
+  unsigned RowSpan() const override;
+  // For a table row or column.
+  AXObject* HeaderObject() const override;
+  // For a table row or column header.
+  ax::mojom::blink::SortDirection GetSortDirection() const override;
+  // Role determination within a table.
+  ax::mojom::blink::Role DetermineTableSectionRole() const;
+  ax::mojom::blink::Role DetermineTableCellRole() const;
+  ax::mojom::blink::Role DetermineTableRowRole() const;
 
   Element* MenuItemElementForMenu() const;
   HTMLElement* CorrespondingControlForLabelElement() const;
@@ -112,17 +139,18 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool IsSpinButton() const override;
   bool IsNativeSlider() const override;
   bool IsNativeSpinButton() const override;
-  bool IsChildTreeOwner() const override;
+  bool IsEmbeddingElement() const override;
+  bool IsLinked() const override;
+  bool IsVisited() const override;
 
   // Check object state.
   bool IsClickable() const final;
   bool IsFocused() const override;
-  // aria-grabbed is deprecated in WAI-ARIA 1.1.
-  AccessibilityGrabbedState IsGrabbed() const override;
   AccessibilityExpanded IsExpanded() const override;
   AccessibilitySelectedState IsSelected() const override;
   bool IsSelectedFromFocusSupported() const override;
   bool IsSelectedFromFocus() const override;
+  bool IsNotUserSelectable() const override;
   bool IsRequired() const final;
   bool IsControl() const override;
   AXRestriction Restriction() const override;
@@ -141,12 +169,16 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   int HeadingLevel() const final;
   unsigned HierarchicalLevel() const final;
   void SerializeMarkerAttributes(ui::AXNodeData* node_data) const override;
+  ax::mojom::blink::ListStyle GetListStyle() const final;
   AXObject* InPageLinkTarget() const override;
   const AtomicString& EffectiveTarget() const override;
   AccessibilityOrientation Orientation() const override;
 
   AXObject* GetChildFigcaption() const override;
   bool IsDescendantOfLandmarkDisallowedElement() const override;
+
+  // Is a redundant label of a radio button or checkbox.
+  static bool IsRedundantLabel(HTMLLabelElement* label);
 
   // Used to compute kRadioGroupIds, which is only used on Mac.
   // TODO(accessibility) Consider computing on browser side and removing here.
@@ -186,10 +218,9 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
                              bool recursive) const override;
 
   // ARIA attributes.
-  ax::mojom::blink::Role AriaRoleAttribute() const final;
+  ax::mojom::blink::Role RawAriaRole() const final;
   void AriaDescribedbyElements(AXObjectVector&) const override;
   void AriaOwnsElements(AXObjectVector&) const override;
-  bool SupportsARIADragging() const override;
   void Dropeffects(
       Vector<ax::mojom::blink::Dropeffect>& dropeffects) const override;
 
@@ -199,6 +230,7 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   bool HasContentEditableAttributeSet() const override;
 
   // Modify or take an action on an object.
+  bool OnNativeSetSelectedAction(bool selected) override;
   bool OnNativeSetValueAction(const String&) override;
 
   // AX name calculation.
@@ -210,6 +242,17 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
                          ax::mojom::blink::NameFrom&,
                          AXRelatedObjectVector*,
                          NameSources*) const override;
+  // If name_sources are being collected in a call to TextAlternative(), the
+  // algorithm will continue even after finding a valid text alternative in
+  // order to collect all viable name_sources. This can cause the original text
+  // alternative to be overwritten. So, at the end of TextAlternative() it's
+  // necessary to call GetSavedTextAlternativeFromNameSource() to recover the
+  // original text alternative from name_sources.
+  static String GetSavedTextAlternativeFromNameSource(
+      bool found_text_alternative,
+      ax::mojom::NameFrom& name_from,
+      AXRelatedObjectVector* related_objects,
+      NameSources* name_sources);
   String Description(ax::mojom::blink::NameFrom,
                      ax::mojom::blink::DescriptionFrom&,
                      AXObjectVector* description_objects) const override;
@@ -252,6 +295,7 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   Element* AnchorElement() const override;
   Document* GetDocument() const override;
   Node* GetNode() const final;
+  LayoutObject* GetLayoutObject() const final;
 
   // DOM and layout tree access.
   AtomicString Language() const override;
@@ -288,17 +332,28 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   void ComputeAriaOwnsChildren(
       HeapVector<Member<AXObject>>& owned_children) const;
 
-  // Inline text boxes.
-  void LoadInlineTextBoxes() override;
-  void ForceAddInlineTextBoxChildren() override;
+  // Helper method for LoadInlineTextBoxes().
+  void LoadInlineTextBoxesHelper() override;
 
   //
   // Layout object specific methods.
   //
 
+  AXObject* AccessibilityHitTest(const gfx::Point&) const override;
+
   // If we can't determine a useful role from the DOM node, attempt to determine
   // a role from the layout object.
-  virtual ax::mojom::blink::Role RoleFromLayoutObjectOrNode() const;
+  ax::mojom::blink::Role RoleFromLayoutObjectOrNode() const;
+
+  // Called when autofill/autocomplete suggestion availability changes on a form
+  // control.
+  void HandleAutofillSuggestionAvailabilityChanged(
+      WebAXAutofillSuggestionAvailability suggestion_availability) override;
+
+  // Word boundaries are only exposed for inline text boxes and list markers.
+  // This override implements word boundaries for list markers.
+  void GetWordBoundaries(Vector<int>& word_starts,
+                         Vector<int>& word_ends) const override;
 
  private:
   bool HasInternalsAttribute(Element&, const QualifiedName&) const;
@@ -347,6 +402,7 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   void AddPopupChildren();
   bool HasValidHTMLTableStructureAndLayout() const;
   void AddTableChildren();
+  bool FindAllTableCellsWithRole(ax::mojom::blink::Role, AXObjectVector&) const;
   void AddValidationMessageChild();
   void AddAccessibleNodeChildren();
   void AddOwnedChildren();
@@ -358,13 +414,28 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   ax::mojom::blink::Dropeffect ParseDropeffect(String& dropeffect) const;
 
   static bool IsNameFromLabelElement(HTMLElement* control);
-  static bool IsRedundantLabel(HTMLLabelElement* label);
 
-#if BUILDFLAG(IS_ANDROID)
+  // Hit testing.
+  AXObject* AccessibilityImageMapHitTest(HTMLAreaElement*,
+                                         const gfx::Point&) const;
+
+  // Inline text boxes.
+  //
+  // Get either the first inline block descendant or deepest descendant that
+  // is included in the tree. |start_object| does not have to be included in the
+  // tree. If |first| is true, returns the deepest first descendant. Otherwise,
+  // returns the deepest last descendant.
+  AXObject* GetFirstInlineBlockOrDeepestInlineAXChildInLayoutTree(
+      AXObject* start_object,
+      bool first) const;
+  AXObject* NextOnLine() const override;
+  AXObject* PreviousOnLine() const override;
+#if defined(REDUCE_AX_INLINE_TEXTBOXES)
   bool always_load_inline_text_boxes_ = false;
 #endif
 
   Member<Node> node_;
+  Member<LayoutObject> layout_object_;
 };
 
 }  // namespace blink

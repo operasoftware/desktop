@@ -14,10 +14,12 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl_hash.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 namespace {
@@ -30,15 +32,6 @@ enum class CookieCacheLookupResult {
   kCacheMissAfterSet = 4,
   kMaxValue = kCacheMissAfterSet,
 };
-
-void LogCookieHistogram(const char* prefix,
-                        bool cookie_manager_requested,
-                        base::TimeDelta elapsed) {
-  base::UmaHistogramTimes(
-      base::StrCat({prefix, cookie_manager_requested ? "ManagerRequested"
-                                                     : "ManagerAvailable"}),
-      elapsed);
-}
 
 // TODO(crbug.com/1276520): Remove after truncating characters are fully
 // deprecated.
@@ -65,59 +58,23 @@ void CookieJar::SetCookie(const String& value) {
     return;
 
   base::ElapsedTimer timer;
-  bool requested = RequestRestrictedCookieManagerIfNeeded();
-  bool site_for_cookies_ok = true;
-  bool top_frame_origin_ok = true;
+  RequestRestrictedCookieManagerIfNeeded();
   backend_->SetCookieFromString(
       cookie_url, document_->SiteForCookies(), document_->TopFrameOrigin(),
-      document_->GetExecutionContext()->HasStorageAccess(), value,
-      &site_for_cookies_ok, &top_frame_origin_ok);
+      document_->GetExecutionContext()->HasStorageAccess(), value);
   last_operation_was_set_ = true;
-  LogCookieHistogram("Blink.SetCookieTime.", requested, timer.Elapsed());
+  base::UmaHistogramTimes("Blink.SetCookieTime", timer.Elapsed());
 
   // TODO(crbug.com/1276520): Remove after truncating characters are fully
   // deprecated
   if (value.Find(ContainsTruncatingChar) != kNotFound) {
     document_->CountDeprecation(WebFeature::kCookieWithTruncatingChar);
   }
-
-  static bool reported = false;
-  if (!site_for_cookies_ok) {
-    if (!reported) {
-      reported = true;
-      SCOPED_CRASH_KEY_STRING256("RCM", "document-site_for_cookies",
-                                 document_->SiteForCookies().ToDebugString());
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-top_frame_origin",
-          document_->TopFrameOrigin()->ToUrlOrigin().GetDebugString());
-      // Only origin here, since url is probably way too sensitive.
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-origin",
-          url::Origin::Create(GURL(cookie_url)).GetDebugString());
-      base::debug::DumpWithoutCrashing();
-    }
-  }
-  if (!top_frame_origin_ok) {
-    if (!reported) {
-      reported = true;
-      SCOPED_CRASH_KEY_STRING256("RCM", "document-site_for_cookies",
-                                 document_->SiteForCookies().ToDebugString());
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-top_frame_origin",
-          document_->TopFrameOrigin()->ToUrlOrigin().GetDebugString());
-      // Only origin here, since url is probably way too sensitive.
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-origin",
-          url::Origin::Create(GURL(cookie_url)).GetDebugString());
-      base::debug::DumpWithoutCrashing();
-    }
-  }
 }
 
 void CookieJar::OnBackendDisconnect() {
-  shared_memory_initialized_ = false;
-  last_cookies_hash_.reset();
-  last_version_ = network::mojom::blink::kInvalidCookieVersion;
+  shared_memory_version_client_.reset();
+  InvalidateCache();
 }
 
 String CookieJar::Cookies() {
@@ -126,32 +83,44 @@ String CookieJar::Cookies() {
     return String();
 
   base::ElapsedTimer timer;
-  bool requested = RequestRestrictedCookieManagerIfNeeded();
+  RequestRestrictedCookieManagerIfNeeded();
 
-  String value;
+  String value = g_empty_string;
   base::ReadOnlySharedMemoryRegion new_mapped_region;
-  const bool get_version_shared_memory = !shared_memory_initialized_;
+  const bool get_version_shared_memory =
+      !shared_memory_version_client_.has_value();
 
-  // Store the latest cookie version to update |last_version_| after getting the
-  // string.
-  const uint64_t new_version = GetSharedCookieVersion();
+  // Store the latest cookie version to update |last_version_| after attempting
+  // to get the string. Will get updated once more by GetCookiesString() if an
+  // ipc is required.
+  uint64_t new_version = last_version_;
+  if (IPCNeeded()) {
+    bool is_ad_tagged =
+        document_->GetFrame() ? document_->GetFrame()->IsAdFrame() : false;
 
-  backend_->GetCookiesString(
-      cookie_url, document_->SiteForCookies(), document_->TopFrameOrigin(),
-      document_->GetExecutionContext()->HasStorageAccess(),
-      get_version_shared_memory, &new_mapped_region, &value);
-
-  if (!shared_memory_initialized_ && new_mapped_region.IsValid()) {
-    mapped_region_ = std::move(new_mapped_region);
-    mapping_ = mapped_region_.Map();
-    shared_memory_initialized_ = true;
+    if (!backend_->GetCookiesString(
+            cookie_url, document_->SiteForCookies(),
+            document_->TopFrameOrigin(),
+            document_->GetExecutionContext()->HasStorageAccess(),
+            get_version_shared_memory, is_ad_tagged,
+            /*force_disable_third_party_cookies=*/false, &new_version,
+            &new_mapped_region, &value)) {
+      // On IPC failure invalidate cached values and return empty string since
+      // there is no guarantee the client can still validly access cookies in
+      // the current context. See crbug.com/1468909.
+      InvalidateCache();
+      return g_empty_string;
+    }
+    last_cookies_ = value;
   }
-
-  LogCookieHistogram("Blink.CookiesTime.", requested, timer.Elapsed());
+  if (new_mapped_region.IsValid()) {
+    shared_memory_version_client_.emplace(std::move(new_mapped_region));
+  }
+  base::UmaHistogramTimes("Blink.CookiesTime", timer.Elapsed());
   UpdateCacheAfterGetRequest(cookie_url, value, new_version);
 
   last_operation_was_set_ = false;
-  return value;
+  return last_cookies_;
 }
 
 bool CookieJar::CookiesEnabled() {
@@ -160,12 +129,12 @@ bool CookieJar::CookiesEnabled() {
     return false;
 
   base::ElapsedTimer timer;
-  bool requested = RequestRestrictedCookieManagerIfNeeded();
+  RequestRestrictedCookieManagerIfNeeded();
   bool cookies_enabled = false;
   backend_->CookiesEnabledFor(
       cookie_url, document_->SiteForCookies(), document_->TopFrameOrigin(),
       document_->GetExecutionContext()->HasStorageAccess(), &cookies_enabled);
-  LogCookieHistogram("Blink.CookiesEnabledTime.", requested, timer.Elapsed());
+  base::UmaHistogramTimes("Blink.CookiesEnabledTime", timer.Elapsed());
   return cookies_enabled;
 }
 
@@ -179,20 +148,39 @@ void CookieJar::SetCookieManager(
 
 void CookieJar::InvalidateCache() {
   last_cookies_hash_.reset();
+  last_cookies_ = String();
+  last_version_ = mojo::shared_memory_version::kInvalidVersion;
 }
 
-uint64_t CookieJar::GetSharedCookieVersion() {
-  if (shared_memory_initialized_) {
-    // Relaxed memory order since only the version is stored within the region
-    // and as such is the only data shared between processes. There is no
-    // re-ordering to worry about.
-    return mapping_.GetMemoryAs<const std::atomic<uint64_t>>()->load(
-        std::memory_order_relaxed);
+bool CookieJar::IPCNeeded() {
+  // Not under the experiment, always use IPCs.
+  if (!RuntimeEnabledFeatures::ReduceCookieIPCsEnabled()) {
+    return true;
   }
-  return network::mojom::blink::kInvalidCookieVersion;
+
+  // |last_cookies_| can be null when converting the raw mojo payload failed.
+  // (See ConvertUTF8ToUTF16() for details.) In that case use an IPC to request
+  // another string to be safe.
+  if (last_cookies_.IsNull()) {
+    return true;
+  }
+
+  // No shared memory communication so IPC needed.
+  if (!shared_memory_version_client_.has_value()) {
+    return true;
+  }
+
+  // Cookie string has changed.
+  if (shared_memory_version_client_->SharedVersionIsGreaterThan(
+          last_version_)) {
+    return true;
+  }
+
+  // No IPC needed!
+  return false;
 }
 
-bool CookieJar::RequestRestrictedCookieManagerIfNeeded() {
+void CookieJar::RequestRestrictedCookieManagerIfNeeded() {
   if (!backend_.is_bound() || !backend_.is_connected()) {
     backend_.reset();
 
@@ -203,15 +191,13 @@ bool CookieJar::RequestRestrictedCookieManagerIfNeeded() {
     document_->GetFrame()->GetBrowserInterfaceBroker().GetInterface(
         backend_.BindNewPipeAndPassReceiver(
             document_->GetTaskRunner(TaskType::kInternalDefault)));
-    return true;
   }
-  return false;
 }
 
 void CookieJar::UpdateCacheAfterGetRequest(const KURL& cookie_url,
                                            const String& cookie_string,
                                            uint64_t new_version) {
-  absl::optional<unsigned> new_hash =
+  std::optional<unsigned> new_hash =
       WTF::HashInts(WTF::GetHash(cookie_url),
                     cookie_string.IsNull() ? 0 : WTF::GetHash(cookie_string));
 
@@ -221,7 +207,7 @@ void CookieJar::UpdateCacheAfterGetRequest(const KURL& cookie_url,
   // An invalid version means no shared memory communication so assume changes
   // happened.
   const bool cookie_is_unchanged =
-      new_version != network::mojom::blink::kInvalidCookieVersion &&
+      new_version != mojo::shared_memory_version::kInvalidVersion &&
       last_version_ == new_version;
 
   if (last_cookies_hash_.has_value() && cookie_is_unchanged) {

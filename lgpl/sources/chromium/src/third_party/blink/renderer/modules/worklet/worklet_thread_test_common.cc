@@ -50,7 +50,7 @@ CreateAnimationAndPaintWorkletThread(
           BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
           window->GetAgentClusterID(), ukm::kInvalidSourceId,
           window->GetExecutionContextToken()),
-      absl::nullopt, std::make_unique<WorkerDevToolsParams>());
+      std::nullopt, std::make_unique<WorkerDevToolsParams>());
   return thread;
 }
 

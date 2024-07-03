@@ -51,8 +51,10 @@
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/node.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
@@ -71,9 +73,6 @@
 #include "third_party/blink/renderer/core/html/html_link_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
-#include "third_party/blink/renderer/core/html/portal/document_portals.h"
-#include "third_party/blink/renderer/core/html/portal/html_portal_element.h"
-#include "third_party/blink/renderer/core/html/portal/portal_contents.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/inspector/dom_editor.h"
 #include "third_party/blink/renderer/core/inspector/dom_patch_support.h"
@@ -84,6 +83,7 @@
 #include "third_party/blink/renderer/core/inspector/inspector_history.h"
 #include "third_party/blink/renderer/core/inspector/resolve_node.h"
 #include "third_party/blink/renderer/core/inspector/v8_inspector_string.h"
+#include "third_party/blink/renderer/core/layout/hit_test_location.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
@@ -103,6 +103,7 @@
 
 namespace blink {
 
+using mojom::blink::FormControlType;
 using protocol::Maybe;
 
 namespace {
@@ -223,6 +224,10 @@ protocol::DOM::PseudoType InspectorDOMAgent::ProtocolPseudoElementType(
       return protocol::DOM::PseudoTypeEnum::ScrollbarTrackPiece;
     case kPseudoIdScrollbarCorner:
       return protocol::DOM::PseudoTypeEnum::ScrollbarCorner;
+    case kPseudoIdScrollMarker:
+      return protocol::DOM::PseudoTypeEnum::ScrollMarker;
+    case kPseudoIdScrollMarkers:
+      return protocol::DOM::PseudoTypeEnum::ScrollMarkers;
     case kPseudoIdResizer:
       return protocol::DOM::PseudoTypeEnum::Resizer;
     case kPseudoIdInputListButton:
@@ -239,6 +244,7 @@ protocol::DOM::PseudoType InspectorDOMAgent::ProtocolPseudoElementType(
       return protocol::DOM::PseudoTypeEnum::ViewTransitionOld;
     case kAfterLastInternalPseudoId:
     case kPseudoIdNone:
+    case kPseudoIdInvalid:
       CHECK(false);
       return "";
   }
@@ -591,7 +597,7 @@ protocol::Response InspectorDOMAgent::getNodesForSubtreeByStyle(
 
   HashMap<CSSPropertyID, HashSet<String>> properties;
   for (const auto& style : *computed_styles) {
-    absl::optional<CSSPropertyName> property_name = CSSPropertyName::From(
+    std::optional<CSSPropertyName> property_name = CSSPropertyName::From(
         document_->GetExecutionContext(), style->getName());
     if (!property_name)
       return protocol::Response::InvalidParams("Invalid CSS property name");
@@ -697,7 +703,7 @@ Node* InspectorDOMAgent::NodeForId(int id) const {
 
   const auto it = id_to_node_.find(id);
   if (it != id_to_node_.end())
-    return it->value;
+    return it->value.Get();
   return nullptr;
 }
 
@@ -1182,6 +1188,21 @@ protocol::Response InspectorDOMAgent::performSearch(
   HeapVector<Member<Document>> docs = Documents();
   HeapLinkedHashSet<Member<Node>> result_collector;
 
+  // Selector evaluation
+  for (Document* document : docs) {
+    DummyExceptionStateForTesting exception_state;
+    StaticElementList* element_list = document->QuerySelectorAll(
+        AtomicString(whitespace_trimmed_query), exception_state);
+    if (exception_state.HadException() || !element_list) {
+      continue;
+    }
+
+    unsigned size = element_list->length();
+    for (unsigned i = 0; i < size; ++i) {
+      result_collector.insert(element_list->item(i));
+    }
+  }
+
   for (Document* document : docs) {
     Node* document_element = document->documentElement();
     Node* node = document_element;
@@ -1262,19 +1283,6 @@ protocol::Response InspectorDOMAgent::performSearch(
         node = To<Attr>(node)->ownerElement();
       result_collector.insert(node);
     }
-  }
-
-  // Selector evaluation
-  for (Document* document : docs) {
-    DummyExceptionStateForTesting exception_state;
-    StaticElementList* element_list = document->QuerySelectorAll(
-        AtomicString(whitespace_trimmed_query), exception_state);
-    if (exception_state.HadException() || !element_list)
-      continue;
-
-    unsigned size = element_list->length();
-    for (unsigned i = 0; i < size; ++i)
-      result_collector.insert(element_list->item(i));
   }
 
   *search_id = IdentifiersFactory::CreateIdentifier();
@@ -1448,7 +1456,7 @@ protocol::Response InspectorDOMAgent::focus(Maybe<int> node_id,
   element->GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kInspector);
   if (!element->IsFocusable())
     return protocol::Response::ServerError("Element is not focusable");
-  element->Focus();
+  element->Focus(FocusParams(FocusTrigger::kUserGesture));
   return protocol::Response::Success();
 }
 
@@ -1465,8 +1473,9 @@ protocol::Response InspectorDOMAgent::setFileInputFiles(
 
   auto* html_input_element = DynamicTo<HTMLInputElement>(node);
   if (!html_input_element ||
-      html_input_element->type() != input_type_names::kFile)
+      html_input_element->FormControlType() != FormControlType::kInputFile) {
     return protocol::Response::ServerError("Node is not a file input element");
+  }
 
   Vector<String> paths;
   for (const String& file : *files)
@@ -1555,7 +1564,7 @@ protocol::Response InspectorDOMAgent::getNodeForLocation(
   HitTestResult result(request, location);
   document->GetFrame()->ContentLayoutObject()->HitTest(location, result);
   if (!include_user_agent_shadow_dom)
-    result.SetToShadowHostIfInRestrictedShadowRoot();
+    result.SetToShadowHostIfInUAShadowRoot();
   Node* node = result.InnerPossiblyPseudoNode();
   while (node && node->getNodeType() == Node::kTextNode)
     node = node->parentNode();
@@ -1636,33 +1645,33 @@ protocol::Response InspectorDOMAgent::getContainerForNode(
   if (!response.IsSuccess())
     return response;
 
-  PhysicalAxes physical = kPhysicalAxisNone;
+  PhysicalAxes physical = kPhysicalAxesNone;
   // TODO(crbug.com/1378237): Need to keep the broken behavior of querying the
   // inline-axis by default to avoid even worse behavior before devtools-
-  // frontend catches up. Change value here to kLogicalAxisNone.
-  LogicalAxes logical = kLogicalAxisInline;
+  // frontend catches up. Change value here to kLogicalAxesNone.
+  LogicalAxes logical = kLogicalAxesInline;
 
   if (physical_axes.has_value()) {
     if (physical_axes.value() == protocol::DOM::PhysicalAxesEnum::Horizontal) {
-      physical = kPhysicalAxisHorizontal;
+      physical = kPhysicalAxesHorizontal;
     } else if (physical_axes.value() ==
                protocol::DOM::PhysicalAxesEnum::Vertical) {
-      physical = kPhysicalAxisVertical;
+      physical = kPhysicalAxesVertical;
     } else if (physical_axes.value() == protocol::DOM::PhysicalAxesEnum::Both) {
-      physical = kPhysicalAxisBoth;
+      physical = kPhysicalAxesBoth;
     }
   }
   if (logical_axes.has_value()) {
     if (logical_axes.value() == protocol::DOM::LogicalAxesEnum::Inline) {
-      logical = kLogicalAxisInline;
+      logical = kLogicalAxesInline;
     } else if (logical_axes.value() == protocol::DOM::LogicalAxesEnum::Block) {
-      logical = kLogicalAxisBlock;
+      logical = kLogicalAxesBlock;
     } else if (logical_axes.value() == protocol::DOM::LogicalAxesEnum::Both) {
-      logical = kLogicalAxisBoth;
+      logical = kLogicalAxesBoth;
     }
   }
 
-  element->GetDocument().UpdateStyleAndLayoutTreeForNode(
+  element->GetDocument().UpdateStyleAndLayoutTreeForElement(
       element, DocumentUpdateReason::kInspector);
   StyleResolver& style_resolver = element->GetDocument().GetStyleResolver();
   // Container rule origin no longer known at this point, match name from all
@@ -1762,12 +1771,12 @@ String InspectorDOMAgent::DocumentBaseURLString(Document* document) {
 // static
 protocol::DOM::ShadowRootType InspectorDOMAgent::GetShadowRootType(
     ShadowRoot* shadow_root) {
-  switch (shadow_root->GetType()) {
-    case ShadowRootType::kUserAgent:
+  switch (shadow_root->GetMode()) {
+    case ShadowRootMode::kUserAgent:
       return protocol::DOM::ShadowRootTypeEnum::UserAgent;
-    case ShadowRootType::kOpen:
+    case ShadowRootMode::kOpen:
       return protocol::DOM::ShadowRootTypeEnum::Open;
-    case ShadowRootType::kClosed:
+    case ShadowRootMode::kClosed:
       return protocol::DOM::ShadowRootTypeEnum::Closed;
   }
   NOTREACHED();
@@ -1795,7 +1804,10 @@ std::unique_ptr<protocol::DOM::Node> InspectorDOMAgent::BuildObjectForNode(
     bool pierce,
     NodeToIdMap* nodes_map,
     protocol::Array<protocol::DOM::Node>* flatten_result) {
-  int id = Bind(node, nodes_map);
+  // If no `nodes_map` is provided, do the best effort to provide a node id,
+  // but do not create one if it's not there, since absence of the map implies
+  // we're not pushing the node to the front-end at the moment.
+  const int id = nodes_map ? Bind(node, nodes_map) : BoundNodeId(node);
   String local_name;
   String node_value;
 
@@ -1860,16 +1872,14 @@ std::unique_ptr<protocol::DOM::Node> InspectorDOMAgent::BuildObjectForNode(
       force_push_children = true;
     }
 
-    if (auto* link_element = DynamicTo<HTMLLinkElement>(*element))
+    if (IsA<HTMLLinkElement>(*element)) {
       force_push_children = true;
+    }
 
     if (auto* template_element = DynamicTo<HTMLTemplateElement>(*element)) {
-      // The inspector should not try to access the .content() property of
-      // declarative Shadow DOM <template> elements, because it will be null.
-      if (!template_element->IsDeclarativeShadowRoot() &&
-          template_element->content()) {
-        value->setTemplateContent(BuildObjectForNode(
-            template_element->content(), 0, pierce, nodes_map, flatten_result));
+      if (DocumentFragment* content = template_element->content()) {
+        value->setTemplateContent(
+            BuildObjectForNode(content, 0, pierce, nodes_map, flatten_result));
         force_push_children = true;
       }
     }
@@ -2441,11 +2451,6 @@ void InspectorDOMAgent::NodeCreated(Node* node) {
   }
 }
 
-void InspectorDOMAgent::PortalRemoteFrameCreated(
-    HTMLPortalElement* portal_element) {
-  InvalidateFrameOwnerElement(portal_element);
-}
-
 static ShadowRoot* ShadowRootForNode(Node* node, const String& type) {
   auto* element = DynamicTo<Element>(node);
   if (!element)
@@ -2532,8 +2537,7 @@ protocol::Response InspectorDOMAgent::pushNodesByBackendIdsToFrontend(
 class InspectableNode final
     : public v8_inspector::V8InspectorSession::Inspectable {
  public:
-  explicit InspectableNode(Node* node)
-      : node_id_(DOMNodeIds::IdForNode(node)) {}
+  explicit InspectableNode(Node* node) : node_id_(node->GetDomNodeId()) {}
 
   v8::Local<v8::Value> get(v8::Local<v8::Context> context) override {
     return NodeV8Value(context, DOMNodeIds::NodeForId(node_id_));
@@ -2661,18 +2665,6 @@ protocol::Response InspectorDOMAgent::getFrameOwner(
     }
   }
 
-  if (!found_frame) {
-    if (auto* portals =
-            DocumentPortals::Get(*inspected_frames_->Root()->GetDocument())) {
-      for (PortalContents* portal : portals->GetPortals()) {
-        Frame* portal_frame = portal->GetFrame();
-        if (IdentifiersFactory::FrameId(portal_frame) == frame_id) {
-          found_frame = portal_frame;
-          break;
-        }
-      }
-    }
-  }
   if (!found_frame) {
     return protocol::Response::ServerError(
         "Frame with the given id was not found.");

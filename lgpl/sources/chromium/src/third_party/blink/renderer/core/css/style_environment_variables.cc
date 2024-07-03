@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/style_environment_variables.h"
 
+#include "base/containers/contains.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 namespace blink {
@@ -90,22 +91,43 @@ const AtomicString StyleEnvironmentVariables::GetVariableName(
     case UADefinedVariable::kKeyboardInsetHeight:
       return AtomicString("keyboard-inset-height");
     case UADefinedVariable::kTitlebarAreaX:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
       return AtomicString("titlebar-area-x");
     case UADefinedVariable::kTitlebarAreaY:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
       return AtomicString("titlebar-area-y");
     case UADefinedVariable::kTitlebarAreaWidth:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
       return AtomicString("titlebar-area-width");
     case UADefinedVariable::kTitlebarAreaHeight:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
       return AtomicString("titlebar-area-height");
 #if BUILDFLAG(OPERA_FEATURE_BLINK_BROWSER_COLORS)
+    case UADefinedVariable::kOperaAccentColor:
+      return AtomicString("-opera-accent-color");
+    case UADefinedVariable::kOperaAccentColorH:
+      return AtomicString("-opera-accent-color-h");
+    case UADefinedVariable::kOperaAccentColorS:
+      return AtomicString("-opera-accent-color-s");
+    case UADefinedVariable::kOperaAccentColorL:
+      return AtomicString("-opera-accent-color-l");
+    case UADefinedVariable::kOperaAccentColorR:
+      return AtomicString("-opera-accent-color-r");
+    case UADefinedVariable::kOperaAccentColorG:
+      return AtomicString("-opera-accent-color-g");
+    case UADefinedVariable::kOperaAccentColorB:
+      return AtomicString("-opera-accent-color-b");
+    case UADefinedVariable::kOperaBackgroundColor:
+      return AtomicString("-opera-background-color");
+    case UADefinedVariable::kOperaBackgroundColorH:
+      return AtomicString("-opera-background-color-h");
+    case UADefinedVariable::kOperaBackgroundColorS:
+      return AtomicString("-opera-background-color-s");
+    case UADefinedVariable::kOperaBackgroundColorL:
+      return AtomicString("-opera-background-color-l");
+    case UADefinedVariable::kOperaBackgroundColorR:
+      return AtomicString("-opera-background-color-r");
+    case UADefinedVariable::kOperaBackgroundColorG:
+      return AtomicString("-opera-background-color-g");
+    case UADefinedVariable::kOperaBackgroundColorB:
+      return AtomicString("-opera-background-color-b");
+    // For backward compatibility
     case UADefinedVariable::kOperaGxAccentColor:
       return AtomicString("-opera-gx-accent-color");
     case UADefinedVariable::kOperaGxAccentColorH:
@@ -147,22 +169,22 @@ const AtomicString StyleEnvironmentVariables::GetVariableName(
     const FeatureContext* feature_context) {
   switch (variable) {
     case UADefinedTwoDimensionalVariable::kViewportSegmentTop:
-      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled());
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
       return AtomicString("viewport-segment-top");
     case UADefinedTwoDimensionalVariable::kViewportSegmentRight:
-      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled());
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
       return AtomicString("viewport-segment-right");
     case UADefinedTwoDimensionalVariable::kViewportSegmentBottom:
-      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled());
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
       return AtomicString("viewport-segment-bottom");
     case UADefinedTwoDimensionalVariable::kViewportSegmentLeft:
-      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled());
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
       return AtomicString("viewport-segment-left");
     case UADefinedTwoDimensionalVariable::kViewportSegmentWidth:
-      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled());
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
       return AtomicString("viewport-segment-width");
     case UADefinedTwoDimensionalVariable::kViewportSegmentHeight:
-      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled());
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
       return AtomicString("viewport-segment-height");
     default:
       break;
@@ -252,8 +274,9 @@ void StyleEnvironmentVariables::SetVariable(
     UADefinedTwoDimensionalVariable variable,
     unsigned first_dimension,
     unsigned second_dimension,
-    const String& value) {
-  SetVariable(GetVariableName(variable, GetFeatureContext()), first_dimension,
+    const String& value,
+    const FeatureContext* feature_context) {
+  SetVariable(GetVariableName(variable, feature_context), first_dimension,
               second_dimension, value);
 }
 
@@ -263,8 +286,9 @@ void StyleEnvironmentVariables::RemoveVariable(UADefinedVariable variable) {
 }
 
 void StyleEnvironmentVariables::RemoveVariable(
-    UADefinedTwoDimensionalVariable variable) {
-  const AtomicString name = GetVariableName(variable, GetFeatureContext());
+    UADefinedTwoDimensionalVariable variable,
+    const FeatureContext* feature_context) {
+  const AtomicString name = GetVariableName(variable, feature_context);
   RemoveVariable(name);
 }
 
@@ -347,8 +371,8 @@ void StyleEnvironmentVariables::ParentInvalidatedVariable(
     const AtomicString& name) {
   // If we have not overridden the variable then we should invalidate it
   // locally.
-  if (data_.find(name) == data_.end() &&
-      two_dimension_data_.find(name) == two_dimension_data_.end()) {
+  if (!base::Contains(data_, name) &&
+      !base::Contains(two_dimension_data_, name)) {
     InvalidateVariable(name);
   }
 }

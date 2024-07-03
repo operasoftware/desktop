@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/view_transition_element_id.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/restriction_target_id.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/rrect_f.h"
 
@@ -30,8 +31,8 @@ class PropertyTreeState;
 class EffectPaintPropertyNode;
 
 class PLATFORM_EXPORT EffectPaintPropertyNodeOrAlias
-    : public PaintPropertyNode<EffectPaintPropertyNodeOrAlias,
-                               EffectPaintPropertyNode> {
+    : public PaintPropertyNodeBase<EffectPaintPropertyNodeOrAlias,
+                                   EffectPaintPropertyNode> {
  public:
   // Checks if the accumulated effect from |this| to |relative_to_state
   // .Effect()| has changed, at least significance of |change|, in the space of
@@ -47,13 +48,15 @@ class PLATFORM_EXPORT EffectPaintPropertyNodeOrAlias
       const PropertyTreeState& relative_to_state,
       const TransformPaintPropertyNodeOrAlias* transform_not_to_check) const;
 
+  // See PaintPropertyNode::ChangedSequenceNumber().
   void ClearChangedToRoot(int sequence_number) const;
 
  protected:
-  using PaintPropertyNode::PaintPropertyNode;
+  using PaintPropertyNodeBase::PaintPropertyNodeBase;
 };
 
-class EffectPaintPropertyNodeAlias : public EffectPaintPropertyNodeOrAlias {
+class EffectPaintPropertyNodeAlias final
+    : public EffectPaintPropertyNodeOrAlias {
  public:
   static scoped_refptr<EffectPaintPropertyNodeAlias> Create(
       const EffectPaintPropertyNodeOrAlias& parent) {
@@ -66,7 +69,7 @@ class EffectPaintPropertyNodeAlias : public EffectPaintPropertyNodeOrAlias {
       : EffectPaintPropertyNodeOrAlias(parent, kParentAlias) {}
 };
 
-class PLATFORM_EXPORT EffectPaintPropertyNode
+class PLATFORM_EXPORT EffectPaintPropertyNode final
     : public EffectPaintPropertyNodeOrAlias {
  public:
   struct AnimationState {
@@ -122,6 +125,9 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
     // the Viz process. This generated resource can be used as content for other
     // elements.
     viz::ViewTransitionElementResourceId view_transition_element_resource_id;
+
+    // Used to associate this effect node with its originating Element.
+    RestrictionTargetId restriction_target_id;
 
     // When set, the affected elements should avoid doing clipping for
     // optimization purposes (like off-screen clipping). This is set by view
@@ -189,19 +195,14 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
     return state_.output_clip.get();
   }
 
-  SkBlendMode BlendMode() const {
-    return state_.blend_mode;
-  }
-  float Opacity() const {
-    return state_.opacity;
-  }
-  const CompositorFilterOperations& Filter() const {
-    return state_.filter;
-  }
+  SkBlendMode BlendMode() const { return state_.blend_mode; }
+  float Opacity() const { return state_.opacity; }
+  const CompositorFilterOperations& Filter() const { return state_.filter; }
 
   const CompositorFilterOperations* BackdropFilter() const {
-    if (!state_.backdrop_filter_info)
+    if (!state_.backdrop_filter_info) {
       return nullptr;
+    }
     DCHECK(!state_.backdrop_filter_info->operations.IsEmpty());
     return &state_.backdrop_filter_info->operations;
   }
@@ -303,7 +304,7 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
   // is entirely empty.
   bool DrawsContent() const {
     return MayHaveFilter() || MayHaveBackdropEffect() ||
-           ViewTransitionElementId().valid();
+           ViewTransitionElementId().valid() || !ElementCaptureId()->is_zero();
   }
 
   CompositingReasons DirectCompositingReasonsForDebugging() const {
@@ -323,11 +324,15 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
     return state_.view_transition_element_resource_id;
   }
 
+  const RestrictionTargetId& ElementCaptureId() const {
+    return state_.restriction_target_id;
+  }
+
   bool SelfOrAncestorParticipatesInViewTransition() const {
     return state_.self_or_ancestor_participates_in_view_transition;
   }
 
-  std::unique_ptr<JSONObject> ToJSON() const;
+  std::unique_ptr<JSONObject> ToJSON() const final;
 
  private:
   EffectPaintPropertyNode(const EffectPaintPropertyNodeOrAlias* parent,

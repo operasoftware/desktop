@@ -80,6 +80,10 @@ bool WebCryptoResult::Cancelled() const {
   return cancel_->Cancelled();
 }
 
+ExecutionContext* WebCryptoResult::GetExecutionContext() const {
+  return impl_->GetExecutionContext();
+}
+
 WebCryptoResult::WebCryptoResult(CryptoResult* impl,
                                  scoped_refptr<CryptoResultCancel> cancel)
     : impl_(impl), cancel_(std::move(cancel)) {

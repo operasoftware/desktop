@@ -8,17 +8,18 @@
 
 #include "base/ranges/algorithm.h"
 #include "media/base/video_encoder.h"
+#include "media/media_buildflags.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_platform_sw_video_supported_formats.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder_adapter.h"
 #include "third_party/blink/renderer/platform/webrtc/webrtc_video_utils.h"
 
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 #if BUILDFLAG(IS_MAC)
 #include "media/video/vt_video_encoder.h"
 #elif BUILDFLAG(IS_WIN)
 #include "media/video/wmf_video_encoder.h"
 #endif
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 
 namespace blink {
 
@@ -61,22 +62,20 @@ RTCPlatformSWVideoEncoderFactory::QueryCodecSupport(
   return {/*is_supported=*/false, /*is_power_efficient=*/false};
 }
 
-std::unique_ptr<webrtc::VideoEncoder>
-RTCPlatformSWVideoEncoderFactory::CreateVideoEncoder(
+std::unique_ptr<webrtc::VideoEncoder> RTCPlatformSWVideoEncoderFactory::Create(
+    const webrtc::Environment& env,
     const webrtc::SdpVideoFormat& format) {
-  std::unique_ptr<media::VideoEncoder> encoder;
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 #if BUILDFLAG(IS_MAC)
-  encoder = std::make_unique<media::VTVideoEncoder>();
+  auto encoder = std::make_unique<media::VTVideoEncoder>();
 #elif BUILDFLAG(IS_WIN)
-  encoder = std::make_unique<media::WMFVideoEncoder>();
+  auto encoder = std::make_unique<media::WMFVideoEncoder>();
 #endif
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
-  if (!encoder)
-    return nullptr;
-
   return std::make_unique<RTCVideoEncoderAdapter>(
       WebRtcVideoFormatToMediaVideoCodecProfile(format), std::move(encoder));
+#else
+  return nullptr;
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 }
 
 }  // namespace blink

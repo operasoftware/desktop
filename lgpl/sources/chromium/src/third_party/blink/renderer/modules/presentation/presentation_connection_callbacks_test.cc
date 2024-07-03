@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/modules/presentation/presentation_connection.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_request.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 
 constexpr char kPresentationUrl[] = "https://example.com";
@@ -44,10 +45,12 @@ static PresentationRequest* MakeRequest(V8TestingScope* scope) {
 }  // namespace
 
 TEST(PresentationConnectionCallbacksTest, HandleSuccess) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   MockFunctionScope funcs(scope.GetScriptState());
   auto* resolver =
-      MakeGarbageCollected<ScriptPromiseResolver>(scope.GetScriptState());
+      MakeGarbageCollected<ScriptPromiseResolver<PresentationConnection>>(
+          scope.GetScriptState());
   resolver->Promise().Then(funcs.ExpectCall(), funcs.ExpectNoCall());
 
   PresentationConnectionCallbacks callbacks(resolver, MakeRequest(&scope));
@@ -75,12 +78,14 @@ TEST(PresentationConnectionCallbacksTest, HandleSuccess) {
 }
 
 TEST(PresentationConnectionCallbacksTest, HandleReconnect) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   MockFunctionScope funcs(scope.GetScriptState());
   PresentationInfoPtr info = PresentationInfo::New(
       url_test_helpers::ToKURL(kPresentationUrl), kPresentationId);
   auto* resolver =
-      MakeGarbageCollected<ScriptPromiseResolver>(scope.GetScriptState());
+      MakeGarbageCollected<ScriptPromiseResolver<PresentationConnection>>(
+          scope.GetScriptState());
   resolver->Promise().Then(funcs.ExpectCall(), funcs.ExpectNoCall());
 
   auto* connection = ControllerPresentationConnection::Take(
@@ -111,10 +116,12 @@ TEST(PresentationConnectionCallbacksTest, HandleReconnect) {
 }
 
 TEST(PresentationConnectionCallbacksTest, HandleError) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   MockFunctionScope funcs(scope.GetScriptState());
   auto* resolver =
-      MakeGarbageCollected<ScriptPromiseResolver>(scope.GetScriptState());
+      MakeGarbageCollected<ScriptPromiseResolver<PresentationConnection>>(
+          scope.GetScriptState());
   resolver->Promise().Then(funcs.ExpectNoCall(), funcs.ExpectCall());
 
   PresentationConnectionCallbacks callbacks(resolver, MakeRequest(&scope));

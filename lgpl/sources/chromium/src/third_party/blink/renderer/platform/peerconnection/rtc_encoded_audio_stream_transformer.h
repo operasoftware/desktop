@@ -11,12 +11,12 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 #include "third_party/webrtc/api/scoped_refptr.h"
 
 namespace base {
@@ -61,13 +61,15 @@ class PLATFORM_EXPORT RTCEncodedAudioStreamTransformer {
     void SendFrameToSink(
         std::unique_ptr<webrtc::TransformableAudioFrameInterface> frame);
 
+    void StartShortCircuiting();
+
    private:
     explicit Broker(RTCEncodedAudioStreamTransformer* transformer_);
     void ClearTransformer();
     friend class RTCEncodedAudioStreamTransformer;
 
     base::Lock transformer_lock_;
-    RTCEncodedAudioStreamTransformer* transformer_
+    raw_ptr<RTCEncodedAudioStreamTransformer> transformer_
         GUARDED_BY(transformer_lock_);
   };
 
@@ -120,6 +122,8 @@ class PLATFORM_EXPORT RTCEncodedAudioStreamTransformer {
 
   scoped_refptr<Broker> GetBroker();
 
+  void StartShortCircuiting();
+
  private:
   const scoped_refptr<Broker> broker_;
   const rtc::scoped_refptr<webrtc::FrameTransformerInterface> delegate_;
@@ -128,6 +132,7 @@ class PLATFORM_EXPORT RTCEncodedAudioStreamTransformer {
       GUARDED_BY(sink_lock_);
   base::Lock source_lock_;
   TransformerCallback transformer_callback_ GUARDED_BY(source_lock_);
+  bool short_circuit_ GUARDED_BY(sink_lock_) = false;
 };
 
 }  // namespace blink

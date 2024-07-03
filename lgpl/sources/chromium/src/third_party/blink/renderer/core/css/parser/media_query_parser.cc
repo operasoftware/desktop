@@ -4,12 +4,14 @@
 
 #include "third_party/blink/renderer/core/css/parser/media_query_parser.h"
 
+#include "third_party/blink/renderer/core/css/media_feature_names.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/media_type_names.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -37,6 +39,7 @@ class MediaQueryFeatureSet : public MediaQueryParser::FeatureSet {
         feature == media_feature_names::kMinBlockSizeMediaFeature ||
         feature == media_feature_names::kMaxBlockSizeMediaFeature ||
         feature == media_feature_names::kStuckMediaFeature ||
+        feature == media_feature_names::kSnappedMediaFeature ||
         CSSVariableParser::IsValidVariableName(feature)) {
       return false;
     }
@@ -77,9 +80,8 @@ class MediaQueryFeatureSet : public MediaQueryParser::FeatureSet {
             RuntimeEnabledFeatures::CSSUpdateMediaFeatureEnabled()) ||
            (feature == media_feature_names::kPrefersReducedDataMediaFeature &&
             RuntimeEnabledFeatures::PrefersReducedDataEnabled()) ||
-           (feature ==
-                media_feature_names::kPrefersReducedTransparencyMediaFeature &&
-            RuntimeEnabledFeatures::PrefersReducedTransparencyEnabled()) ||
+           feature ==
+               media_feature_names::kPrefersReducedTransparencyMediaFeature ||
            (feature == media_feature_names::kForcedColorsMediaFeature &&
             RuntimeEnabledFeatures::ForcedColorsEnabled()) ||
            (feature == media_feature_names::kNavigationControlsMediaFeature &&
@@ -89,20 +91,28 @@ class MediaQueryFeatureSet : public MediaQueryParser::FeatureSet {
                 execution_context)) ||
            (feature ==
                 media_feature_names::kHorizontalViewportSegmentsMediaFeature &&
-            RuntimeEnabledFeatures::ViewportSegmentsEnabled()) ||
+            RuntimeEnabledFeatures::ViewportSegmentsEnabled(
+                execution_context)) ||
            (feature ==
                 media_feature_names::kVerticalViewportSegmentsMediaFeature &&
-            RuntimeEnabledFeatures::ViewportSegmentsEnabled()) ||
+            RuntimeEnabledFeatures::ViewportSegmentsEnabled(
+                execution_context)) ||
            (feature == media_feature_names::kDevicePostureMediaFeature &&
-            RuntimeEnabledFeatures::DevicePostureEnabled()) ||
+            RuntimeEnabledFeatures::DevicePostureEnabled(execution_context)) ||
            (feature == media_feature_names::kOverflowInlineMediaFeature &&
             RuntimeEnabledFeatures::CSSOverflowMediaFeaturesEnabled()) ||
            (feature == media_feature_names::kOverflowBlockMediaFeature &&
             RuntimeEnabledFeatures::CSSOverflowMediaFeaturesEnabled()) ||
            (feature == media_feature_names::kInvertedColorsMediaFeature &&
             RuntimeEnabledFeatures::InvertedColorsEnabled()) ||
-           (CSSVariableParser::IsValidVariableName(feature) &&
-            RuntimeEnabledFeatures::CSSStyleQueriesBooleanEnabled());
+           CSSVariableParser::IsValidVariableName(feature) ||
+           feature == media_feature_names::kScriptingMediaFeature ||
+           (RuntimeEnabledFeatures::
+                DesktopPWAsAdditionalWindowingControlsEnabled() &&
+            feature == media_feature_names::kDisplayStateMediaFeature) ||
+           (RuntimeEnabledFeatures::
+                DesktopPWAsAdditionalWindowingControlsEnabled() &&
+            feature == media_feature_names::kResizableMediaFeature);
   }
 
   bool IsCaseSensitive(const String& feature) const override { return false; }
@@ -158,7 +168,10 @@ MediaQueryParser::MediaQueryParser(ParserType parser_type,
       syntax_level_(syntax_level),
       fake_context_(*MakeGarbageCollected<CSSParserContext>(
           kHTMLStandardMode,
-          SecureContextMode::kInsecureContext)) {}
+          SecureContextMode::kInsecureContext,
+          DynamicTo<LocalDOMWindow>(execution_context)
+              ? DynamicTo<LocalDOMWindow>(execution_context)->document()
+              : nullptr)) {}
 
 MediaQueryParser::~MediaQueryParser() = default;
 

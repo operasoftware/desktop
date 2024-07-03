@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/eval.h"
 #include "libavutil/imgutils.h"
@@ -149,10 +150,10 @@ FF_ENABLE_DEPRECATION_WARNINGS
     w = dw; h = dh; x1[0] = dx1; y1[0] = dy1; x2[0] = dx2; y2[0] = dy2;
 
     x1[0] = av_clip(x1[0], 0, inlink->w - 1);
-    y1[0] = av_clip(y1[0], 0, inlink->w - 1);
+    y1[0] = av_clip(y1[0], 0, inlink->h - 1);
 
     x2[0] = av_clip(x2[0], 0, inlink->w - 1);
-    y2[0] = av_clip(y2[0], 0, inlink->w - 1);
+    y2[0] = av_clip(y2[0], 0, inlink->h - 1);
 
     ah[1] = ah[2] = AV_CEIL_RSHIFT(h, s->desc->log2_chroma_h);
     ah[0] = ah[3] = h;
@@ -172,15 +173,19 @@ FF_ENABLE_DEPRECATION_WARNINGS
     lw[1] = lw[2] = AV_CEIL_RSHIFT(inlink->w, s->desc->log2_chroma_w);
     lw[0] = lw[3] = inlink->w;
 
-    x1[1] = x1[2] = AV_CEIL_RSHIFT(x1[0], s->desc->log2_chroma_w);
+    x1[1] = x1[2] = (x1[0] >> s->desc->log2_chroma_w);
     x1[0] = x1[3] = x1[0];
-    y1[1] = y1[2] = AV_CEIL_RSHIFT(y1[0], s->desc->log2_chroma_h);
+    y1[1] = y1[2] = (y1[0] >> s->desc->log2_chroma_h);
     y1[0] = y1[3] = y1[0];
 
-    x2[1] = x2[2] = AV_CEIL_RSHIFT(x2[0], s->desc->log2_chroma_w);
+    x2[1] = x2[2] = (x2[0] >> s->desc->log2_chroma_w);
     x2[0] = x2[3] = x2[0];
-    y2[1] = y2[2] = AV_CEIL_RSHIFT(y2[0], s->desc->log2_chroma_h);
+    y2[1] = y2[2] = (y2[0] >> s->desc->log2_chroma_h);
     y2[0] = y2[3] = y2[0];
+
+
+    av_assert0(FFMAX(x1[1], x2[1]) + pw[1] <= lw[1]);
+    av_assert0(FFMAX(y1[1], y2[1]) + ph[1] <= lh[1]);
 
     for (p = 0; p < s->nb_planes; p++) {
         if (ph[p] == ah[p] && pw[p] == aw[p]) {
@@ -237,13 +242,6 @@ static const AVFilterPad inputs[] = {
     },
 };
 
-static const AVFilterPad outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
 const AVFilter ff_vf_swaprect = {
     .name          = "swaprect",
     .description   = NULL_IF_CONFIG_SMALL("Swap 2 rectangular objects in video."),
@@ -251,7 +249,7 @@ const AVFilter ff_vf_swaprect = {
     .priv_class    = &swaprect_class,
     .uninit        = uninit,
     FILTER_INPUTS(inputs),
-    FILTER_OUTPUTS(outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     FILTER_QUERY_FUNC(query_formats),
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
     .process_command = ff_filter_process_command,

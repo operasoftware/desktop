@@ -10,7 +10,7 @@ manage changelists and try jobs associated with them.
 import collections
 import logging
 import re
-from typing import Literal, Mapping, NamedTuple, Set
+from typing import Literal, Mapping, NamedTuple, Optional, Set
 
 from blinkpy.common.checkout.git import Git
 from blinkpy.common.net.results_fetcher import filter_latest_builds
@@ -49,6 +49,18 @@ class TryJobStatus(NamedTuple):
 BuildStatuses = Mapping[Build, TryJobStatus]
 
 
+# TODO(crbug.com/41483974): Replace `issue_number` and `patchset` paired
+# arguments in `GitCL.*` with this more meaningful type.
+class CLRevisionID(NamedTuple):
+    """An identifier for a Gerrit CL patchset."""
+    issue: int
+    patchset: Optional[int] = None
+
+    def __str__(self) -> str:
+        base_url = f'https://crrev.com/c/{self.issue}'
+        return f'{base_url}/{self.patchset}' if self.patchset else base_url
+
+
 class CLStatus(NamedTuple):
     """The current status of a particular CL.
 
@@ -59,7 +71,7 @@ class CLStatus(NamedTuple):
     try_job_results: BuildStatuses
 
 
-class GitCL(object):
+class GitCL:
     def __init__(self,
                  host,
                  auth_refresh_token_json=None,
@@ -91,6 +103,12 @@ class GitCL(object):
         # running on Swarming bots with local git cache.
         return self._host.executive.run_command(
             command, cwd=self._cwd, return_stderr=False, ignore_stderr=True)
+
+    def close(self, issue: Optional[int] = None):
+        command = ['set-close']
+        if issue:
+            command.append(f'--issue={issue}')
+        self.run(command)
 
     def trigger_try_jobs(self, builders, bucket=None):
         """Triggers try jobs on the given builders.
@@ -132,8 +150,11 @@ class GitCL(object):
             return output[output.index('number:') + 1]
         return 'None'
 
-    def _get_cl_status(self):
-        return self.run(['status', '--field=status']).strip()
+    def get_cl_status(self, issue: Optional[int] = None) -> str:
+        command = ['status', '--field=status']
+        if issue:
+            command.append(f'--issue={issue}')
+        return self.run(command).strip()
 
     def _get_latest_patchset(self):
         return self.run(['status', '--field=patch']).strip()
@@ -152,7 +173,7 @@ class GitCL(object):
         """
 
         def finished_try_job_results_or_none():
-            cl_status = self._get_cl_status()
+            cl_status = self.get_cl_status()
             _log.debug('Fetched CL status: %s', cl_status)
             issue_number = self.get_issue_number()
             try_job_results = self.latest_try_jobs(
@@ -170,29 +191,32 @@ class GitCL(object):
             message=' for try jobs')
 
     def wait_for_closed_status(self,
-                               poll_delay_seconds=2 * 60,
-                               timeout_seconds=30 * 60):
+                               poll_delay_seconds: float = 2 * 60,
+                               timeout_seconds: float = 30 * 60,
+                               issue: Optional[int] = None,
+                               start: Optional[float] = None) -> Optional[str]:
         """Waits until git cl reports that the current CL is closed."""
 
         def closed_status_or_none():
-            status = self._get_cl_status()
+            status = self.get_cl_status(issue)
             _log.debug('CL status is: %s', status)
             if status == 'closed':
                 self._host.print_('CL is closed.')
                 return status
             return None
 
-        return self._wait_for(
-            closed_status_or_none,
-            poll_delay_seconds,
-            timeout_seconds,
-            message=' for closed status')
+        return self._wait_for(closed_status_or_none,
+                              poll_delay_seconds,
+                              timeout_seconds,
+                              message=' for closed status',
+                              start=start)
 
     def _wait_for(self,
                   poll_function,
                   poll_delay_seconds,
                   timeout_seconds,
-                  message=''):
+                  message='',
+                  start: Optional[float] = None):
         """Waits for the given poll_function to return something other than None.
 
         Args:
@@ -201,14 +225,22 @@ class GitCL(object):
             poll_delay_seconds: Time to wait between fetching results.
             timeout_seconds: Time to wait before aborting.
             message: Message to print indicate what is being waited for.
+            start: A UNIX-epoch timestamp that each polled duration should be
+                calculated against. Defaults to the time of the call. This
+                method will poll at least once, so passing an already timed-out
+                start is safe.
 
         Returns:
             The value returned by poll_function, or None on timeout.
         """
-        start = self._host.time()
-        self._host.print_(
-            'Waiting%s, timeout: %d seconds.' % (message, timeout_seconds))
+        if start is None:
+            start = self._host.time()
+        self._host.print_('Waiting%s, timeout: %d seconds.' %
+                          (message, timeout_seconds))
         while (self._host.time() - start) < timeout_seconds:
+            # TODO(crbug.com/40631540): The poll delay is actually twice what is
+            # documented because we `sleep()` twice per loop. Get rid of one and
+            # fix the tests that broke.
             self._host.sleep(poll_delay_seconds)
             value = poll_function()
             if value is not None:
@@ -217,7 +249,8 @@ class GitCL(object):
                               (message, self._host.time() - start))
             self._host.sleep(poll_delay_seconds)
         self._host.print_('Timed out waiting%s.' % message)
-        return None
+        # Poll one more time in case the result recently changed.
+        return poll_function()
 
     def latest_try_jobs(self,
                         issue_number=None,
@@ -260,11 +293,15 @@ class GitCL(object):
         return {b: s for b, s in try_results.items() if b in latest_builds}
 
     @staticmethod
-    def filter_infra_failed(build_statuses: BuildStatuses) -> Set[Build]:
+    def filter_incomplete(build_statuses: BuildStatuses) -> Set[Build]:
+        incomplete_statuses = {
+            TryJobStatus.from_bb_status('INFRA_FAILURE'),
+            TryJobStatus.from_bb_status('CANCELED'),
+        }
         return {
             build
             for build, status in build_statuses.items()
-            if status == TryJobStatus.from_bb_status('INFRA_FAILURE')
+            if status in incomplete_statuses
         }
 
     def try_job_results(self,

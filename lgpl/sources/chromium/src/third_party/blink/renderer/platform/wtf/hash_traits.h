@@ -24,13 +24,13 @@
 
 #include <string.h>
 
+#include <concepts>
 #include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
 
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_table_deleted_value_type.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -72,6 +72,8 @@ namespace WTF {
 //
 template <typename T>
 struct HashTraits;
+
+class String;
 
 namespace internal {
 
@@ -177,15 +179,6 @@ struct GenericHashTraitsBase {
   static constexpr unsigned kMinimumTableSize = 8;
 #endif
 
-  // When a hash table backing store is traced, its elements will be
-  // traced if their class type has a trace method. However, weak-referenced
-  // elements should not be traced then, but handled by the weak processing
-  // phase that follows.
-  template <typename U = void>
-  struct IsTraceableInCollection {
-    static constexpr bool value = IsTraceable<T>::value && !IsWeak<T>::value;
-  };
-
   // The NeedsToForbidGCOnMove flag is used to make the hash table move
   // operations safe when GC is enabled: if a move constructor invokes
   // an allocation triggering the GC then it should be invoked within GC
@@ -194,7 +187,8 @@ struct GenericHashTraitsBase {
   struct NeedsToForbidGCOnMove {
     // TODO(yutak): Consider using of std:::is_trivially_move_constructible
     // when it is accessible.
-    static constexpr bool value = !std::is_pod<T>::value;
+    static constexpr bool value =
+        !std::is_trivial_v<T> || !std::is_standard_layout_v<T>;
   };
 
   // The kCanTraceConcurrently value is used by Oilpan concurrent marking. Only
@@ -225,13 +219,12 @@ struct IntHashTraits
 
 // Default traits for an enum type.  0 is very popular, and -1 is also popular.
 // So we use -128 and -127.
-template <typename T, auto empty_value = -128, auto deleted_value = -127>
-struct EnumHashTraits
-    : internal::IntOrEnumHashTraits<T, empty_value, deleted_value> {
+template <typename T>
+struct EnumHashTraits : internal::IntOrEnumHashTraits<T, -128, -127> {
   static_assert(std::is_enum_v<T>);
 };
 
-template <typename T, typename Enable = void>
+template <typename T>
 struct GenericHashTraits : internal::GenericHashTraitsBase<T> {
   static_assert(!std::is_integral_v<T>);
   static_assert(!std::is_enum_v<T>);
@@ -239,16 +232,16 @@ struct GenericHashTraits : internal::GenericHashTraitsBase<T> {
 };
 
 template <typename T>
-struct GenericHashTraits<T, std::enable_if_t<std::is_integral_v<T>>>
-    : IntHashTraits<T> {};
+  requires std::integral<T>
+struct GenericHashTraits<T> : IntHashTraits<T> {};
 
 template <typename T>
-struct GenericHashTraits<T, std::enable_if_t<std::is_enum_v<T>>>
-    : EnumHashTraits<T> {};
+  requires std::is_enum_v<T>
+struct GenericHashTraits<T> : EnumHashTraits<T> {};
 
 template <typename T>
-struct GenericHashTraits<T, std::enable_if_t<std::is_floating_point_v<T>>>
-    : internal::GenericHashTraitsBase<T> {
+  requires std::floating_point<T>
+struct GenericHashTraits<T> : internal::GenericHashTraitsBase<T> {
   static unsigned GetHash(T key) { return HashFloat(key); }
   static bool Equal(T a, T b) { return FloatEqualForHash(a, b); }
   static constexpr T EmptyValue() { return std::numeric_limits<T>::infinity(); }
@@ -527,11 +520,6 @@ struct OneFieldHashTraits : GenericHashTraits<T> {
   static constexpr unsigned kMinimumTableSize = FieldTraits::kMinimumTableSize;
 
   template <typename U = void>
-  struct IsTraceableInCollection {
-    static const bool value = IsTraceableInCollectionTrait<FieldTraits>::value;
-  };
-
-  template <typename U = void>
   struct NeedsToForbidGCOnMove {
     static const bool value =
         FieldTraits::template NeedsToForbidGCOnMove<>::value;
@@ -574,13 +562,6 @@ struct TwoFieldsHashTraits : OneFieldHashTraits<T, first_field, FirstTraits> {
 
   // ConstructDeletedValue(), IsDeletedValue(), kMinimumTableSize delegate to
   // the first field, inherited from OneFieldHashTraits.
-
-  template <typename U = void>
-  struct IsTraceableInCollection {
-    static const bool value =
-        IsTraceableInCollectionTrait<FirstTraits>::value ||
-        IsTraceableInCollectionTrait<SecondTraits>::value;
-  };
 
   template <typename U = void>
   struct NeedsToForbidGCOnMove {

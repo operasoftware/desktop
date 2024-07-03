@@ -16,30 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "codec_id.h"
-
 #include "vulkan_video.h"
-
-const FFVkCodecMap ff_vk_codec_map[AV_CODEC_ID_FIRST_AUDIO] = {
-    [AV_CODEC_ID_H264] = {
-                           0,
-                           0,
-                           FF_VK_EXT_VIDEO_DECODE_H264,
-                           VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR,
-    },
-    [AV_CODEC_ID_HEVC] = {
-                           0,
-                           0,
-                           FF_VK_EXT_VIDEO_DECODE_H265,
-                           VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR
-    },
-    [AV_CODEC_ID_AV1] = {
-                           0,
-                           0,
-                           FF_VK_EXT_VIDEO_DECODE_AV1,
-                           0x01000000 /* TODO fix this */
-    },
-};
 
 #define ASPECT_2PLANE (VK_IMAGE_ASPECT_PLANE_0_BIT | VK_IMAGE_ASPECT_PLANE_1_BIT)
 #define ASPECT_3PLANE (VK_IMAGE_ASPECT_PLANE_0_BIT | VK_IMAGE_ASPECT_PLANE_1_BIT | VK_IMAGE_ASPECT_PLANE_2_BIT)
@@ -154,6 +131,51 @@ VkVideoComponentBitDepthFlagBitsKHR ff_vk_depth_from_av_depth(int depth)
     return VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR;
 }
 
+int ff_vk_h264_level_to_av(StdVideoH264LevelIdc level)
+{
+    switch (level) {
+    case STD_VIDEO_H264_LEVEL_IDC_1_0: return 10;
+    case STD_VIDEO_H264_LEVEL_IDC_1_1: return 11;
+    case STD_VIDEO_H264_LEVEL_IDC_1_2: return 12;
+    case STD_VIDEO_H264_LEVEL_IDC_1_3: return 13;
+    case STD_VIDEO_H264_LEVEL_IDC_2_0: return 20;
+    case STD_VIDEO_H264_LEVEL_IDC_2_1: return 21;
+    case STD_VIDEO_H264_LEVEL_IDC_2_2: return 22;
+    case STD_VIDEO_H264_LEVEL_IDC_3_0: return 30;
+    case STD_VIDEO_H264_LEVEL_IDC_3_1: return 31;
+    case STD_VIDEO_H264_LEVEL_IDC_3_2: return 32;
+    case STD_VIDEO_H264_LEVEL_IDC_4_0: return 40;
+    case STD_VIDEO_H264_LEVEL_IDC_4_1: return 41;
+    case STD_VIDEO_H264_LEVEL_IDC_4_2: return 42;
+    case STD_VIDEO_H264_LEVEL_IDC_5_0: return 50;
+    case STD_VIDEO_H264_LEVEL_IDC_5_1: return 51;
+    case STD_VIDEO_H264_LEVEL_IDC_5_2: return 52;
+    case STD_VIDEO_H264_LEVEL_IDC_6_0: return 60;
+    case STD_VIDEO_H264_LEVEL_IDC_6_1: return 61;
+    default:
+    case STD_VIDEO_H264_LEVEL_IDC_6_2: return 62;
+    }
+}
+
+int ff_vk_h265_level_to_av(StdVideoH265LevelIdc level)
+{
+    switch (level) {
+    case STD_VIDEO_H265_LEVEL_IDC_1_0: return 10;
+    case STD_VIDEO_H265_LEVEL_IDC_2_0: return 20;
+    case STD_VIDEO_H265_LEVEL_IDC_2_1: return 21;
+    case STD_VIDEO_H265_LEVEL_IDC_3_0: return 30;
+    case STD_VIDEO_H265_LEVEL_IDC_3_1: return 31;
+    case STD_VIDEO_H265_LEVEL_IDC_4_0: return 40;
+    case STD_VIDEO_H265_LEVEL_IDC_4_1: return 41;
+    case STD_VIDEO_H265_LEVEL_IDC_5_0: return 50;
+    case STD_VIDEO_H265_LEVEL_IDC_5_1: return 51;
+    case STD_VIDEO_H265_LEVEL_IDC_6_0: return 60;
+    case STD_VIDEO_H265_LEVEL_IDC_6_1: return 61;
+    default:
+    case STD_VIDEO_H265_LEVEL_IDC_6_2: return 62;
+    }
+}
+
 static void free_data_buf(void *opaque, uint8_t *data)
 {
     FFVulkanContext *ctx = opaque;
@@ -242,7 +264,7 @@ av_cold void ff_vk_video_common_uninit(FFVulkanContext *s,
     if (common->session) {
         vk->DestroyVideoSessionKHR(s->hwctx->act_dev, common->session,
                                    s->hwctx->alloc);
-        common->session = NULL;
+        common->session = VK_NULL_HANDLE;
     }
 
     if (common->nb_mem && common->mem)
@@ -261,7 +283,6 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
     int err;
     VkResult ret;
     FFVulkanFunctions *vk = &s->vkfn;
-    VkMemoryRequirements2 *mem_req = NULL;
     VkVideoSessionMemoryRequirementsKHR *mem = NULL;
     VkBindVideoSessionMemoryInfoKHR *bind_mem = NULL;
 
@@ -292,11 +313,6 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
         err = AVERROR(ENOMEM);
         goto fail;
     }
-    mem_req = av_mallocz(sizeof(*mem_req)*common->nb_mem);
-    if (!mem_req) {
-        err = AVERROR(ENOMEM);
-        goto fail;
-    }
     bind_mem = av_mallocz(sizeof(*bind_mem)*common->nb_mem);
     if (!bind_mem) {
         err = AVERROR(ENOMEM);
@@ -305,12 +321,8 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
 
     /* Set the needed fields to get the memory requirements */
     for (int i = 0; i < common->nb_mem; i++) {
-        mem_req[i] = (VkMemoryRequirements2) {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
-        };
         mem[i] = (VkVideoSessionMemoryRequirementsKHR) {
             .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_MEMORY_REQUIREMENTS_KHR,
-            .memoryRequirements = mem_req[i].memoryRequirements,
         };
     }
 
@@ -339,7 +351,7 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
             .memorySize = mem[i].memoryRequirements.size,
         };
 
-        av_log(log, AV_LOG_VERBOSE, "Allocating %"SIZE_SPECIFIER" bytes in bind index %i for video session\n",
+        av_log(log, AV_LOG_VERBOSE, "Allocating %"PRIu64" bytes in bind index %i for video session\n",
                bind_mem[i].memorySize, bind_mem[i].memoryBindIndex);
     }
 
@@ -352,14 +364,12 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
     }
 
     av_freep(&mem);
-    av_freep(&mem_req);
     av_freep(&bind_mem);
 
     return 0;
 
 fail:
     av_freep(&mem);
-    av_freep(&mem_req);
     av_freep(&bind_mem);
 
     ff_vk_video_common_uninit(s, common);

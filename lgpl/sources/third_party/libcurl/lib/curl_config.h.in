@@ -18,20 +18,35 @@
 /* disable alt-svc */
 #undef CURL_DISABLE_ALTSVC
 
+/* to disable AWS sig support */
+#undef CURL_DISABLE_AWS
+
+/* to disable basic authentication */
+#undef CURL_DISABLE_BASIC_AUTH
+
+/* to disable bearer authentication */
+#undef CURL_DISABLE_BEARER_AUTH
+
+/* disable local binding support */
+#undef CURL_DISABLE_BINDLOCAL
+
 /* to disable cookies support */
 #undef CURL_DISABLE_COOKIES
 
-/* to disable cryptographic authentication */
-#undef CURL_DISABLE_CRYPTO_AUTH
-
 /* to disable DICT */
 #undef CURL_DISABLE_DICT
+
+/* to disable digest authentication */
+#undef CURL_DISABLE_DIGEST_AUTH
 
 /* disable DoH */
 #undef CURL_DISABLE_DOH
 
 /* to disable FILE */
 #undef CURL_DISABLE_FILE
+
+/* disable form API */
+#undef CURL_DISABLE_FORM_API
 
 /* to disable FTP */
 #undef CURL_DISABLE_FTP
@@ -57,6 +72,9 @@
 /* to disable IMAP */
 #undef CURL_DISABLE_IMAP
 
+/* to disable kerberos authentication */
+#undef CURL_DISABLE_KERBEROS_AUTH
+
 /* to disable LDAP */
 #undef CURL_DISABLE_LDAP
 
@@ -71,6 +89,9 @@
 
 /* to disable MQTT */
 #undef CURL_DISABLE_MQTT
+
+/* to disable negotiate authentication */
+#undef CURL_DISABLE_NEGOTIATE_AUTH
 
 /* disable netrc parsing */
 #undef CURL_DISABLE_NETRC
@@ -129,9 +150,6 @@
 /* enable debug build options */
 #undef DEBUGBUILD
 
-/* your Entropy Gathering Daemon socket pathname */
-#undef EGD_SOCKET
-
 /* Define if you want to enable IPv6 support */
 #undef ENABLE_IPV6
 
@@ -141,17 +159,20 @@
 /* Define to 1 if you have the alarm function. */
 #undef HAVE_ALARM
 
+/* Define to 1 if you have the `arc4random' function. */
+#undef HAVE_ARC4RANDOM
+
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #undef HAVE_ARPA_INET_H
 
 /* Define to 1 if you have the <arpa/tftp.h> header file. */
 #undef HAVE_ARPA_TFTP_H
 
-/* Define to 1 if you have the <assert.h> header file. */
-#undef HAVE_ASSERT_H
-
 /* Define to 1 if you have _Atomic support. */
 #undef HAVE_ATOMIC
+
+/* Define to 1 if using AWS-LC. */
+#undef HAVE_AWSLC
 
 /* Define to 1 if you have the basename function. */
 #undef HAVE_BASENAME
@@ -173,6 +194,10 @@
 
 /* Define to 1 if you have the clock_gettime function and monotonic timer. */
 #undef HAVE_CLOCK_GETTIME_MONOTONIC
+
+/* Define to 1 if you have the clock_gettime function and raw monotonic timer.
+   */
+#undef HAVE_CLOCK_GETTIME_MONOTONIC_RAW
 
 /* Define to 1 if you have the closesocket function. */
 #undef HAVE_CLOSESOCKET
@@ -196,9 +221,6 @@
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #undef HAVE_DLFCN_H
 
-/* Define to 1 if you have the <errno.h> header file. */
-#undef HAVE_ERRNO_H
-
 /* Define to 1 if you have the <err.h> header file. */
 #undef HAVE_ERR_H
 
@@ -216,6 +238,9 @@
 
 /* Define to 1 if you have the `fnmatch' function. */
 #undef HAVE_FNMATCH
+
+/* Define to 1 if you have the `fork' function. */
+#undef HAVE_FORK
 
 /* Define to 1 if you have the freeaddrinfo function. */
 #undef HAVE_FREEADDRINFO
@@ -359,6 +384,9 @@
 /* Define to 1 if you have the ldap.h header file. */
 #undef HAVE_LDAP_H
 
+/* Define to 1 if you have the `ldap_init_fd' function. */
+#undef HAVE_LDAP_INIT_FD
+
 /* Use LDAPS implementation */
 #undef HAVE_LDAP_SSL
 
@@ -388,12 +416,6 @@
 
 /* Define to 1 if you have the `ssh2' library (-lssh2). */
 #undef HAVE_LIBSSH2
-
-/* Define to 1 if you have the <libssh2.h> header file. */
-#undef HAVE_LIBSSH2_H
-
-/* Define to 1 if you have the <libssh/libssh.h> header file. */
-#undef HAVE_LIBSSH_LIBSSH_H
 
 /* Define to 1 if you have the `ssl' library (-lssl). */
 #undef HAVE_LIBSSL
@@ -493,9 +515,6 @@
 /* Define to 1 if you have the `pipe' function. */
 #undef HAVE_PIPE
 
-/* if you have the PK11_CreateManagedGenericObject function */
-#undef HAVE_PK11_CREATEMANAGEDGENERICOBJECT
-
 /* If you have a fine poll */
 #undef HAVE_POLL_FINE
 
@@ -519,9 +538,6 @@
 
 /* Define to 1 if you have the <quiche.h> header file. */
 #undef HAVE_QUICHE_H
-
-/* Define to 1 if you have the `RAND_egd' function. */
-#undef HAVE_RAND_EGD
 
 /* Define to 1 if you have the recv function. */
 #undef HAVE_RECV
@@ -568,6 +584,9 @@
 /* Define to 1 if you have the sigsetjmp function or macro. */
 #undef HAVE_SIGSETJMP
 
+/* Define to 1 if you have the `snprintf' function. */
+#undef HAVE_SNPRINTF
+
 /* Define to 1 if struct sockaddr_in6 has the sin6_scope_id member */
 #undef HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID
 
@@ -585,6 +604,9 @@
 
 /* Define to 1 if you have the <ssl.h> header file. */
 #undef HAVE_SSL_H
+
+/* Define to 1 if you have the `SSL_set0_wbio' function. */
+#undef HAVE_SSL_SET0_WBIO
 
 /* Define to 1 if you have the <stdatomic.h> header file. */
 #undef HAVE_STDATOMIC_H
@@ -712,14 +734,8 @@
 /* Define to 1 if compiler supports old gcc variadic macro style. */
 #undef HAVE_VARIADIC_MACROS_GCC
 
-/* Define to 1 if you have the wincrypt.h header file. */
-#undef HAVE_WINCRYPT_H
-
 /* Define to 1 if you have the windows.h header file. */
 #undef HAVE_WINDOWS_H
-
-/* Define to 1 if you have the winldap.h header file. */
-#undef HAVE_WINLDAP_H
 
 /* Define to 1 if you have the winsock2.h header file. */
 #undef HAVE_WINSOCK2_H
@@ -729,6 +745,9 @@
 
 /* if you have wolfSSL_DES_ecb_encrypt */
 #undef HAVE_WOLFSSL_DES_ECB_ENCRYPT
+
+/* if you have wolfSSL_BIO_set_shutdown */
+#undef HAVE_WOLFSSL_FULL_BIO
 
 /* Define to 1 if you have the `wolfSSL_get_peer_certificate' function. */
 #undef HAVE_WOLFSSL_GET_PEER_CERTIFICATE
@@ -744,9 +763,6 @@
 
 /* Define to 1 if you have the <x509.h> header file. */
 #undef HAVE_X509_H
-
-/* if you have the zlib.h header file */
-#undef HAVE_ZLIB_H
 
 /* if libzstd is in use */
 #undef HAVE_ZSTD
@@ -799,56 +815,11 @@
 /* a suitable file to read random data from */
 #undef RANDOM_FILE
 
-/* Define to the type of arg 1 for recv. */
-#undef RECV_TYPE_ARG1
-
-/* Define to the type of arg 2 for recv. */
-#undef RECV_TYPE_ARG2
-
-/* Define to the type of arg 3 for recv. */
-#undef RECV_TYPE_ARG3
-
-/* Define to the type of arg 4 for recv. */
-#undef RECV_TYPE_ARG4
-
-/* Define to the function return type for recv. */
-#undef RECV_TYPE_RETV
-
-/* Define to the type qualifier of arg 5 for select. */
-#undef SELECT_QUAL_ARG5
-
-/* Define to the type of arg 1 for select. */
-#undef SELECT_TYPE_ARG1
-
-/* Define to the type of args 2, 3 and 4 for select. */
-#undef SELECT_TYPE_ARG234
-
-/* Define to the type of arg 5 for select. */
-#undef SELECT_TYPE_ARG5
-
-/* Define to the function return type for select. */
-#undef SELECT_TYPE_RETV
-
-/* Define to the type qualifier of arg 2 for send. */
-#undef SEND_QUAL_ARG2
-
-/* Define to the type of arg 1 for send. */
-#undef SEND_TYPE_ARG1
-
-/* Define to the type of arg 2 for send. */
-#undef SEND_TYPE_ARG2
-
-/* Define to the type of arg 3 for send. */
-#undef SEND_TYPE_ARG3
-
-/* Define to the type of arg 4 for send. */
-#undef SEND_TYPE_ARG4
-
-/* Define to the function return type for send. */
-#undef SEND_TYPE_RETV
-
 /* Size of curl_off_t in number of bytes */
 #undef SIZEOF_CURL_OFF_T
+
+/* Size of curl_socket_t in number of bytes */
+#undef SIZEOF_CURL_SOCKET_T
 
 /* Size of int in number of bytes */
 #undef SIZEOF_INT
@@ -927,14 +898,11 @@
 /* if ngtcp2_crypto_gnutls is in use */
 #undef USE_NGTCP2_CRYPTO_GNUTLS
 
-/* if ngtcp2_crypto_openssl is in use */
-#undef USE_NGTCP2_CRYPTO_OPENSSL
+/* if ngtcp2_crypto_quictls is in use */
+#undef USE_NGTCP2_CRYPTO_QUICTLS
 
 /* if ngtcp2_crypto_wolfssl is in use */
 #undef USE_NGTCP2_CRYPTO_WOLFSSL
-
-/* if NSS is enabled */
-#undef USE_NSS
 
 /* Use OpenLDAP-specific code */
 #undef USE_OPENLDAP
@@ -966,6 +934,9 @@
 /* Use Unix domain sockets */
 #undef USE_UNIX_SOCKETS
 
+/* enable websockets support */
+#undef USE_WEBSOCKETS
+
 /* Define to 1 if you are building a Windows target with crypto API support.
    */
 #undef USE_WIN32_CRYPTO
@@ -995,9 +966,6 @@
 
 /* Version number of package */
 #undef VERSION
-
-/* Define to 1 to provide own prototypes. */
-#undef WANT_IDN_PROTOTYPES
 
 /* Define to 1 if OS is AIX. */
 #ifndef _ALL_SOURCE

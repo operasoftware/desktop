@@ -22,13 +22,14 @@ FormattedTextRunInternal::FormattedTextRunInternal(
   builder.SetDisplay(EDisplay::kInline);
   layout_text_ = LayoutText::CreateAnonymousForFormattedText(
       *document, builder.TakeStyle(), text.Impl());
-  layout_text_->SetIsLayoutNGObjectForFormattedText(true);
+  layout_text_->SetIsDetachedNonDomRoot(true);
 }
 
 void FormattedTextRunInternal::UpdateStyle(Document& document,
                                            const ComputedStyle& parent_style) {
-  auto style = document.GetStyleResolver().StyleForFormattedText(
-      /*is_text_run*/ true, parent_style, GetCssPropertySet());
+  const ComputedStyle* style =
+      document.GetStyleResolver().StyleForFormattedText(
+          /*is_text_run*/ true, parent_style, GetCssPropertySet());
   layout_text_->SetStyle(style, LayoutObject::ApplyStyleChanges::kNo);
 }
 

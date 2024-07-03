@@ -33,6 +33,7 @@
 #include "avfilter.h"
 #include "audio.h"
 #include "filters.h"
+#include "formats.h"
 #include "internal.h"
 
 typedef struct AResampleContext {
@@ -193,12 +194,6 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *insamplesref)
 
     av_frame_copy_props(outsamplesref, insamplesref);
     outsamplesref->format                = outlink->format;
-#if FF_API_OLD_CHANNEL_LAYOUT
-FF_DISABLE_DEPRECATION_WARNINGS
-    outsamplesref->channels              = outlink->ch_layout.nb_channels;
-    outsamplesref->channel_layout        = outlink->channel_layout;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     ret = av_channel_layout_copy(&outsamplesref->ch_layout, &outlink->ch_layout);
     if (ret < 0)
         return ret;
@@ -357,13 +352,6 @@ static const AVClass aresample_class = {
     .child_next       = resample_child_next,
 };
 
-static const AVFilterPad aresample_inputs[] = {
-    {
-        .name         = "default",
-        .type         = AVMEDIA_TYPE_AUDIO,
-    },
-};
-
 static const AVFilterPad aresample_outputs[] = {
     {
         .name          = "default",
@@ -380,7 +368,7 @@ const AVFilter ff_af_aresample = {
     .uninit        = uninit,
     .priv_size     = sizeof(AResampleContext),
     .priv_class    = &aresample_class,
-    FILTER_INPUTS(aresample_inputs),
+    FILTER_INPUTS(ff_audio_default_filterpad),
     FILTER_OUTPUTS(aresample_outputs),
     FILTER_QUERY_FUNC(query_formats),
 };

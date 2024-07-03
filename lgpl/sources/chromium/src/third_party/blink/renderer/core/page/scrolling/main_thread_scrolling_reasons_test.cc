@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/testing/find_cc_layer.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
@@ -127,6 +128,7 @@ class MainThreadScrollingReasonsTest : public PaintTestConfigurations,
   }
 
  protected:
+  test::TaskEnvironment task_environment_;
   String base_url_;
   frame_test_helpers::WebViewHelper helper_;
 };
@@ -351,23 +353,6 @@ TEST_P(MainThreadScrollingReasonsTest,
   EXPECT_FALSE(GetViewMainThreadScrollingReasons());
 }
 
-TEST_P(MainThreadScrollingReasonsTest, FastScrollingCanBeDisabledWithSetting) {
-  GetWebView()->MainFrameViewWidget()->Resize(gfx::Size(800, 600));
-  LoadHTML("<div id='spacer' style='height: 1000px'></div>");
-  GetWebView()->GetSettings()->SetThreadedScrollingEnabled(false);
-  GetFrame()->View()->SetNeedsPaintPropertyUpdate();
-  ForceFullCompositingUpdate();
-
-  // Main scrolling should be enabled with the setting override.
-  EXPECT_TRUE(GetViewMainThreadScrollingReasons());
-
-  // Main scrolling should also propagate to inner viewport layer.
-  const cc::Layer* visual_viewport_scroll_layer =
-      GetFrame()->GetPage()->GetVisualViewport().LayerForScrolling();
-  ASSERT_TRUE(IsScrollable(visual_viewport_scroll_layer));
-  EXPECT_TRUE(GetMainThreadScrollingReasons(visual_viewport_scroll_layer));
-}
-
 TEST_P(MainThreadScrollingReasonsTest, FastScrollingForFixedPosition) {
   RegisterMockedHttpURLLoad("fixed-position.html");
   NavigateTo(base_url_ + "fixed-position.html");
@@ -491,10 +476,7 @@ TEST_P(NonCompositedMainThreadScrollingReasonsTest,
   TestNonCompositedReasons(
       "cant-paint-scrolling-background",
       cc::MainThreadScrollingReason::kBackgroundNeedsRepaintOnScroll |
-          (RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()
-               ? cc::MainThreadScrollingReason::kNotOpaqueForTextAndLCDText
-               : cc::MainThreadScrollingReason::
-                     kCantPaintScrollingBackgroundAndLCDText));
+          cc::MainThreadScrollingReason::kNotOpaqueForTextAndLCDText);
 }
 
 TEST_P(NonCompositedMainThreadScrollingReasonsTest,
@@ -522,10 +504,7 @@ TEST_P(NonCompositedMainThreadScrollingReasonsTest, BoxShadowTest) {
 TEST_P(NonCompositedMainThreadScrollingReasonsTest, InsetBoxShadowTest) {
   TestNonCompositedReasons(
       "inset-box-shadow",
-      RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()
-          ? cc::MainThreadScrollingReason::kNotOpaqueForTextAndLCDText
-          : cc::MainThreadScrollingReason::
-                kCantPaintScrollingBackgroundAndLCDText);
+      cc::MainThreadScrollingReason::kNotOpaqueForTextAndLCDText);
 }
 
 TEST_P(NonCompositedMainThreadScrollingReasonsTest, StackingContextTest) {
@@ -563,11 +542,7 @@ TEST_P(NonCompositedMainThreadScrollingReasonsTest,
   ForceFullCompositingUpdate();
   PaintLayerScrollableArea* scrollable_area2 = GetScrollableArea(*container2);
   ASSERT_TRUE(scrollable_area2);
-  if (RuntimeEnabledFeatures::CompositeScrollAfterPaintEnabled()) {
-    EXPECT_TRUE(GetScrollNode(*scrollable_area2)->is_composited);
-  } else {
-    ASSERT_TRUE(scrollable_area2->UsesCompositedScrolling());
-  }
+  EXPECT_TRUE(GetScrollNode(*scrollable_area2)->is_composited);
 }
 
 }  // namespace blink

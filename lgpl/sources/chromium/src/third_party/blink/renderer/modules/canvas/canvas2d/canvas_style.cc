@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/cssom/css_color_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
+#include "third_party/blink/renderer/core/css/resolver/style_builder_converter.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
@@ -41,30 +42,47 @@ namespace blink {
 
 static ColorParseResult ParseColor(Color& parsed_color,
                                    const String& color_string,
-                                   mojom::blink::ColorScheme color_scheme) {
+                                   mojom::blink::ColorScheme color_scheme,
+                                   const ui::ColorProvider* color_provider) {
   if (EqualIgnoringASCIICase(color_string, "currentcolor"))
     return ColorParseResult::kCurrentColor;
   const bool kUseStrictParsing = true;
   if (CSSParser::ParseColor(parsed_color, color_string, kUseStrictParsing))
     return ColorParseResult::kColor;
-  if (CSSParser::ParseSystemColor(parsed_color, color_string, color_scheme))
+  if (CSSParser::ParseSystemColor(parsed_color, color_string, color_scheme,
+                                  color_provider)) {
     return ColorParseResult::kColor;
+  }
+  if (auto* color_mix_value =
+          DynamicTo<cssvalue::CSSColorMixValue>(CSSParser::ParseSingleValue(
+              CSSPropertyID::kColor, color_string,
+              StrictCSSParserContext(SecureContextMode::kInsecureContext)))) {
+    static const TextLinkColors kDefaultTextLinkColors{};
+    const StyleColor style_color = ResolveColorValue(
+        *color_mix_value, kDefaultTextLinkColors, color_scheme, color_provider);
+    parsed_color = style_color.Resolve(Color::kBlack, color_scheme);
+    return ColorParseResult::kColorMix;
+  }
   return ColorParseResult::kParseFailed;
 }
 
-ColorParseResult ParseCanvasColorString(const String& color_string,
-                                        mojom::blink::ColorScheme color_scheme,
-                                        Color& parsed_color) {
+ColorParseResult ParseCanvasColorString(
+    const String& color_string,
+    mojom::blink::ColorScheme color_scheme,
+    Color& parsed_color,
+    const ui::ColorProvider* color_provider) {
   return ParseColor(parsed_color,
                     color_string.StripWhiteSpace(IsHTMLSpace<UChar>),
-                    color_scheme);
+                    color_scheme, color_provider);
 }
 
 bool ParseCanvasColorString(const String& color_string, Color& parsed_color) {
-  const ColorParseResult parse_result = ParseCanvasColorString(
-      color_string, mojom::blink::ColorScheme::kLight, parsed_color);
+  const ColorParseResult parse_result =
+      ParseCanvasColorString(color_string, mojom::blink::ColorScheme::kLight,
+                             parsed_color, /*color_provider=*/nullptr);
   switch (parse_result) {
     case ColorParseResult::kColor:
+    case ColorParseResult::kColorMix:
       return true;
     case ColorParseResult::kCurrentColor:
       parsed_color = Color::kBlack;

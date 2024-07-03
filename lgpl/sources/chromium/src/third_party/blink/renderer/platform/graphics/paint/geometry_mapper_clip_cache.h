@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_GEOMETRY_MAPPER_CLIP_CACHE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_GEOMETRY_MAPPER_CLIP_CACHE_H_
 
+#include "base/memory/raw_ptr_exclusion.h"
 #include "third_party/blink/renderer/platform/graphics/overlay_scrollbar_clip_behavior.h"
 #include "third_party/blink/renderer/platform/graphics/paint/float_clip_rect.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -31,8 +32,12 @@ class PLATFORM_EXPORT GeometryMapperClipCache {
     DISALLOW_NEW();
 
    public:
-    const ClipPaintPropertyNode* ancestor_clip;
-    const TransformPaintPropertyNode* ancestor_transform;
+    // RAW_PTR_EXCLUSION: Performance reasons: based on this sampling profiler
+    // result on Windows Dev.
+    // TODO(crbug.com/1489080): `ancestor_clip` was marked
+    // `DanglingUntriaged` before being unrewritten.
+    RAW_PTR_EXCLUSION const ClipPaintPropertyNode* ancestor_clip;
+    RAW_PTR_EXCLUSION const TransformPaintPropertyNode* ancestor_transform;
     OverlayScrollbarClipBehavior clip_behavior;
     bool operator==(const ClipAndTransform& other) const {
       return ancestor_clip == other.ancestor_clip &&

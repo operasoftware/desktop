@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
@@ -44,7 +45,6 @@
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/web_client_hints_types.mojom-blink.h"
 #include "services/network/public/mojom/web_client_hints_types.mojom-shared.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/device_memory/approximated_device_memory.h"
@@ -155,6 +155,7 @@ mojom::FetchCacheMode DetermineFrameCacheMode(Frame* frame) {
     case WebFrameLoadType::kReplaceCurrentItem:
       return mojom::FetchCacheMode::kDefault;
     case WebFrameLoadType::kBackForward:
+    case WebFrameLoadType::kRestore:
       // Mutates the policy for POST requests to avoid form resubmission.
       return mojom::FetchCacheMode::kForceCache;
     case WebFrameLoadType::kReload:
@@ -176,7 +177,7 @@ struct FrameFetchContext::FrozenState final : GarbageCollected<FrozenState> {
               const ClientHintsPreferences& client_hints_preferences,
               float device_pixel_ratio,
               const String& user_agent,
-              const absl::optional<UserAgentMetadata>& user_agent_metadata,
+              base::optional_ref<const UserAgentMetadata> user_agent_metadata,
               bool is_svg_image_chrome_client,
               bool is_prerendering,
               const String& reduced_accept_language)
@@ -187,7 +188,7 @@ struct FrameFetchContext::FrozenState final : GarbageCollected<FrozenState> {
         client_hints_preferences(client_hints_preferences),
         device_pixel_ratio(device_pixel_ratio),
         user_agent(user_agent),
-        user_agent_metadata(user_agent_metadata),
+        user_agent_metadata(user_agent_metadata.CopyAsOptional()),
         is_svg_image_chrome_client(is_svg_image_chrome_client),
         is_prerendering(is_prerendering),
         reduced_accept_language(reduced_accept_language) {}
@@ -200,7 +201,7 @@ struct FrameFetchContext::FrozenState final : GarbageCollected<FrozenState> {
   const ClientHintsPreferences client_hints_preferences;
   const float device_pixel_ratio;
   const String user_agent;
-  const absl::optional<UserAgentMetadata> user_agent_metadata;
+  const std::optional<UserAgentMetadata> user_agent_metadata;
   const bool is_svg_image_chrome_client;
   const bool is_prerendering;
   const String reduced_accept_language;
@@ -241,7 +242,6 @@ ResourceFetcher* FrameFetchContext::CreateFetcherForCommittedDocument(
   fetcher->SetResourceLoadObserver(
       MakeGarbageCollected<ResourceLoadObserverForFrame>(
           loader, document, fetcher->GetProperties()));
-  fetcher->SetImagesEnabled(frame->GetSettings()->GetImagesEnabled());
   fetcher->SetAutoLoadImages(
       frame->GetSettings()->GetLoadsImagesAutomatically());
   fetcher->SetEarlyHintsPreloadedResources(
@@ -284,15 +284,6 @@ LocalFrame* FrameFetchContext::GetFrame() const {
 
 LocalFrameClient* FrameFetchContext::GetLocalFrameClient() const {
   return GetFrame()->Client();
-}
-
-void FrameFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request) {
-  // The remaining modifications are only necessary for HTTP and HTTPS.
-  if (!request.Url().IsEmpty() && !request.Url().ProtocolIsInHTTPFamily())
-    return;
-
-  if (GetResourceFetcherProperties().IsDetached())
-    return;
 }
 
 // TODO(toyoshim, arthursonzogni): PlzNavigate doesn't use this function to set
@@ -357,14 +348,18 @@ void FrameFetchContext::PrepareRequest(
         attribution_src_loader->GetRuntimeFeatures());
   }
 
-  if (request.GetSharedStorageWritable()) {
+  // If the original request included the attribute to opt-in to shared storage,
+  // then update eligibility for the current (possibly redirected) request. Note
+  // that if the original request didn't opt-in, then the original request and
+  // any subsequent redirects are ineligible for shared storage writing by
+  // response header.
+  if (request.GetSharedStorageWritableOptedIn()) {
     auto* policy = GetPermissionsPolicy();
-    if (!policy ||
-        !request.IsFeatureEnabledForSubresourceRequestAssumingOptIn(
+    request.SetSharedStorageWritableEligible(
+        policy &&
+        request.IsFeatureEnabledForSubresourceRequestAssumingOptIn(
             policy, mojom::blink::PermissionsPolicyFeature::kSharedStorage,
-            SecurityOrigin::Create(request.Url())->ToUrlOrigin())) {
-      request.SetSharedStorageWritable(false);
-    }
+            SecurityOrigin::Create(request.Url())->ToUrlOrigin()));
   }
 
   request.SetSharedDictionaryWriterEnabled(
@@ -404,11 +399,16 @@ void FrameFetchContext::AddResourceTiming(
       ->AddResourceTiming(std::move(info), initiator_type);
 }
 
-bool FrameFetchContext::AllowImage(bool images_enabled, const KURL& url) const {
+bool FrameFetchContext::AllowImage() const {
   if (GetResourceFetcherProperties().IsDetached())
     return true;
-  if (auto* settings_client = GetContentSettingsClient())
-    images_enabled = settings_client->AllowImage(images_enabled, url);
+
+  bool images_enabled = GetFrame()->ImagesEnabled();
+  if (!images_enabled) {
+    if (auto* settings_client = GetContentSettingsClient()) {
+      settings_client->DidNotAllowImage();
+    }
+  }
   return images_enabled;
 }
 
@@ -423,8 +423,12 @@ void FrameFetchContext::ModifyRequestForCSP(ResourceRequest& resource_request) {
 }
 
 void FrameFetchContext::AddClientHintsIfNecessary(
-    const absl::optional<float> resource_width,
+    const std::optional<float> resource_width,
     ResourceRequest& request) {
+  if (GetResourceFetcherProperties().IsDetached()) {
+    return;
+  }
+
   // If the feature is enabled, then client hints are allowed only on secure
   // URLs.
   if (!ClientHintsPreferences::IsClientHintsAllowed(request.Url()))
@@ -432,8 +436,7 @@ void FrameFetchContext::AddClientHintsIfNecessary(
 
   // Check if |url| is allowed to run JavaScript. If not, client hints are not
   // attached to the requests that initiate on the render side.
-  if (!AllowScriptFromSourceWithoutNotifying(
-          request.Url(), GetContentSettingsClient(), GetSettings())) {
+  if (!GetFrame()->ScriptEnabled()) {
     return;
   }
 
@@ -444,15 +447,16 @@ void FrameFetchContext::AddClientHintsIfNecessary(
           ? document_->domWindow()->GetSecurityContext().GetPermissionsPolicy()
           : nullptr;
 
-  url::Origin resource_origin =
-      SecurityOrigin::Create(request.Url())->ToUrlOrigin();
-  bool is_1p_origin = IsFirstPartyOrigin(request.Url());
+  const scoped_refptr<SecurityOrigin> resource_origin =
+      SecurityOrigin::Create(request.Url());
+  bool is_1p_origin = IsFirstPartyOrigin(resource_origin.get());
 
-  absl::optional<UserAgentMetadata> ua = GetUserAgentMetadata(request.Url());
+  std::optional<UserAgentMetadata> ua = GetUserAgentMetadata(request.Url());
 
-  absl::optional<ClientHintImageInfo> image_info;
-  absl::optional<WTF::AtomicString> prefers_color_scheme;
-  absl::optional<WTF::AtomicString> prefers_reduced_motion;
+  std::optional<ClientHintImageInfo> image_info;
+  std::optional<WTF::AtomicString> prefers_color_scheme;
+  std::optional<WTF::AtomicString> prefers_reduced_motion;
+  std::optional<WTF::AtomicString> prefers_reduced_transparency;
 
   if (document_) {  // Only get frame info if the frame is not detached
     image_info = ClientHintImageInfo();
@@ -470,14 +474,19 @@ void FrameFetchContext::AddClientHintsIfNecessary(
         AtomicString(GetSettings()->GetPrefersReducedMotion()
                          ? network::kPrefersReducedMotionReduce
                          : network::kPrefersReducedMotionNoPreference);
+    prefers_reduced_transparency =
+        AtomicString(GetSettings()->GetPrefersReducedTransparency()
+                         ? network::kPrefersReducedTransparencyReduce
+                         : network::kPrefersReducedTransparencyNoPreference);
   }
 
   // GetClientHintsPreferences() has things parsed for this document
   // by browser (from accept-ch header on this response or previously persisted)
   // with renderer-parsed http-equiv merged in.
   BaseFetchContext::AddClientHintsIfNecessary(
-      GetClientHintsPreferences(), resource_origin, is_1p_origin, ua, policy,
-      image_info, prefers_color_scheme, prefers_reduced_motion, request);
+      GetClientHintsPreferences(), resource_origin->ToUrlOrigin(), is_1p_origin,
+      ua, policy, image_info, prefers_color_scheme, prefers_reduced_motion,
+      prefers_reduced_transparency, request);
 }
 
 void FrameFetchContext::AddReducedAcceptLanguageIfNecessary(
@@ -512,7 +521,7 @@ void FrameFetchContext::AddReducedAcceptLanguageIfNecessary(
 
 void FrameFetchContext::PopulateResourceRequest(
     ResourceType type,
-    const absl::optional<float> resource_width,
+    const std::optional<float> resource_width,
     ResourceRequest& request,
     const ResourceLoaderOptions& options) {
   if (!GetResourceFetcherProperties().IsDetached())
@@ -549,29 +558,19 @@ void FrameFetchContext::SetFirstPartyCookie(ResourceRequest& request) {
     request.SetSiteForCookies(GetSiteForCookies());
 }
 
-bool FrameFetchContext::AllowScriptFromSource(const KURL& url) const {
-  if (AllowScriptFromSourceWithoutNotifying(url, GetContentSettingsClient(),
-                                            GetSettings())) {
-    return true;
+bool FrameFetchContext::AllowScript() const {
+  bool script_enabled = GetFrame()->ScriptEnabled();
+  if (!script_enabled) {
+    WebContentSettingsClient* settings_client = GetContentSettingsClient();
+    if (settings_client) {
+      settings_client->DidNotAllowScript();
+    }
   }
-  WebContentSettingsClient* settings_client = GetContentSettingsClient();
-  if (settings_client)
-    settings_client->DidNotAllowScript();
-  return false;
+  return script_enabled;
 }
 
-// static
-bool FrameFetchContext::AllowScriptFromSourceWithoutNotifying(
-    const KURL& url,
-    WebContentSettingsClient* settings_client,
-    Settings* settings) {
-  bool allow_script = !settings || settings->GetScriptEnabled();
-  if (settings_client)
-    allow_script = settings_client->AllowScriptFromSource(allow_script, url);
-  return allow_script;
-}
-
-bool FrameFetchContext::IsFirstPartyOrigin(const KURL& url) const {
+bool FrameFetchContext::IsFirstPartyOrigin(
+    const SecurityOrigin* resource_origin) const {
   if (GetResourceFetcherProperties().IsDetached())
     return false;
 
@@ -580,7 +579,7 @@ bool FrameFetchContext::IsFirstPartyOrigin(const KURL& url) const {
       .Top()
       .GetSecurityContext()
       ->GetSecurityOrigin()
-      ->IsSameOriginWith(SecurityOrigin::Create(url).get());
+      ->IsSameOriginWith(resource_origin);
 }
 
 bool FrameFetchContext::ShouldBlockRequestByInspector(const KURL& url) const {
@@ -605,7 +604,7 @@ void FrameFetchContext::DispatchDidBlockRequest(
 ContentSecurityPolicy* FrameFetchContext::GetContentSecurityPolicyForWorld(
     const DOMWrapperWorld* world) const {
   if (GetResourceFetcherProperties().IsDetached())
-    return frozen_state_->content_security_policy;
+    return frozen_state_->content_security_policy.Get();
 
   return document_->GetExecutionContext()->GetContentSecurityPolicyForWorld(
       world);
@@ -656,19 +655,19 @@ FrameFetchContext::CreateWebSocketHandshakeThrottle() {
 bool FrameFetchContext::ShouldBlockFetchByMixedContentCheck(
     mojom::blink::RequestContextType request_context,
     network::mojom::blink::IPAddressSpace target_address_space,
-    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info,
+    base::optional_ref<const ResourceRequest::RedirectInfo> redirect_info,
     const KURL& url,
     ReportingDisposition reporting_disposition,
-    const absl::optional<String>& devtools_id) const {
+    const String& devtools_id) const {
   if (GetResourceFetcherProperties().IsDetached()) {
     // TODO(yhirano): Implement the detached case.
     return false;
   }
   const KURL& url_before_redirects =
-      redirect_info ? redirect_info->original_url : url;
+      redirect_info.has_value() ? redirect_info->original_url : url;
   ResourceRequest::RedirectStatus redirect_status =
-      redirect_info ? RedirectStatus::kFollowedRedirect
-                    : RedirectStatus::kNoRedirect;
+      redirect_info.has_value() ? RedirectStatus::kFollowedRedirect
+                                : RedirectStatus::kNoRedirect;
   return MixedContentChecker::ShouldBlockFetch(
       GetFrame(), request_context, target_address_space, url_before_redirects,
       redirect_status, url, devtools_id, reporting_disposition,
@@ -712,7 +711,7 @@ const KURL& FrameFetchContext::Url() const {
 
 ContentSecurityPolicy* FrameFetchContext::GetContentSecurityPolicy() const {
   if (GetResourceFetcherProperties().IsDetached())
-    return frozen_state_->content_security_policy;
+    return frozen_state_->content_security_policy.Get();
   return document_->domWindow()->GetContentSecurityPolicy();
 }
 
@@ -735,7 +734,7 @@ String FrameFetchContext::GetUserAgent(const KURL& url) const {
   return GetFrame()->Loader().UserAgent(url);
 }
 
-absl::optional<UserAgentMetadata> FrameFetchContext::GetUserAgentMetadata(
+std::optional<UserAgentMetadata> FrameFetchContext::GetUserAgentMetadata(
     const KURL& url) const {
   if (GetResourceFetcherProperties().IsDetached())
     return frozen_state_->user_agent_metadata;
@@ -807,7 +806,7 @@ void FrameFetchContext::Trace(Visitor* visitor) const {
 
 bool FrameFetchContext::CalculateIfAdSubresource(
     const ResourceRequestHead& resource_request,
-    const absl::optional<KURL>& alias_url,
+    base::optional_ref<const KURL> alias_url,
     ResourceType type,
     const FetchInitiatorInfo& initiator_info) {
   // Mark the resource as an Ad if the BaseFetchContext thinks it's an ad.
@@ -820,7 +819,8 @@ bool FrameFetchContext::CalculateIfAdSubresource(
 
   // The AdTracker needs to know about the request as well, and may also mark it
   // as an ad.
-  const KURL& url = alias_url ? alias_url.value() : resource_request.Url();
+  const KURL& url =
+      alias_url.has_value() ? alias_url.value() : resource_request.Url();
   return GetFrame()->GetAdTracker()->CalculateIfAdSubresource(
       document_->domWindow(), url, type, initiator_info, known_ad);
 }
@@ -849,13 +849,14 @@ ExecutionContext* FrameFetchContext::GetExecutionContext() const {
   return document_->GetExecutionContext();
 }
 
-absl::optional<ResourceRequestBlockedReason> FrameFetchContext::CanRequest(
+std::optional<ResourceRequestBlockedReason> FrameFetchContext::CanRequest(
     ResourceType type,
     const ResourceRequest& resource_request,
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
-    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info) const {
+    base::optional_ref<const ResourceRequest::RedirectInfo> redirect_info)
+    const {
   if (!GetResourceFetcherProperties().IsDetached() &&
       document_->IsFreezingInProgress() && !resource_request.GetKeepalive()) {
     GetDetachableConsoleLogger().AddConsoleMessage(

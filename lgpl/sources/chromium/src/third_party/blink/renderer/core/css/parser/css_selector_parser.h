@@ -6,11 +6,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_SELECTOR_PARSER_H_
 
 #include <memory>
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/css/parser/css_nesting_type.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
+#include "third_party/blink/renderer/core/dom/qualified_name.h"
 
 namespace blink {
 
@@ -61,6 +63,7 @@ class CORE_EXPORT CSSSelectorParser {
       const CSSParserContext*,
       CSSNestingType,
       const StyleRule* parent_rule_for_nesting,
+      bool is_within_scope,
       bool semicolon_aborts_nested_selector,
       StyleSheetContents*,
       HeapVector<CSSSelector>&);
@@ -69,6 +72,7 @@ class CORE_EXPORT CSSSelectorParser {
       const CSSParserContext*,
       CSSNestingType,
       const StyleRule* parent_rule_for_nesting,
+      bool is_within_scope,
       bool semicolon_aborts_nested_selector,
       StyleSheetContents*,
       CSSParserObserver*,
@@ -83,28 +87,30 @@ class CORE_EXPORT CSSSelectorParser {
   static CSSSelector::PseudoType ParsePseudoType(const AtomicString&,
                                                  bool has_arguments,
                                                  const Document*);
-  static PseudoId ParsePseudoElement(const String&, const Node*);
-  // Returns the argument of a parameterized pseudo-element. For example, for
-  // '::highlight(foo)' it returns 'foo'.
-  static AtomicString ParsePseudoElementArgument(const String&);
+
+  static PseudoId ParsePseudoElement(const String&,
+                                     const Node*,
+                                     AtomicString& argument);
 
   // https://drafts.csswg.org/css-cascade-6/#typedef-scope-start
   // https://drafts.csswg.org/css-cascade-6/#typedef-scope-end
   //
-  // Parse errors are signalled by returning absl::nullopt. Empty spans are
+  // Parse errors are signalled by returning std::nullopt. Empty spans are
   // normal and expected, since <scope-start> / <scope-end> are forgiving
   // selector lists.
-  static absl::optional<base::span<CSSSelector>> ParseScopeBoundary(
+  static std::optional<base::span<CSSSelector>> ParseScopeBoundary(
       CSSParserTokenRange,
       const CSSParserContext*,
       CSSNestingType,
       const StyleRule* parent_rule_for_nesting,
+      bool is_within_scope,
       StyleSheetContents*,
       HeapVector<CSSSelector>&);
 
  private:
   CSSSelectorParser(const CSSParserContext*,
                     const StyleRule* parent_rule_for_nesting,
+                    bool is_within_scope,
                     bool semicolon_aborts_nested_selector,
                     StyleSheetContents*,
                     HeapVector<CSSSelector>&);
@@ -135,7 +141,7 @@ class CORE_EXPORT CSSSelectorParser {
   CSSSelectorList* ConsumeNestedSelectorList(CSSParserTokenRange&);
   CSSSelectorList* ConsumeForgivingNestedSelectorList(CSSParserTokenRange&);
   // https://drafts.csswg.org/selectors/#typedef-forgiving-selector-list
-  absl::optional<base::span<CSSSelector>> ConsumeForgivingComplexSelectorList(
+  std::optional<base::span<CSSSelector>> ConsumeForgivingComplexSelectorList(
       CSSParserTokenRange&,
       CSSNestingType);
   CSSSelectorList* ConsumeForgivingCompoundSelectorList(CSSParserTokenRange&);
@@ -214,6 +220,9 @@ class CORE_EXPORT CSSSelectorParser {
   // The parent rule pointed to by the nesting selector (&).
   // https://drafts.csswg.org/css-nesting-1/#nest-selector
   const StyleRule* parent_rule_for_nesting_;
+  // True if we're parsing a selector within an @scope rule.
+  // https://drafts.csswg.org/selectors-4/#scoped-selector
+  const bool is_within_scope_;
   // See AbortsNestedSelectorParsing.
   bool semicolon_aborts_nested_selector_ = false;
   const StyleSheetContents* style_sheet_;

@@ -6,8 +6,6 @@
 import json
 import logging
 
-from blinkpy.common.path_finder import RELATIVE_WPT_TESTS
-
 WPT_GH_ORG = 'web-platform-tests'
 WPT_GH_REPO_NAME = 'wpt'
 WPT_GH_URL = 'https://github.com/%s/%s/' % (WPT_GH_ORG, WPT_GH_REPO_NAME)
@@ -20,6 +18,7 @@ CHANGE_ID_FOOTER = 'Change-Id: '
 EXPORT_PR_LABEL = 'chromium-export'
 PROVISIONAL_PR_LABEL = 'do not merge yet'
 
+AUTOROLLER_EMAIL = 'wpt-autoroller@chops-service-accounts.iam.gserviceaccount.com'
 # These are only set in a new WPT checkout, and they should be consistent with
 # the bot's GitHub account (chromium-wpt-export-bot).
 DEFAULT_WPT_COMMITTER_NAME = 'Chromium WPT Sync'
@@ -28,6 +27,8 @@ DEFAULT_WPT_COMMITTER_EMAIL = 'blink-w3c-test-autoroller@chromium.org'
 EXPORT_DENYLIST = {
     'third_party/blink/web_tests/external/wpt/config.json',
 }
+
+LEGACY_MAIN_BRANCH_NAME = 'retsam'[::-1]
 
 _log = logging.getLogger(__name__)
 
@@ -103,12 +104,12 @@ def is_basename_skipped(basename):
             or basename.startswith('.') or is_disallowed_ini(basename))
 
 
-def is_file_exportable(path):
+def is_file_exportable(path, project_config):
     """Checks whether a file in Chromium WPT should be exported to upstream.
 
     Args:
         path: A relative path from the root of Chromium repository.
     """
-    assert path.startswith(RELATIVE_WPT_TESTS)
+    assert path.startswith(project_config.relative_tests_path)
     basename = path[path.rfind('/') + 1:]
     return path not in EXPORT_DENYLIST and not is_basename_skipped(basename)

@@ -4,40 +4,15 @@
 
 #include "third_party/blink/renderer/core/paint/box_painter.h"
 
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
 #include "third_party/blink/renderer/core/layout/layout_box.h"
+#include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/scrollable_area_painter.h"
 
 namespace blink {
-
-void BoxPainter::RecordHitTestData(const PaintInfo& paint_info,
-                                   const PhysicalRect& paint_rect,
-                                   const DisplayItemClient& background_client) {
-  if (paint_info.IsPaintingBackgroundInContentsSpace() &&
-      layout_box_.EffectiveAllowedTouchAction() == TouchAction::kAuto &&
-      !layout_box_.InsideBlockingWheelEventHandler()) {
-    return;
-  }
-
-  // Hit test data are only needed for compositing. This flag is used for for
-  // printing and drag images which do not need hit testing.
-  if (paint_info.ShouldOmitCompositingInfo())
-    return;
-
-  // If an object is not visible, it does not participate in hit testing.
-  if (layout_box_.StyleRef().Visibility() != EVisibility::kVisible)
-    return;
-
-  if (!paint_info.FragmentToPaint(layout_box_))
-    return;
-
-  paint_info.context.GetPaintController().RecordHitTestData(
-      background_client, ToPixelSnappedRect(paint_rect),
-      layout_box_.EffectiveAllowedTouchAction(),
-      layout_box_.InsideBlockingWheelEventHandler());
-}
 
 void BoxPainter::RecordRegionCaptureData(
     const PaintInfo& paint_info,
@@ -55,7 +30,12 @@ void BoxPainter::RecordRegionCaptureData(
 
 void BoxPainter::RecordScrollHitTestData(
     const PaintInfo& paint_info,
-    const DisplayItemClient& background_client) {
+    const DisplayItemClient& background_client,
+    const FragmentData* fragment) {
+  if (!fragment) {
+    return;
+  }
+
   // Scroll hit test data are only needed for compositing. This flag is used for
   // printing and drag images which do not need hit testing.
   if (paint_info.ShouldOmitCompositingInfo())
@@ -70,10 +50,6 @@ void BoxPainter::RecordScrollHitTestData(
   if (!layout_box_.GetScrollableArea())
     return;
 
-  const auto* fragment = paint_info.FragmentToPaint(layout_box_);
-  if (!fragment)
-    return;
-
   // If an object does scroll overflow, but it is not itself visible to
   // hit testing (e.g., because it has pointer-events: none), it may
   // have descendants that *are* visible to hit testing.  In that case,
@@ -83,16 +59,18 @@ void BoxPainter::RecordScrollHitTestData(
   //
   // Note that if it is visibility: hidden, then the style.Visibility()
   // check above will fail and we will already have returned.
-  if (!style.VisibleToHitTesting()) {
+  if (!RuntimeEnabledFeatures::HitTestOpaquenessEnabled() &&
+      !style.VisibleToHitTesting()) {
     auto& paint_controller = paint_info.context.GetPaintController();
     paint_controller.RecordScrollHitTestData(
         background_client, DisplayItem::kScrollHitTest, nullptr,
-        VisualRect(fragment->PaintOffset()));
+        VisualRect(fragment->PaintOffset()), cc::HitTestOpaqueness::kMixed);
     return;
   }
 
   // If there is an associated scroll node, emit scroll hit test data.
   const auto* properties = fragment->PaintProperties();
+  auto hit_test_opaqueness = ObjectPainter(layout_box_).GetHitTestOpaqueness();
   if (properties && properties->Scroll()) {
     DCHECK(properties->ScrollTranslation());
     // We record scroll hit test data in the local border box properties
@@ -117,18 +95,21 @@ void BoxPainter::RecordScrollHitTestData(
 #endif
     paint_controller.RecordScrollHitTestData(
         background_client, DisplayItem::kScrollHitTest,
-        properties->ScrollTranslation(), VisualRect(fragment->PaintOffset()));
+        properties->ScrollTranslation(), VisualRect(fragment->PaintOffset()),
+        hit_test_opaqueness);
   }
 
-  ScrollableAreaPainter(*layout_box_.GetScrollableArea())
-      .RecordResizerScrollHitTestData(paint_info.context,
-                                      fragment->PaintOffset());
+  if (hit_test_opaqueness != cc::HitTestOpaqueness::kTransparent) {
+    ScrollableAreaPainter(*layout_box_.GetScrollableArea())
+        .RecordResizerScrollHitTestData(paint_info.context,
+                                        fragment->PaintOffset());
+  }
 }
 
 gfx::Rect BoxPainter::VisualRect(const PhysicalOffset& paint_offset) {
   DCHECK(!layout_box_.VisualRectRespectsVisibility() ||
          layout_box_.StyleRef().Visibility() == EVisibility::kVisible);
-  PhysicalRect rect = layout_box_.PhysicalSelfVisualOverflowRect();
+  PhysicalRect rect = layout_box_.SelfVisualOverflowRect();
   rect.Move(paint_offset);
   return ToEnclosingRect(rect);
 }

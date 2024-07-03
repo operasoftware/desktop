@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_chunks_to_cc_layer.h"
 
 #include "base/logging.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/numerics/safe_conversions.h"
 #include "cc/input/layer_selection_bound.h"
 #include "cc/layers/layer.h"
@@ -234,12 +235,19 @@ class ConversionContext {
     bool IsEffect() const { return type_ == kEffect; }
     bool NeedsRestore() const { return type_ != kClipOmitted; }
 
-    // These fields are neve nullptr.
-    const TransformPaintPropertyNode* transform;
-    const ClipPaintPropertyNode* clip;
-    const EffectPaintPropertyNode* effect;
+    // These fields are never nullptr.
+    //
+    // RAW_PTR_EXCLUSION: Performance reasons: regressions in MotionMark
+    // (crbug.com/1495275#c116). The struct is performance critical and stack
+    // scoped.
+    RAW_PTR_EXCLUSION const TransformPaintPropertyNode* transform;
+    // RAW_PTR_EXCLUSION: The struct is performance critical and stack scoped.
+    RAW_PTR_EXCLUSION const ClipPaintPropertyNode* clip;
+    // RAW_PTR_EXCLUSION: The struct is performance critical and stack scoped.
+    RAW_PTR_EXCLUSION const EffectPaintPropertyNode* effect;
     // See ConversionContext<Result>::previous_transform_.
-    const TransformPaintPropertyNode* previous_transform;
+    // RAW_PTR_EXCLUSION: The struct is performance critical and stack scoped.
+    RAW_PTR_EXCLUSION const TransformPaintPropertyNode* previous_transform;
 #if DCHECK_IS_ON()
     bool has_pre_cap_effect_hierarchy_issue = false;
 #endif
@@ -279,7 +287,8 @@ class ConversionContext {
     // UpdateSaveLayerBounds().
     size_t save_layer_id;
     // The transform space when the SaveLayer[Alpha]Op was emitted.
-    const TransformPaintPropertyNode* transform;
+    // RAW_PTR_EXCLUSION: The struct is performance critical and stack scoped.
+    RAW_PTR_EXCLUSION const TransformPaintPropertyNode* transform;
     // Records the bounds of the effect which initiated the entry. Note that
     // the effect is not |effect| (which is the previous effect), but the
     // |current_effect_| when this entry is the top of the stack.

@@ -10,6 +10,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
@@ -67,6 +68,12 @@ webrtc::VideoFrame CreateBlackFrame(const gfx::Size& size,
 
 class TestEncoder final : public media::VideoEncoder {
  public:
+  explicit TestEncoder(base::OnceClosure destroy_cb)
+      : destroy_cb_(std::move(destroy_cb)) {}
+  ~TestEncoder() override {
+    std::move(destroy_cb_).Run();
+  }
+
   media::VideoCodecProfile profile() const { return profile_; }
   const Options& options() const { return options_; }
 
@@ -142,6 +149,7 @@ class TestEncoder final : public media::VideoEncoder {
   }
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
+  base::OnceClosure destroy_cb_;
   media::VideoCodecProfile profile_ =  media::VIDEO_CODEC_PROFILE_UNKNOWN;
   Options options_;
   OutputCB output_cb_;
@@ -170,7 +178,7 @@ class TestEncodedImageCallback final : public webrtc::EncodedImageCallback {
     images_.push_back(encoded_image);
     if (--pending_image_count_ == 0)
       run_loop_.Quit();
-    return {Result::OK, encoded_image.Timestamp()};
+    return {Result::OK, encoded_image.RtpTimestamp()};
   }
   void OnDroppedFrame(DropReason reason) override {
     has_dropped_frames_ = true;
@@ -190,7 +198,10 @@ class TestEncodedImageCallback final : public webrtc::EncodedImageCallback {
 class RTCVideoEncoderAdapterTest : public testing::Test {
  public:
   RTCVideoEncoderAdapterTest() {
-    auto test_encoder = std::make_unique<TestEncoder>();
+    // The adapter can dispose of the encoder early (on error, etc.). We must
+    // clear our encoder reference in this case to prevent it from dangling.
+    auto test_encoder = std::make_unique<TestEncoder>(
+        base::BindLambdaForTesting([this]() { test_encoder_ = nullptr; }));
     test_encoder_ = test_encoder.get();
     adapter_ = std::make_unique<RTCVideoEncoderAdapter>(
         kProfile, std::move(test_encoder));
@@ -201,12 +212,15 @@ class RTCVideoEncoderAdapterTest : public testing::Test {
   }
 
   RTCVideoEncoderAdapter& adapter() { return *adapter_; }
-  TestEncoder& test_encoder() { return *test_encoder_; }
+  TestEncoder& test_encoder() {
+    CHECK(test_encoder_) << "The adapter has disposed of the encoder already";
+    return *test_encoder_;
+  }
 
  private:
   base::test::TaskEnvironment task_environment_;
-  base::raw_ptr<TestEncoder> test_encoder_;
   std::unique_ptr<RTCVideoEncoderAdapter> adapter_;
+  base::raw_ptr<TestEncoder> test_encoder_;
 };
 
 TEST_F(RTCVideoEncoderAdapterTest, InitEncodeSuccess) {
@@ -278,7 +292,7 @@ TEST_F(RTCVideoEncoderAdapterTest, Encode) {
   for (size_t i = 0; i < kFrameCount; ++i) {
     EXPECT_EQ(gfx::Size(images[i]._encodedWidth, images[i]._encodedHeight),
               kFrameSize1);
-    EXPECT_EQ(base::Milliseconds(images[i].Timestamp() / kRtpTicksPerMs),
+    EXPECT_EQ(base::Milliseconds(images[i].RtpTimestamp() / kRtpTicksPerMs),
               kFrameInterval25fps * i);
     EXPECT_EQ(images[i]._frameType,
               i % 2 == 0 ? webrtc::VideoFrameType::kVideoFrameKey

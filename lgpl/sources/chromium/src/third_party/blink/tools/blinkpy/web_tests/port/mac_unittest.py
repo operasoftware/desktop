@@ -59,23 +59,27 @@ class MacPortTest(port_testcase.PortTestCase):
         self.assert_name(None, 'mac11', 'mac-mac11')
         self.assert_name(None, 'mac12', 'mac-mac12')
         self.assert_name(None, 'mac13', 'mac-mac13')
+        self.assert_name(None, 'mac14', 'mac-mac14')
         self.assert_name('mac', 'mac11', 'mac-mac11')
         self.assert_name('mac', 'mac12', 'mac-mac12')
         self.assert_name('mac', 'mac13', 'mac-mac13')
+        self.assert_name('mac', 'mac14', 'mac-mac14')
 
         self.assert_name(None, 'mac11', 'mac-mac11-arm64', 'arm64')
         self.assert_name(None, 'mac12', 'mac-mac12-arm64', 'arm64')
         self.assert_name(None, 'mac13', 'mac-mac13-arm64', 'arm64')
+        self.assert_name(None, 'mac14', 'mac-mac14-arm64', 'arm64')
         self.assert_name('mac', 'mac11', 'mac-mac11-arm64', 'arm64')
         self.assert_name('mac', 'mac12', 'mac-mac12-arm64', 'arm64')
         self.assert_name('mac', 'mac13', 'mac-mac13-arm64', 'arm64')
+        self.assert_name('mac', 'mac14', 'mac-mac14-arm64', 'arm64')
 
     def test_driver_name_option(self):
         self.assertTrue(
-            self.make_port()._path_to_driver().endswith('Content Shell'))
+            self.make_port().path_to_driver().endswith('Content Shell'))
         port = self.make_port(
             options=optparse.Values(dict(driver_name='OtherDriver')))
-        self.assertTrue(port._path_to_driver().endswith('OtherDriver'))  # pylint: disable=protected-access
+        self.assertTrue(port.path_to_driver().endswith('OtherDriver'))
 
     def test_path_to_image_diff(self):
         self.assertEqual(self.make_port()._path_to_image_diff(),

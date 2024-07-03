@@ -8,6 +8,7 @@
 #include <memory>
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "build/build_config.h"
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_provider_wrapper.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -44,9 +45,22 @@ class PLATFORM_EXPORT SharedGpuContext {
   static bool AllowSoftwareToAcceleratedCanvasUpgrade();
   static bool IsValidWithoutRestoring();
 
+  // "ImageChromium" refers to putting a canvas into a hardware layer which is
+  // directly scanned out of display, bypassing chromium's own GPU composite.
+  // It is the same "ImageChromium" referenced by
+  // `RuntimeEnabledFeatures::WebGLImageChromiumEnabled` for example.
+  // The name is out of date and refers to the system that morphed into
+  // SharedImage.
+  // This method performs context-specific check that's not available when
+  // RuntimeEnabledFeatures is set.
+#if BUILDFLAG(IS_ANDROID)
+  static bool MaySupportImageChromium();
+#else
+  static bool MaySupportImageChromium() { return true; }
+#endif
+
   using ContextProviderFactory =
-      base::RepeatingCallback<std::unique_ptr<WebGraphicsContext3DProvider>(
-          bool* is_gpu_compositing_disabled)>;
+      base::RepeatingCallback<std::unique_ptr<WebGraphicsContext3DProvider>()>;
   static void SetContextProviderFactoryForTesting(ContextProviderFactory);
   // Resets the global instance including the |context_provider_factory_| and
   // dropping the context. Should be called at the end of a test that uses this

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/css/parser/css_property_parser.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -61,6 +62,36 @@ TEST(CSSPropertyNamesTest, AlternativeAnimationDelay) {
               UnresolvedCSSPropertyID(/* execution_context */ nullptr,
                                       "animation-delay"));
   }
+}
+
+TEST(CSSPropertyNamesTest, AlternativeViewTimelineWithInset) {
+  {
+    ScopedCSSViewTimelineInsetShorthandForTest feature(false);
+    EXPECT_EQ(CSSPropertyID::kViewTimeline,
+              UnresolvedCSSPropertyID(/* execution_context */ nullptr,
+                                      "view-timeline"));
+  }
+
+  {
+    ScopedCSSViewTimelineInsetShorthandForTest feature(true);
+    EXPECT_EQ(CSSPropertyID::kAlternativeViewTimelineWithInset,
+              UnresolvedCSSPropertyID(/* execution_context */ nullptr,
+                                      "view-timeline"));
+  }
+}
+
+TEST(CSSPropertyNamesTest, WebkitMaskSize) {
+  CSSPropertyID property_id = UnresolvedCSSPropertyID(
+      /* execution_context */ nullptr, "-webkit-mask-size");
+  EXPECT_EQ(CSSPropertyID::kAliasWebkitMaskSize, property_id);
+  EXPECT_TRUE(IsPropertyAlias(property_id));
+  EXPECT_EQ(CSSPropertyID::kMaskSize, ResolveCSSPropertyID(property_id));
+}
+
+TEST(CSSPropertyNamesTest, WebkitMask) {
+  CSSPropertyID property_id = UnresolvedCSSPropertyID(
+      /* execution_context */ nullptr, "-webkit-mask");
+  EXPECT_EQ(CSSPropertyID::kAliasWebkitMask, property_id);
 }
 
 }  // namespace blink

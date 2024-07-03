@@ -30,16 +30,19 @@ import contextlib
 import json
 import logging
 import optparse
+import posixpath
 import re
 import traceback
+from typing import List, Optional
 
 from blinkpy.common import exit_codes
 from blinkpy.common.host import Host
+from blinkpy.common.path_finder import PathFinder
 from blinkpy.common.system.log_utils import configure_logging
 from blinkpy.web_tests.models.test_expectations import (TestExpectations,
                                                         ParseError)
-from blinkpy.web_tests.models.typ_types import ResultType
-from blinkpy.web_tests.port.android import ANDROID_DISABLED_TESTS
+from blinkpy.web_tests.models.typ_types import Expectation, ResultType
+from blinkpy.web_tests.port.base import Port
 from blinkpy.web_tests.port.factory import platform_options
 
 _log = logging.getLogger(__name__)
@@ -62,19 +65,14 @@ def lint(host, options):
     # The checks and list of expectation files are generally not
     # platform-dependent. Still, we need a port to identify test types and
     # manipulate virtual test paths.
-    #
-    # Force a manifest update to ensure it's always up-to-date.
-    # TODO(crbug.com/1411505): See if the manifest refresh can be made faster.
-    options.manifest_update = True
-    port = host.port_factory.get(options=options)
-
+    finder = PathFinder(host.filesystem)
     # Add all extra expectation files to be linted.
-    options.additional_expectations.extend(
-        [ANDROID_DISABLED_TESTS] + [
-            host.filesystem.join(port.web_tests_dir(),
-                                 'WPTOverrideExpectations'),
-            host.filesystem.join(port.web_tests_dir(), 'WebGPUExpectations'),
-        ])
+    options.additional_expectations.extend([
+        finder.path_from_web_tests('ChromeTestExpectations'),
+        finder.path_from_web_tests('MobileTestExpectations'),
+        finder.path_from_web_tests('WebGPUExpectations'),
+    ])
+    port = host.port_factory.get(options=options)
 
     failures = []
     warnings = []
@@ -329,6 +327,12 @@ def check_virtual_test_suites(host, options):
     virtual_suites = port.virtual_test_suites()
     virtual_suites.sort(key=lambda s: s.full_prefix)
 
+    wpt_tests = set()
+    for wpt_dir in port.WPT_DIRS:
+        wpt_tests.update(
+            posixpath.join(wpt_dir, url)
+            for url in port.wpt_manifest(wpt_dir).all_urls())
+
     failures = []
     for suite in virtual_suites:
         suite_comps = suite.full_prefix.split(port.TEST_PATH_SEPARATOR)
@@ -356,7 +360,9 @@ def check_virtual_test_suites(host, options):
                 continue
             base_comps = base.split(port.TEST_PATH_SEPARATOR)
             absolute_base = port.abspath_for_test(base)
-            if fs.isfile(absolute_base):
+            # Also, allow any WPT URLs that are valid generated tests but
+            # aren't test files (e.g., `.any.js` and variants).
+            if fs.isfile(absolute_base) or base in wpt_tests:
                 del base_comps[-1]
             elif not fs.isdir(absolute_base):
                 failure = 'Base "{}" in virtual suite "{}" must refer to a real file or directory'.format(
@@ -383,7 +389,8 @@ def check_virtual_test_suites(host, options):
                 failures.append(failure)
 
         for exclusive_test in suite.exclusive_tests:
-            if not fs.exists(port.abspath_for_test(exclusive_test)):
+            if not fs.exists(port.abspath_for_test(
+                    exclusive_test)) and base not in wpt_tests:
                 failure = 'Exclusive_tests entry "{}" in virtual suite "{}" must refer to a real file or directory'.format(
                     exclusive_test, prefix)
                 failures.append(failure)

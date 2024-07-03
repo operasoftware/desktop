@@ -8,7 +8,6 @@
 #include "content/web_test/renderer/event_sender.h"
 #include "content/web_test/renderer/test_runner.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_page_popup.h"
@@ -92,7 +91,7 @@ void WebTestWebFrameWidgetImpl::WillBeginMainFrame() {
   // WillBeginMainFrame occurs before we run BeginMainFrame() in the base
   // class, which will change states. TestFinished() wants to grab the current
   // state.
-  GetTestRunner()->FinishTestIfReady();
+  GetTestRunner()->FinishTestIfReady(*LocalRootImpl());
 
   WebFrameWidgetImpl::WillBeginMainFrame();
 }
@@ -113,13 +112,19 @@ void WebTestWebFrameWidgetImpl::ScheduleAnimationForWebTests() {
     ScheduleAnimationInternal(/*do_raster=*/true);
 }
 
+void WebTestWebFrameWidgetImpl::WasShown(bool was_evicted) {
+  WebFrameWidgetImpl::WasShown(was_evicted);
+
+  if (animation_deferred_while_hidden_) {
+    animation_deferred_while_hidden_ = false;
+    ScheduleAnimationInternal(composite_requested_);
+  }
+}
+
 void WebTestWebFrameWidgetImpl::UpdateAllLifecyclePhasesAndComposite(
     base::OnceClosure callback) {
-  LayerTreeHost()->RequestSuccessfulPresentationTimeForNextFrame(WTF::BindOnce(
-      [](base::OnceClosure callback, base::TimeTicks presentation_timestamp) {
-        std::move(callback).Run();
-      },
-      std::move(callback)));
+  LayerTreeHost()->RequestSuccessfulPresentationTimeForNextFrame(
+      base::IgnoreArgs<const viz::FrameTimingDetails&>(std::move(callback)));
   LayerTreeHost()->SetNeedsCommitWithForcedRedraw();
   ScheduleAnimationForWebTests();
 }
@@ -157,14 +162,15 @@ bool WebTestWebFrameWidgetImpl::RequestedMainFramePending() {
 }
 
 void WebTestWebFrameWidgetImpl::StartDragging(
+    LocalFrame* source_frame,
     const WebDragData& data,
     DragOperationsMask mask,
     const SkBitmap& drag_image,
     const gfx::Vector2d& cursor_offset,
     const gfx::Rect& drag_obj_rect) {
   if (!GetTestRunner()->AutomaticDragDropEnabled()) {
-    return WebFrameWidgetImpl::StartDragging(data, mask, drag_image,
-                                             cursor_offset, drag_obj_rect);
+    return WebFrameWidgetImpl::StartDragging(
+        source_frame, data, mask, drag_image, cursor_offset, drag_obj_rect);
   }
 
   // When running a test, we need to fake a drag drop operation otherwise
@@ -312,8 +318,20 @@ void WebTestWebFrameWidgetImpl::AnimateNow() {
   if (!LocalRootImpl()) {
     return;
   }
-  bool do_raster = composite_requested_;
+
   animation_scheduled_ = false;
+
+  if (LocalRootImpl()->ViewImpl()->does_composite() &&
+      !LayerTreeHost()->IsVisible()) {
+    // If the widget is hidden, SynchronouslyComposite will early-out which may
+    // leave a test waiting (e.g. waiting on a requestAnimationFrame). Setting
+    // this bit will reschedule the animation request when the widget becomes
+    // visible.
+    animation_deferred_while_hidden_ = true;
+    return;
+  }
+
+  bool do_raster = composite_requested_;
   composite_requested_ = false;
   // Composite may destroy |this|, so don't use it afterward.
   SynchronouslyComposite(base::OnceClosure(), do_raster);

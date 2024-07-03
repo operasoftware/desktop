@@ -68,6 +68,8 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
     three_d_enabled = MediaValues::CalculateThreeDEnabled(frame);
     strict_mode = MediaValues::CalculateStrictMode(frame);
     display_mode = MediaValues::CalculateDisplayMode(frame);
+    window_show_state = MediaValues::CalculateWindowShowState(frame);
+    resizable = MediaValues::CalculateResizable(frame);
     media_type = MediaValues::CalculateMediaType(frame);
     color_gamut = MediaValues::CalculateColorGamut(frame);
     preferred_color_scheme = MediaValues::CalculatePreferredColorScheme(frame);
@@ -84,6 +86,7 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
         MediaValues::CalculateVerticalViewportSegments(frame);
     device_posture = MediaValues::CalculateDevicePosture(frame);
     inverted_colors = MediaValues::CalculateInvertedColors(frame);
+    scripting = MediaValues::CalculateScripting(frame);
   }
 }
 
@@ -205,6 +208,14 @@ double MediaValuesCached::ContainerHeight() const {
   return SmallViewportHeight();
 }
 
+double MediaValuesCached::ContainerWidth(const ScopedCSSName&) const {
+  return SmallViewportWidth();
+}
+
+double MediaValuesCached::ContainerHeight(const ScopedCSSName&) const {
+  return SmallViewportHeight();
+}
+
 int MediaValuesCached::DeviceWidth() const {
   return data_.device_width;
 }
@@ -270,6 +281,14 @@ blink::mojom::DisplayMode MediaValuesCached::DisplayMode() const {
   return data_.display_mode;
 }
 
+ui::WindowShowState MediaValuesCached::WindowShowState() const {
+  return data_.window_show_state;
+}
+
+bool MediaValuesCached::Resizable() const {
+  return data_.resizable;
+}
+
 Document* MediaValuesCached::GetDocument() const {
   return nullptr;
 }
@@ -326,9 +345,12 @@ int MediaValuesCached::GetVerticalViewportSegments() const {
   return data_.vertical_viewport_segments;
 }
 
-device::mojom::blink::DevicePostureType MediaValuesCached::GetDevicePosture()
-    const {
+mojom::blink::DevicePostureType MediaValuesCached::GetDevicePosture() const {
   return data_.device_posture;
+}
+
+Scripting MediaValuesCached::GetScripting() const {
+  return data_.scripting;
 }
 
 }  // namespace blink

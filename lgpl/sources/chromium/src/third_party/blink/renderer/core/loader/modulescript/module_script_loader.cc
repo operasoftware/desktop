@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/script/value_wrapper_synthetic_module_script.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
@@ -97,6 +98,42 @@ void ModuleScriptLoader::Fetch(
                         level, custom_fetch_type);
 }
 
+// <specdef
+// href="https://html.spec.whatwg.org/C/#fetch-destination-from-module-type">
+void SetFetchDestinationFromModuleType(
+    ResourceRequest& resource_request,
+    const ModuleScriptFetchRequest& module_request) {
+  if (!base::FeatureList::IsEnabled(
+          features::kFetchDestinationJsonCssModules)) {
+    resource_request.SetRequestContext(module_request.ContextType());
+    resource_request.SetRequestDestination(module_request.Destination());
+    return;
+  }
+
+  switch (module_request.GetExpectedModuleType()) {
+    case ModuleType::kCSS:
+      resource_request.SetRequestContext(
+          mojom::blink::RequestContextType::STYLE);
+      resource_request.SetRequestDestination(
+          network::mojom::RequestDestination::kStyle);
+      break;
+    case ModuleType::kJSON:
+      resource_request.SetRequestContext(
+          mojom::blink::RequestContextType::JSON);
+      resource_request.SetRequestDestination(
+          network::mojom::RequestDestination::kJson);
+      break;
+    case ModuleType::kJavaScript:
+      resource_request.SetRequestContext(module_request.ContextType());
+      resource_request.SetRequestDestination(module_request.Destination());
+      break;
+    case ModuleType::kInvalid:
+      // ModuleTreeLinker checks that the module type is valid
+      // before creating ModuleScriptFetchRequest objects.
+      NOTREACHED_NORETURN();
+  }
+}
+
 // <specdef href="https://html.spec.whatwg.org/C/#fetch-a-single-module-script">
 void ModuleScriptLoader::FetchInternal(
     const ModuleScriptFetchRequest& module_request,
@@ -107,22 +144,26 @@ void ModuleScriptLoader::FetchInternal(
       fetch_client_settings_object_fetcher->GetProperties()
           .GetFetchClientSettingsObject();
 
-  // <spec step="4">Set moduleMap[url] to "fetching".</spec>
+  // <spec step="7">Set moduleMap[(url, moduleType)] to "fetching".</spec>
   AdvanceState(State::kFetching);
 
-  // <spec step="5">Let request be a new request whose url is url, ...</spec>
+  // <spec step="8">Let request be a new request whose url is url, ...</spec>
   ResourceRequest resource_request(module_request.Url());
 #if DCHECK_IS_ON()
   url_ = module_request.Url();
 #endif
 
-  // <spec step="5">... destination is destination, ...</spec>
-  resource_request.SetRequestContext(module_request.ContextType());
-  resource_request.SetRequestDestination(module_request.Destination());
+  // <spec step="9">Set request 's destination to the result of running the
+  // fetch destination from module type steps given destination and
+  // moduleType.</spec>
+  SetFetchDestinationFromModuleType(resource_request, module_request);
 
   ResourceLoaderOptions options(&modulator_->GetScriptState()->World());
 
-  // <spec step="7">Set up the module script request given request and
+  // <spec step="11">Set request's initiator type to "script".</spec>
+  options.initiator_info.name = fetch_initiator_type_names::kScript;
+
+  // <spec step="12">Set up the module script request given request and
   // options.</spec>
   //
   // <specdef label="SMSR"
@@ -131,11 +172,6 @@ void ModuleScriptLoader::FetchInternal(
   // <spec label="SMSR">... its parser metadata to options's parser metadata,
   // ...</spec>
   options.parser_disposition = options_.ParserState();
-
-  // As initiator for module script fetch is not specified in HTML spec,
-  // we specify "" as initiator per:
-  // https://fetch.spec.whatwg.org/#concept-request-initiator
-  options.initiator_info.name = g_empty_atom;
 
   // TODO(crbug.com/1064920): Remove this once PlzDedicatedWorker ships.
   options.reject_coep_unsafe_none = options_.GetRejectCoepUnsafeNone();

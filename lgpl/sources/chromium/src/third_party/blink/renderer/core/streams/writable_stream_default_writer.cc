@@ -74,8 +74,8 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter(
       //         a new promise.
       if (!WritableStream::CloseQueuedOrInFlight(stream) &&
           stream->HasBackpressure()) {
-        ready_promise_ =
-            MakeGarbageCollected<StreamPromiseResolver>(script_state);
+        ready_promise_ = MakeGarbageCollected<StreamPromiseResolver>(
+            script_state, exception_state);
       } else {
         //      b. Otherwise, set this.[[readyPromise]] to a promise resolved
         //         with undefined.
@@ -83,8 +83,8 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter(
             StreamPromiseResolver::CreateResolvedWithUndefined(script_state);
       }
       //      c. Set this.[[closedPromise]] to a new promise.
-      closed_promise_ =
-          MakeGarbageCollected<StreamPromiseResolver>(script_state);
+      closed_promise_ = MakeGarbageCollected<StreamPromiseResolver>(
+          script_state, exception_state);
       break;
     }
 
@@ -99,8 +99,8 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter(
       ready_promise_->MarkAsHandled(isolate);
 
       //      c. Set this.[[closedPromise]] to a new promise.
-      closed_promise_ =
-          MakeGarbageCollected<StreamPromiseResolver>(script_state);
+      closed_promise_ = MakeGarbageCollected<StreamPromiseResolver>(
+          script_state, exception_state);
       break;
     }
 
@@ -147,11 +147,11 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter(
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() = default;
 
-ScriptPromise WritableStreamDefaultWriter::closed(
+ScriptPromiseUntyped WritableStreamDefaultWriter::closed(
     ScriptState* script_state) const {
   // https://streams.spec.whatwg.org/#default-writer-closed
   //  2. Return this.[[closedPromise]].
-  return closed_promise_->GetScriptPromise(script_state);
+  return closed_promise_->GetScriptPromiseUntyped(script_state);
 }
 
 ScriptValue WritableStreamDefaultWriter::desiredSize(
@@ -171,14 +171,14 @@ ScriptValue WritableStreamDefaultWriter::desiredSize(
   return ScriptValue(isolate, GetDesiredSize(isolate, this));
 }
 
-ScriptPromise WritableStreamDefaultWriter::ready(
+ScriptPromiseUntyped WritableStreamDefaultWriter::ready(
     ScriptState* script_state) const {
   // https://streams.spec.whatwg.org/#default-writer-ready
   //  2. Return this.[[readyPromise]].
-  return ready_promise_->GetScriptPromise(script_state);
+  return ready_promise_->GetScriptPromiseUntyped(script_state);
 }
 
-ScriptPromise WritableStreamDefaultWriter::abort(
+ScriptPromiseUntyped WritableStreamDefaultWriter::abort(
     ScriptState* script_state,
     ExceptionState& exception_state) {
   return abort(script_state,
@@ -187,7 +187,7 @@ ScriptPromise WritableStreamDefaultWriter::abort(
                exception_state);
 }
 
-ScriptPromise WritableStreamDefaultWriter::abort(
+ScriptPromiseUntyped WritableStreamDefaultWriter::abort(
     ScriptState* script_state,
     ScriptValue reason,
     ExceptionState& exception_state) {
@@ -196,15 +196,15 @@ ScriptPromise WritableStreamDefaultWriter::abort(
   //     with a TypeError exception.
   if (!owner_writable_stream_) {
     exception_state.ThrowTypeError(CreateWriterLockReleasedMessage("aborted"));
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   //  3. Return ! WritableStreamDefaultWriterAbort(this, reason).
-  return ScriptPromise(script_state,
-                       Abort(script_state, this, reason.V8Value()));
+  return ScriptPromiseUntyped(script_state,
+                              Abort(script_state, this, reason.V8Value()));
 }
 
-ScriptPromise WritableStreamDefaultWriter::close(
+ScriptPromiseUntyped WritableStreamDefaultWriter::close(
     ScriptState* script_state,
     ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#default-writer-close
@@ -215,7 +215,7 @@ ScriptPromise WritableStreamDefaultWriter::close(
   //     exception.
   if (!stream) {
     exception_state.ThrowTypeError(CreateWriterLockReleasedMessage("closed"));
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   //  4. If ! WritableStreamCloseQueuedOrInFlight(stream) is true, return a
@@ -224,11 +224,11 @@ ScriptPromise WritableStreamDefaultWriter::close(
     exception_state.ThrowTypeError(
         "Cannot close a writable stream that has "
         "already been requested to be closed");
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   //  5. Return ! WritableStreamDefaultWriterClose(this).
-  return ScriptPromise(script_state, Close(script_state, this));
+  return ScriptPromiseUntyped(script_state, Close(script_state, this));
 }
 
 void WritableStreamDefaultWriter::releaseLock(ScriptState* script_state) {
@@ -248,7 +248,7 @@ void WritableStreamDefaultWriter::releaseLock(ScriptState* script_state) {
   Release(script_state, this);
 }
 
-ScriptPromise WritableStreamDefaultWriter::write(
+ScriptPromiseUntyped WritableStreamDefaultWriter::write(
     ScriptState* script_state,
     ExceptionState& exception_state) {
   return write(script_state,
@@ -257,7 +257,7 @@ ScriptPromise WritableStreamDefaultWriter::write(
                exception_state);
 }
 
-ScriptPromise WritableStreamDefaultWriter::write(
+ScriptPromiseUntyped WritableStreamDefaultWriter::write(
     ScriptState* script_state,
     ScriptValue chunk,
     ExceptionState& exception_state) {
@@ -267,12 +267,13 @@ ScriptPromise WritableStreamDefaultWriter::write(
   if (!owner_writable_stream_) {
     exception_state.ThrowTypeError(
         CreateWriterLockReleasedMessage("written to"));
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   //  3. Return ! WritableStreamDefaultWriterWrite(this, chunk).
-  return ScriptPromise(script_state,
-                       Write(script_state, this, chunk.V8Value()));
+  return ScriptPromiseUntyped(
+      script_state,
+      Write(script_state, this, chunk.V8Value(), exception_state));
 }
 
 void WritableStreamDefaultWriter::EnsureReadyPromiseRejected(
@@ -369,7 +370,8 @@ void WritableStreamDefaultWriter::Release(ScriptState* script_state,
 v8::Local<v8::Promise> WritableStreamDefaultWriter::Write(
     ScriptState* script_state,
     WritableStreamDefaultWriter* writer,
-    v8::Local<v8::Value> chunk) {
+    v8::Local<v8::Value> chunk,
+    ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#writable-stream-default-writer-write
   //  1. Let stream be writer.[[ownerWritableStream]].
   WritableStream* stream = writer->owner_writable_stream_;
@@ -384,7 +386,7 @@ v8::Local<v8::Promise> WritableStreamDefaultWriter::Write(
   //  4. Let chunkSize be !
   //     WritableStreamDefaultControllerGetChunkSize(controller, chunk).
   double chunk_size = WritableStreamDefaultController::GetChunkSize(
-      script_state, controller, chunk);
+      script_state, controller, chunk, exception_state);
 
   //  5. If stream is not equal to writer.[[ownerWritableStream]], return a
   //     promise rejected with a TypeError exception.
@@ -433,13 +435,13 @@ v8::Local<v8::Promise> WritableStreamDefaultWriter::Write(
   // 12. Perform ! WritableStreamDefaultControllerWrite(controller, chunk,
   //     chunkSize).
   WritableStreamDefaultController::Write(script_state, controller, chunk,
-                                         chunk_size);
+                                         chunk_size, exception_state);
 
   // 13. Return promise.
   return promise;
 }
 
-absl::optional<double> WritableStreamDefaultWriter::GetDesiredSizeInternal()
+std::optional<double> WritableStreamDefaultWriter::GetDesiredSizeInternal()
     const {
   // https://streams.spec.whatwg.org/#writable-stream-default-writer-get-desired-size
   //  1. Let stream be writer.[[ownerWritableStream]].
@@ -452,7 +454,7 @@ absl::optional<double> WritableStreamDefaultWriter::GetDesiredSizeInternal()
     //  3. If state is "errored" or "erroring", return null.
     case WritableStream::kErrored:
     case WritableStream::kErroring:
-      return absl::nullopt;
+      return std::nullopt;
 
       //  4. If state is "closed", return 0.
     case WritableStream::kClosed:
@@ -538,7 +540,7 @@ v8::Local<v8::Value> WritableStreamDefaultWriter::GetDesiredSize(
   //  1. Let stream be writer.[[ownerWritableStream]].
   //  2. Let state be stream.[[state]].
   //  3. If state is "errored" or "erroring", return null.
-  absl::optional<double> desired_size = writer->GetDesiredSizeInternal();
+  std::optional<double> desired_size = writer->GetDesiredSizeInternal();
   if (!desired_size.has_value()) {
     return v8::Null(isolate);
   }

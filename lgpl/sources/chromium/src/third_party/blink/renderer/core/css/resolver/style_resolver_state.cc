@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/core_probes_inl.h"
 #include "third_party/blink/renderer/core/css/css_light_dark_value_pair.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
+#include "third_party/blink/renderer/core/css/out_of_flow_data.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
@@ -48,6 +49,49 @@ Element* ComputeStyledElement(const StyleRequest& style_request,
         style_request.pseudo_id, style_request.pseudo_argument);
   }
   return styled_element;
+}
+
+AnchorEvaluator* ComputeAnchorEvaluator(
+    Element* styled_element,
+    const StyleRecalcContext* style_recalc_context) {
+  if (!style_recalc_context) {
+    return nullptr;
+  }
+  if (style_recalc_context->anchor_evaluator) {
+    return style_recalc_context->anchor_evaluator;
+  }
+  if (style_recalc_context->is_interleaved_oof) {
+    // If we don't have an anchor evaluator, then we're resolving the style for
+    // a descendant of the anchored element. Normally, if that descendant is
+    // also anchored, then we'd enter UpdateStyleForOutOfFlow separately for
+    // that descendant, but this is not the case for ::backdrop, where
+    // UpdateStyleForOutOfFlow calls appear in the reverse order. For example:
+    //
+    //  - Say ::backdrop and its <dialog> are both absolutely positioned,
+    //    and <dialog> uses the anchor attribute.
+    //  - We get a call to UpdateStyleForOutOfFlow to ::backdrop first,
+    //    which evaluates any anchor queries correctly for ::backdrop.
+    //  - We then get another call to UpdateStyleForOutOfFlow for <dialog>,
+    //    which also updates the ::backdrop (again), but this time we lose the
+    //    AnchorEvaluator on our way into ::backdrop. (This is the correct
+    //    behavior as the AnchorEvaluator passed into UpdateStyleForOutOfFlow is
+    //    only supposed to apply to the interleaving root itself).
+    //
+    // For this reason, we use the AnchorResults (the most recently seen anchor
+    // query results) as the AnchorEvaluator if we end up with no (incoming)
+    // AnchorEvaluator during is_interleaved_oof.
+    //
+    // The AnchorResults cache was originally implemented as an optimization for
+    // regular style recalcs, but is currently disabled due to issues with
+    // invalidation.
+    //
+    // TODO(crbug.com/333608683): Make use of AnchorResults for regular recalcs.
+    if (styled_element) {
+      OutOfFlowData* out_of_flow_data = styled_element->GetOutOfFlowData();
+      return out_of_flow_data ? &out_of_flow_data->GetAnchorResults() : nullptr;
+    }
+  }
+  return nullptr;
 }
 
 }  // namespace
@@ -75,6 +119,8 @@ StyleResolverState::StyleResolverState(
       container_unit_context_(style_recalc_context
                                   ? style_recalc_context->container
                                   : element.ParentOrShadowHostElement()),
+      anchor_evaluator_(
+          ComputeAnchorEvaluator(styled_element_, style_recalc_context)),
       originating_element_style_(style_request.originating_element_style),
       is_for_highlight_(IsHighlightPseudoElement(style_request.pseudo_id)),
       uses_highlight_pseudo_inheritance_(
@@ -145,7 +191,7 @@ EInsideLink StyleResolverState::InsideLink() const {
   return *inside_link_;
 }
 
-scoped_refptr<const ComputedStyle> StyleResolverState::TakeStyle() {
+const ComputedStyle* StyleResolverState::TakeStyle() {
   if (had_no_matched_properties_ &&
       pseudo_request_type_ == StyleRequest::kForRenderer) {
     return nullptr;
@@ -158,6 +204,9 @@ void StyleResolverState::UpdateLengthConversionData() {
       *style_builder_, ParentStyle(), RootElementStyle(),
       GetDocument().GetStyleEngine().GetViewportSize(),
       CSSToLengthConversionData::ContainerSizes(container_unit_context_),
+      CSSToLengthConversionData::AnchorData(anchor_evaluator_,
+                                            StyleBuilder().PositionAnchor(),
+                                            StyleBuilder().InsetAreaOffsets()),
       StyleBuilder().EffectiveZoom(), length_conversion_flags_);
   element_style_resources_.UpdateLengthConversionData(
       &css_to_length_conversion_data_);
@@ -176,10 +225,12 @@ CSSToLengthConversionData StyleResolverState::UnzoomedLengthConversionData(
       GetDocument().GetLayoutView());
   CSSToLengthConversionData::ContainerSizes container_sizes(
       container_unit_context_);
-
+  CSSToLengthConversionData::AnchorData anchor_data(
+      anchor_evaluator_, StyleBuilder().PositionAnchor(),
+      StyleBuilder().InsetAreaOffsets());
   return CSSToLengthConversionData(
       StyleBuilder().GetWritingMode(), font_sizes, line_height_size,
-      viewport_size, container_sizes, 1, length_conversion_flags_);
+      viewport_size, container_sizes, anchor_data, 1, length_conversion_flags_);
 }
 
 CSSToLengthConversionData StyleResolverState::FontSizeConversionData() {
@@ -190,8 +241,7 @@ CSSToLengthConversionData StyleResolverState::UnzoomedLengthConversionData() {
   return UnzoomedLengthConversionData(style_builder_->GetFontSizeStyle());
 }
 
-void StyleResolverState::SetParentStyle(
-    scoped_refptr<const ComputedStyle> parent_style) {
+void StyleResolverState::SetParentStyle(const ComputedStyle* parent_style) {
   parent_style_ = std::move(parent_style);
   if (style_builder_) {
     // Need to update conversion data for 'lh' units.
@@ -200,17 +250,26 @@ void StyleResolverState::SetParentStyle(
 }
 
 void StyleResolverState::SetLayoutParentStyle(
-    scoped_refptr<const ComputedStyle> parent_style) {
-  layout_parent_style_ = std::move(parent_style);
+    const ComputedStyle* parent_style) {
+  layout_parent_style_ = parent_style;
 }
 
 void StyleResolverState::LoadPendingResources() {
   if (pseudo_request_type_ == StyleRequest::kForComputedStyle ||
       (ParentStyle() && ParentStyle()->IsEnsuredInDisplayNone()) ||
-      (StyleBuilder().Display() == EDisplay::kNone &&
-       !GetElement().LayoutObjectIsNeeded(style_builder_->GetDisplayStyle())) ||
       StyleBuilder().IsEnsuredOutsideFlatTree()) {
     return;
+  }
+  if (StyleBuilder().Display() == EDisplay::kNone &&
+      !GetElement().LayoutObjectIsNeeded(style_builder_->GetDisplayStyle())) {
+    // Don't load resources for display:none elements unless we are animating
+    // display. If we are animating display, we might otherwise have ended up
+    // caching a base style with pending images.
+    Element* animating_element = GetAnimatingElement();
+    if (!animating_element || !CSSAnimations::IsAnimatingDisplayProperty(
+                                  animating_element->GetElementAnimations())) {
+      return;
+    }
   }
 
   if (StyleBuilder().StyleType() == kPseudoIdTargetText) {
@@ -261,6 +320,27 @@ void StyleResolverState::SetTextOrientation(ETextOrientation text_orientation) {
   if (StyleBuilder().GetTextOrientation() != text_orientation) {
     StyleBuilder().SetTextOrientation(text_orientation);
     font_builder_.DidChangeTextOrientation();
+  }
+}
+
+void StyleResolverState::SetPositionAnchor(ScopedCSSName* position_anchor) {
+  if (StyleBuilder().PositionAnchor() != position_anchor) {
+    StyleBuilder().SetPositionAnchor(position_anchor);
+    css_to_length_conversion_data_.SetAnchorData(
+        CSSToLengthConversionData::AnchorData(
+            anchor_evaluator_, position_anchor,
+            StyleBuilder().InsetAreaOffsets()));
+  }
+}
+
+void StyleResolverState::SetInsetAreaOffsets(
+    const std::optional<InsetAreaOffsets>& inset_area_offsets) {
+  if (StyleBuilder().InsetAreaOffsets() != inset_area_offsets) {
+    StyleBuilder().SetInsetAreaOffsets(inset_area_offsets);
+    css_to_length_conversion_data_.SetAnchorData(
+        CSSToLengthConversionData::AnchorData(anchor_evaluator_,
+                                              StyleBuilder().PositionAnchor(),
+                                              inset_area_offsets));
   }
 }
 

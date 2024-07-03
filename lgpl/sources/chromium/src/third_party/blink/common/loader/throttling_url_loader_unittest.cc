@@ -72,18 +72,10 @@ class TestURLLoaderFactory : public network::mojom::URLLoaderFactory,
     return cors_exempt_headers_modified_on_redirect_;
   }
 
-  size_t pause_reading_body_from_net_called() const {
-    return pause_reading_body_from_net_called_;
-  }
-
-  size_t resume_reading_body_from_net_called() const {
-    return resume_reading_body_from_net_called_;
-  }
-
   void NotifyClientOnReceiveResponse() {
     client_remote_->OnReceiveResponse(network::mojom::URLResponseHead::New(),
                                       mojo::ScopedDataPipeConsumerHandle(),
-                                      absl::nullopt);
+                                      std::nullopt);
   }
 
   void NotifyClientOnReceiveRedirect() {
@@ -139,7 +131,7 @@ class TestURLLoaderFactory : public network::mojom::URLLoaderFactory,
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const absl::optional<GURL>& new_url) override {
+      const std::optional<GURL>& new_url) override {
     headers_removed_on_redirect_ = removed_headers;
     headers_modified_on_redirect_ = modified_headers;
     cors_exempt_headers_modified_on_redirect_ = modified_cors_exempt_headers;
@@ -148,20 +140,13 @@ class TestURLLoaderFactory : public network::mojom::URLLoaderFactory,
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override {}
 
-  void PauseReadingBodyFromNet() override {
-    pause_reading_body_from_net_called_++;
-  }
-
-  void ResumeReadingBodyFromNet() override {
-    resume_reading_body_from_net_called_++;
-  }
+  void PauseReadingBodyFromNet() override {}
+  void ResumeReadingBodyFromNet() override {}
 
   size_t create_loader_and_start_called_ = 0;
   std::vector<std::string> headers_removed_on_redirect_;
   net::HttpRequestHeaders headers_modified_on_redirect_;
   net::HttpRequestHeaders cors_exempt_headers_modified_on_redirect_;
-  size_t pause_reading_body_from_net_called_ = 0;
-  size_t resume_reading_body_from_net_called_ = 0;
 
   mojo::Receiver<network::mojom::URLLoaderFactory> receiver_{this};
   mojo::Receiver<network::mojom::URLLoader> url_loader_receiver_{this};
@@ -209,7 +194,7 @@ class TestURLLoaderClient : public network::mojom::URLLoaderClient {
   void OnReceiveResponse(
       network::mojom::URLResponseHeadPtr response_head,
       mojo::ScopedDataPipeConsumerHandle body,
-      absl::optional<mojo_base::BigBuffer> cached_metadata) override {
+      std::optional<mojo_base::BigBuffer> cached_metadata) override {
     on_received_response_called_++;
     if (on_received_response_callback_)
       std::move(on_received_response_callback_).Run();
@@ -412,8 +397,8 @@ class ThrottlingURLLoaderTest : public testing::Test {
   }
 
   void CreateLoaderAndStart(
-      absl::optional<network::ResourceRequest::TrustedParams> trusted_params =
-          absl::nullopt) {
+      std::optional<network::ResourceRequest::TrustedParams> trusted_params =
+          std::nullopt) {
     network::ResourceRequest request;
     request.url = request_url;
     request.trusted_params = std::move(trusted_params);
@@ -516,36 +501,6 @@ TEST_F(ThrottlingURLLoaderTest, DeferBeforeStart) {
   EXPECT_EQ(1u, client_.on_received_response_called());
   EXPECT_EQ(0u, client_.on_received_redirect_called());
   EXPECT_EQ(1u, client_.on_complete_called());
-}
-
-TEST_F(ThrottlingURLLoaderTest, ModifyHeaderInResumeBeforeStart) {
-  throttle_->set_will_start_request_callback(
-      base::BindRepeating([](blink::URLLoaderThrottle::Delegate* delegate,
-                             bool* defer) { *defer = true; }));
-
-  CreateLoaderAndStart();
-
-  base::RunLoop run_loop;
-  factory_.set_on_create_loader_and_start(base::BindRepeating(
-      [](const base::RepeatingClosure& quit_closure,
-         const network::ResourceRequest& url_request) {
-        EXPECT_EQ("X-Test-Header-1: Foo\r\n\r\n",
-                  url_request.headers.ToString());
-        EXPECT_EQ("X-Test-Header-2: Bar\r\n\r\n",
-                  url_request.cors_exempt_headers.ToString());
-        quit_closure.Run();
-      },
-      run_loop.QuitClosure()));
-
-  net::HttpRequestHeaders modified_headers;
-  net::HttpRequestHeaders modified_cors_exempt_headers;
-  modified_headers.SetHeader("X-Test-Header-1", "Foo");
-  modified_cors_exempt_headers.SetHeader("X-Test-Header-2", "Bar");
-  throttle_->delegate()->UpdateDeferredRequestHeaders(
-      modified_headers, modified_cors_exempt_headers);
-  throttle_->delegate()->Resume();
-
-  run_loop.Run();
 }
 
 TEST_F(ThrottlingURLLoaderTest, ModifyURLBeforeStart) {
@@ -834,40 +789,6 @@ TEST_F(ThrottlingURLLoaderTest, RemoveAcceptLanguageHeader) {
       "X-Test-Header-2: Bar\r\n\r\n",
       factory_.headers_modified_on_redirect().ToString());
   EXPECT_EQ("X-Test-Cors-Exempt-Header-1: Bobble\r\n\r\n",
-            factory_.cors_exempt_headers_modified_on_redirect().ToString());
-}
-
-TEST_F(ThrottlingURLLoaderTest, ModifyHeaderInResumeBeforeRedirect) {
-  base::RunLoop run_loop1;
-  throttle_->set_will_redirect_request_callback(base::BindLambdaForTesting(
-      [&run_loop1](blink::URLLoaderThrottle::Delegate* delegate, bool* defer,
-                   std::vector<std::string>* removed_headers,
-                   net::HttpRequestHeaders* modified_headers,
-                   net::HttpRequestHeaders* modified_cors_exempt_headers) {
-        *defer = true;
-        run_loop1.Quit();
-      }));
-
-  CreateLoaderAndStart();
-  factory_.NotifyClientOnReceiveRedirect();
-  run_loop1.Run();
-
-  net::HttpRequestHeaders modified_headers;
-  net::HttpRequestHeaders modified_cors_exempt_headers;
-  modified_headers.SetHeader("X-Test-Header-1", "Foo");
-  modified_cors_exempt_headers.SetHeader("X-Test-Header-2", "Bar");
-  throttle_->delegate()->UpdateDeferredRequestHeaders(
-      modified_headers, modified_cors_exempt_headers);
-  throttle_->delegate()->Resume();
-
-  loader_->FollowRedirect({}, {}, {});
-
-  base::RunLoop run_loop2;
-  run_loop2.RunUntilIdle();
-
-  EXPECT_EQ("X-Test-Header-1: Foo\r\n\r\n",
-            factory_.headers_modified_on_redirect().ToString());
-  EXPECT_EQ("X-Test-Header-2: Bar\r\n\r\n",
             factory_.cors_exempt_headers_modified_on_redirect().ToString());
 }
 
@@ -1285,58 +1206,6 @@ TEST_F(ThrottlingURLLoaderTest, BlockWithMultipleThrottles) {
   EXPECT_EQ(1u, client_.on_received_response_called());
   EXPECT_EQ(0u, client_.on_received_redirect_called());
   EXPECT_EQ(1u, client_.on_complete_called());
-}
-
-TEST_F(ThrottlingURLLoaderTest, PauseResumeReadingBodyFromNet) {
-  throttles_.emplace_back(std::make_unique<TestURLLoaderThrottle>());
-  auto* throttle2 =
-      static_cast<TestURLLoaderThrottle*>(throttles_.back().get());
-
-  // Test that it is okay to call delegate->PauseReadingBodyFromNet() even
-  // before the loader is created.
-  throttle_->set_will_start_request_callback(base::BindLambdaForTesting(
-      [](blink::URLLoaderThrottle::Delegate* delegate, bool* defer) {
-        delegate->PauseReadingBodyFromNet();
-        *defer = true;
-      }));
-  throttle2->set_will_start_request_callback(base::BindLambdaForTesting(
-      [](blink::URLLoaderThrottle::Delegate* delegate, bool* defer) {
-        delegate->PauseReadingBodyFromNet();
-      }));
-
-  CreateLoaderAndStart();
-
-  throttle_->delegate()->Resume();
-
-  factory_.factory_remote().FlushForTesting();
-  EXPECT_EQ(1u, factory_.create_loader_and_start_called());
-
-  // Make sure all URLLoader calls before this point are delivered to the impl
-  // side.
-  factory_.url_loader_receiver().FlushForTesting();
-
-  // Although there were two calls to delegate->PauseReadingBodyFromNet(), only
-  // one URLLoader::PauseReadingBodyFromNet() Mojo call was made.
-  EXPECT_EQ(1u, factory_.pause_reading_body_from_net_called());
-  EXPECT_EQ(0u, factory_.resume_reading_body_from_net_called());
-
-  // Reading body from network is still paused by |throttle2|. Calling
-  // ResumeReadingBodyFromNet() on |throttle_| shouldn't have any effect.
-  throttle_->delegate()->ResumeReadingBodyFromNet();
-  factory_.url_loader_receiver().FlushForTesting();
-  EXPECT_EQ(1u, factory_.pause_reading_body_from_net_called());
-  EXPECT_EQ(0u, factory_.resume_reading_body_from_net_called());
-
-  // Even if we call ResumeReadingBodyFromNet() on |throttle_| one more time.
-  throttle_->delegate()->ResumeReadingBodyFromNet();
-  factory_.url_loader_receiver().FlushForTesting();
-  EXPECT_EQ(1u, factory_.pause_reading_body_from_net_called());
-  EXPECT_EQ(0u, factory_.resume_reading_body_from_net_called());
-
-  throttle2->delegate()->ResumeReadingBodyFromNet();
-  factory_.url_loader_receiver().FlushForTesting();
-  EXPECT_EQ(1u, factory_.pause_reading_body_from_net_called());
-  EXPECT_EQ(1u, factory_.resume_reading_body_from_net_called());
 }
 
 TEST_F(ThrottlingURLLoaderTest,

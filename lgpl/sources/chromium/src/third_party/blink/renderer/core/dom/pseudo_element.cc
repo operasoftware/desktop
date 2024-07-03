@@ -39,7 +39,7 @@
 #include "third_party/blink/renderer/core/layout/generated_children.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_quote.h"
-#include "third_party/blink/renderer/core/layout/list_marker.h"
+#include "third_party/blink/renderer/core/layout/list/list_marker.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/content_data.h"
@@ -49,6 +49,8 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
+
+using mojom::blink::FormControlType;
 
 bool PseudoElementLayoutObjectIsNeeded(const DisplayStyle& pseudo_style,
                                        const Element* originating_element);
@@ -60,7 +62,7 @@ PseudoElement* PseudoElement::Create(Element* parent,
     return MakeGarbageCollected<FirstLetterPseudoElement>(parent);
   } else if (IsTransitionPseudoElement(pseudo_id)) {
     auto* transition =
-        ViewTransitionUtils::GetActiveTransition(parent->GetDocument());
+        ViewTransitionUtils::GetTransition(parent->GetDocument());
     DCHECK(transition);
     return transition->CreatePseudoElement(parent, pseudo_id,
                                            view_transition_name);
@@ -177,17 +179,16 @@ PseudoElement::PseudoElement(Element* parent,
   parent->GetTreeScope().AdoptIfNeeded(*this);
   SetParentOrShadowHostNode(parent);
   SetHasCustomStyleCallbacks();
-  EnsureMutableData().SetIsPseudoElement(true);
   if ((pseudo_id == kPseudoIdBefore || pseudo_id == kPseudoIdAfter) &&
       parent->HasTagName(html_names::kInputTag)) {
     UseCounter::Count(parent->GetDocument(),
                       WebFeature::kPseudoBeforeAfterForInputElement);
     if (HTMLInputElement* input = DynamicTo<HTMLInputElement>(parent)) {
-      if (input->type() == input_type_names::kDate ||
-          input->type() == input_type_names::kDatetimeLocal ||
-          input->type() == input_type_names::kMonth ||
-          input->type() == input_type_names::kWeek ||
-          input->type() == input_type_names::kTime) {
+      if (input->FormControlType() == FormControlType::kInputDate ||
+          input->FormControlType() == FormControlType::kInputDatetimeLocal ||
+          input->FormControlType() == FormControlType::kInputMonth ||
+          input->FormControlType() == FormControlType::kInputWeek ||
+          input->FormControlType() == FormControlType::kInputTime) {
         UseCounter::Count(
             parent->GetDocument(),
             WebFeature::kPseudoBeforeAfterForDateTimeInputElement);
@@ -196,15 +197,20 @@ PseudoElement::PseudoElement(Element* parent,
   }
 }
 
-scoped_refptr<const ComputedStyle> PseudoElement::CustomStyleForLayoutObject(
+const ComputedStyle* PseudoElement::CustomStyleForLayoutObject(
     const StyleRecalcContext& style_recalc_context) {
+  // This method is not used for highlight pseudos that require an
+  // originating element.
+  DCHECK(!IsHighlightPseudoElement(pseudo_id_));
   Element* parent = ParentOrShadowHostElement();
   return parent->StyleForPseudoElement(
-      style_recalc_context, StyleRequest(pseudo_id_, parent->GetComputedStyle(),
-                                         view_transition_name_));
+      style_recalc_context,
+      StyleRequest(pseudo_id_, parent->GetComputedStyle(),
+                   /* originating_element_style */ nullptr,
+                   view_transition_name_));
 }
 
-scoped_refptr<const ComputedStyle> PseudoElement::LayoutStyleForDisplayContents(
+const ComputedStyle* PseudoElement::LayoutStyleForDisplayContents(
     const ComputedStyle& style) {
   // For display:contents we should not generate a box, but we generate a non-
   // observable inline box for pseudo elements to be able to locate the

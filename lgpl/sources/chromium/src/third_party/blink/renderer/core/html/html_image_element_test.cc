@@ -7,12 +7,15 @@
 #include <memory>
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_request.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 
 namespace blink {
 
@@ -62,7 +65,7 @@ TEST_F(HTMLImageElementTest, width) {
   image->setAttribute(html_names::kWidthAttr, AtomicString("400"));
   // TODO(yoav): `width` does not impact resourceWidth until we resolve
   // https://github.com/ResponsiveImagesCG/picture-element/issues/268
-  EXPECT_EQ(absl::nullopt, image->GetResourceWidth());
+  EXPECT_EQ(std::nullopt, image->GetResourceWidth());
   image->setAttribute(html_names::kSizesAttr, AtomicString("100vw"));
   EXPECT_EQ(500, image->GetResourceWidth());
 }
@@ -163,6 +166,114 @@ TEST_F(HTMLImageElementTest, ImageAdRectangleUpdate) {
   EXPECT_EQ(test_frame_client_->observed_image_ad_rects()[3].first, id);
   EXPECT_EQ(test_frame_client_->observed_image_ad_rects()[3].second,
             gfx::Rect());
+}
+
+using HTMLImageElementSimTest = SimTest;
+
+TEST_F(HTMLImageElementSimTest, Sharedstoragewritable_SecureContext_Allowed) {
+  WebRuntimeFeaturesBase::EnableSharedStorageAPI(true);
+  WebRuntimeFeaturesBase::EnableSharedStorageAPIM118(true);
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  SimSubresourceRequest image_resource("https://example.com/foo.png",
+                                       "image/png");
+  LoadURL("https://example.com/index.html");
+  main_resource.Complete(R"(
+    <img src="foo.png" id="target"
+      allow="shared-storage"
+      sharedstoragewritable></img>
+  )");
+
+  image_resource.Complete("image data");
+  EXPECT_TRUE(ConsoleMessages().empty());
+}
+
+TEST_F(HTMLImageElementSimTest,
+       Sharedstoragewritable_InsecureContext_NotAllowed) {
+  WebRuntimeFeaturesBase::EnableSharedStorageAPI(true);
+  WebRuntimeFeaturesBase::EnableSharedStorageAPIM118(true);
+  SimRequest main_resource("http://example.com/index.html", "text/html");
+  SimSubresourceRequest image_resource("http://example.com/foo.png",
+                                       "image/png");
+  LoadURL("http://example.com/index.html");
+  main_resource.Complete(R"(
+    <img src="foo.png" id="target"
+      allow="shared-storage"
+      sharedstoragewritable></img>
+  )");
+
+  image_resource.Complete("image data");
+  EXPECT_EQ(ConsoleMessages().size(), 1u);
+  EXPECT_TRUE(ConsoleMessages().front().StartsWith(
+      "sharedStorageWritable: sharedStorage operations are only available in "
+      "secure contexts."))
+      << "Expect error that Shared Storage operations are not allowed in "
+         "insecure contexts but got: "
+      << ConsoleMessages().front();
+}
+
+class HTMLImageElementUseCounterTest : public HTMLImageElementTest {
+ protected:
+  bool IsCounted(WebFeature feature) {
+    return GetDocument().IsUseCounted(feature);
+  }
+};
+
+TEST_F(HTMLImageElementUseCounterTest, AutoSizesUseCountersNoSizes) {
+  SetBodyInnerHTML(R"HTML(
+    <img id="target"
+         loading="lazy">
+    </img>
+  )HTML");
+
+  HTMLImageElement* image = To<HTMLImageElement>(GetElementById("target"));
+  ASSERT_NE(image, nullptr);
+
+  EXPECT_FALSE(IsCounted(WebFeature::kAutoSizesLazy));
+  EXPECT_FALSE(IsCounted(WebFeature::kAutoSizesNonLazy));
+}
+
+TEST_F(HTMLImageElementUseCounterTest, AutoSizesUseCountersNonAutoSizes) {
+  SetBodyInnerHTML(R"HTML(
+    <img id="target"
+         sizes = "33px"
+         loading="lazy">
+    </img>
+  )HTML");
+
+  HTMLImageElement* image = To<HTMLImageElement>(GetElementById("target"));
+  ASSERT_NE(image, nullptr);
+
+  EXPECT_FALSE(IsCounted(WebFeature::kAutoSizesLazy));
+  EXPECT_FALSE(IsCounted(WebFeature::kAutoSizesNonLazy));
+}
+
+TEST_F(HTMLImageElementUseCounterTest, AutoSizesNonLazyUseCounter) {
+  SetBodyInnerHTML(R"HTML(
+    <img id="target"
+         sizes="auto">
+    </img>
+  )HTML");
+
+  HTMLImageElement* image = To<HTMLImageElement>(GetElementById("target"));
+  ASSERT_NE(image, nullptr);
+
+  EXPECT_FALSE(IsCounted(WebFeature::kAutoSizesLazy));
+  EXPECT_TRUE(IsCounted(WebFeature::kAutoSizesNonLazy));
+}
+
+TEST_F(HTMLImageElementUseCounterTest, AutoSizesLazyUseCounter) {
+  SetBodyInnerHTML(R"HTML(
+    <img id="target"
+         sizes="auto"
+         loading="lazy">
+    </img>
+  )HTML");
+
+  HTMLImageElement* image = To<HTMLImageElement>(GetElementById("target"));
+  ASSERT_NE(image, nullptr);
+
+  EXPECT_TRUE(IsCounted(WebFeature::kAutoSizesLazy));
+  EXPECT_FALSE(IsCounted(WebFeature::kAutoSizesNonLazy));
 }
 
 }  // namespace blink

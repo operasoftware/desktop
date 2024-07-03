@@ -49,7 +49,7 @@
 #include "third_party/blink/renderer/platform/wtf/wtf_export.h"
 
 #if BUILDFLAG(IS_APPLE)
-#include "base/mac/scoped_cftyperef.h"
+#include "base/apple/scoped_cftyperef.h"
 
 typedef const struct __CFString* CFStringRef;
 #endif
@@ -336,7 +336,9 @@ class WTF_EXPORT StringImpl {
   static void CopyChars(T* destination,
                         const T* source,
                         wtf_size_t num_characters) {
-    memcpy(destination, source, num_characters * sizeof(T));
+    if (num_characters > 0) {
+      memcpy(destination, source, num_characters * sizeof(T));
+    }
   }
 
   ALWAYS_INLINE static void CopyChars(UChar* destination,
@@ -478,7 +480,7 @@ class WTF_EXPORT StringImpl {
                  wtf_size_t length = UINT_MAX) const;
 
 #if BUILDFLAG(IS_APPLE)
-  base::ScopedCFTypeRef<CFStringRef> CreateCFString();
+  base::apple::ScopedCFTypeRef<CFStringRef> CreateCFString();
 #endif
 #ifdef __OBJC__
   operator NSString*();
@@ -664,7 +666,7 @@ template <typename CharType>
 ALWAYS_INLINE bool Equal(const CharType* a,
                          const CharType* b,
                          wtf_size_t length) {
-  return !memcmp(a, b, length * sizeof(CharType));
+  return std::equal(a, a + length, b);
 }
 
 ALWAYS_INLINE bool Equal(const LChar* a, const UChar* b, wtf_size_t length) {

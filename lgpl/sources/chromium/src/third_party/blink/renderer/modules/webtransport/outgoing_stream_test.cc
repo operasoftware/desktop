@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "v8/include/v8.h"
 
@@ -76,9 +77,9 @@ class StreamCreator {
     mock_client_ = MakeGarbageCollected<StrictMock<MockClient>>();
     auto* outgoing_stream = MakeGarbageCollected<OutgoingStream>(
         script_state, mock_client_, std::move(data_pipe_producer));
-    ExceptionState exception_state(scope.GetIsolate(),
-                                   ExceptionState::kConstructionContext,
-                                   "OutgoingStream");
+    ExceptionState exception_state(
+        scope.GetIsolate(), ExceptionContextType::kConstructorOperationInvoke,
+        "OutgoingStream");
     outgoing_stream->Init(exception_state);
     CHECK(!exception_state.HadException());
     return outgoing_stream;
@@ -94,7 +95,7 @@ class StreamCreator {
   Vector<uint8_t> ReadAllPendingData() {
     Vector<uint8_t> data;
     const void* buffer = nullptr;
-    uint32_t buffer_num_bytes = 0;
+    size_t buffer_num_bytes = 0;
     MojoResult result = data_pipe_consumer_->BeginReadData(
         &buffer, &buffer_num_bytes, MOJO_BEGIN_READ_DATA_FLAG_NONE);
 
@@ -120,6 +121,7 @@ class StreamCreator {
 };
 
 TEST(OutgoingStreamTest, Create) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   auto* outgoing_stream = stream_creator.Create(scope);
@@ -129,6 +131,7 @@ TEST(OutgoingStreamTest, Create) {
 }
 
 TEST(OutgoingStreamTest, WriteArrayBuffer) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   auto* outgoing_stream = stream_creator.Create(scope);
@@ -136,7 +139,7 @@ TEST(OutgoingStreamTest, WriteArrayBuffer) {
   auto* writer =
       outgoing_stream->Writable()->getWriter(script_state, ASSERT_NO_EXCEPTION);
   auto* chunk = DOMArrayBuffer::Create("A", 1);
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(scope.GetScriptState(), result);
@@ -148,6 +151,7 @@ TEST(OutgoingStreamTest, WriteArrayBuffer) {
 }
 
 TEST(OutgoingStreamTest, WriteArrayBufferView) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   auto* outgoing_stream = stream_creator.Create(scope);
@@ -157,7 +161,7 @@ TEST(OutgoingStreamTest, WriteArrayBufferView) {
   auto* buffer = DOMArrayBuffer::Create("*B", 2);
   // Create a view into the buffer with offset 1, ie. "B".
   auto* chunk = DOMUint8Array::Create(buffer, 1, 1);
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(scope.GetScriptState(), result);
@@ -173,6 +177,7 @@ bool IsAllNulls(base::span<const uint8_t> data) {
 }
 
 TEST(OutgoingStreamTest, AsyncWrite) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   // Set a large pipe capacity, so any platform-specific excess is dwarfed in
@@ -187,7 +192,7 @@ TEST(OutgoingStreamTest, AsyncWrite) {
   // Write a chunk that definitely will not fit in the pipe.
   const size_t kChunkSize = kPipeCapacity * 3;
   auto* chunk = DOMArrayBuffer::Create(kChunkSize, 1);
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(scope.GetScriptState(), result);
@@ -232,6 +237,7 @@ TEST(OutgoingStreamTest, AsyncWrite) {
 
 // Writing immediately followed by closing should not lose data.
 TEST(OutgoingStreamTest, WriteThenClose) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
 
@@ -240,7 +246,7 @@ TEST(OutgoingStreamTest, WriteThenClose) {
   auto* writer =
       outgoing_stream->Writable()->getWriter(script_state, ASSERT_NO_EXCEPTION);
   auto* chunk = DOMArrayBuffer::Create("D", 1);
-  ScriptPromise write_promise =
+  ScriptPromiseUntyped write_promise =
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
 
@@ -253,7 +259,7 @@ TEST(OutgoingStreamTest, WriteThenClose) {
                                  WrapWeakPersistent(outgoing_stream)));
   });
 
-  ScriptPromise close_promise =
+  ScriptPromiseUntyped close_promise =
       writer->close(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester write_tester(scope.GetScriptState(), write_promise);
   ScriptPromiseTester close_tester(scope.GetScriptState(), close_promise);
@@ -271,6 +277,7 @@ TEST(OutgoingStreamTest, WriteThenClose) {
 }
 
 TEST(OutgoingStreamTest, DataPipeClosed) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
 
@@ -279,7 +286,7 @@ TEST(OutgoingStreamTest, DataPipeClosed) {
 
   auto* writer =
       outgoing_stream->Writable()->getWriter(script_state, ASSERT_NO_EXCEPTION);
-  ScriptPromise closed = writer->closed(script_state);
+  ScriptPromiseUntyped closed = writer->closed(script_state);
   ScriptPromiseTester closed_tester(script_state, closed);
 
   EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
@@ -298,7 +305,7 @@ TEST(OutgoingStreamTest, DataPipeClosed) {
             "The stream was aborted by the remote server");
 
   auto* chunk = DOMArrayBuffer::Create('C', 1);
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester write_tester(script_state, result);
@@ -315,6 +322,7 @@ TEST(OutgoingStreamTest, DataPipeClosed) {
 }
 
 TEST(OutgoingStreamTest, DataPipeClosedDuringAsyncWrite) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
 
@@ -328,12 +336,12 @@ TEST(OutgoingStreamTest, DataPipeClosedDuringAsyncWrite) {
 
   const size_t kChunkSize = kPipeCapacity * 2;
   auto* chunk = DOMArrayBuffer::Create(kChunkSize, 1);
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester write_tester(script_state, result);
 
-  ScriptPromise closed = writer->closed(script_state);
+  ScriptPromiseUntyped closed = writer->closed(script_state);
   ScriptPromiseTester closed_tester(script_state, closed);
 
   EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
@@ -365,6 +373,7 @@ TEST(OutgoingStreamTest, DataPipeClosedDuringAsyncWrite) {
 }
 
 TEST(OutgoingStreamTest, Abort) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   ScriptState* script_state = scope.GetScriptState();
@@ -383,6 +392,7 @@ TEST(OutgoingStreamTest, Abort) {
 }
 
 TEST(OutgoingStreamTest, AbortWithWebTransportError) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   ScriptState* script_state = scope.GetScriptState();
@@ -396,7 +406,7 @@ TEST(OutgoingStreamTest, AbortWithWebTransportError) {
 
   v8::Local<v8::Value> error =
       WebTransportError::Create(isolate,
-                                /*stream_error_code=*/absl::nullopt, "foobar",
+                                /*stream_error_code=*/std::nullopt, "foobar",
                                 WebTransportError::Source::kStream);
 
   auto* writer =
@@ -405,6 +415,7 @@ TEST(OutgoingStreamTest, AbortWithWebTransportError) {
 }
 
 TEST(OutgoingStreamTest, AbortWithWebTransportErrorWithCode) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   ScriptState* script_state = scope.GetScriptState();
@@ -426,6 +437,7 @@ TEST(OutgoingStreamTest, AbortWithWebTransportErrorWithCode) {
 }
 
 TEST(OutgoingStreamTest, CloseAndConnectionError) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   StreamCreator stream_creator;
   ScriptState* script_state = scope.GetScriptState();

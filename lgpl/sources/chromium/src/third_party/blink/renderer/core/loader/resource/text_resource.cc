@@ -14,21 +14,6 @@ namespace blink {
 
 namespace {
 
-class SVGDocumentResourceFactory : public ResourceFactory {
- public:
-  SVGDocumentResourceFactory()
-      : ResourceFactory(ResourceType::kSVGDocument,
-                        TextResourceDecoderOptions::kXMLContent) {}
-
-  Resource* Create(
-      const ResourceRequest& request,
-      const ResourceLoaderOptions& options,
-      const TextResourceDecoderOptions& decoder_options) const override {
-    return MakeGarbageCollected<TextResource>(
-        request, ResourceType::kSVGDocument, options, decoder_options);
-  }
-};
-
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 class GpuShaderDocumentResourceFactory : public ResourceFactory {
  public:
@@ -47,13 +32,6 @@ class GpuShaderDocumentResourceFactory : public ResourceFactory {
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 }  // namespace
-
-TextResource* TextResource::FetchSVGDocument(FetchParameters& params,
-                                             ResourceFetcher* fetcher,
-                                             ResourceClient* client) {
-  return To<TextResource>(
-      fetcher->RequestResource(params, SVGDocumentResourceFactory(), client));
-}
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 TextResource* TextResource::FetchGpuShaderDocument(FetchParameters& params,

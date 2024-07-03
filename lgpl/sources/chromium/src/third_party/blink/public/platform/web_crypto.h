@@ -48,6 +48,7 @@ namespace blink {
 class CryptoResult;
 class CryptoResultCancel;
 class WebString;
+class ExecutionContext;
 
 enum WebCryptoErrorType {
   kWebCryptoErrorTypeType,
@@ -56,6 +57,11 @@ enum WebCryptoErrorType {
   kWebCryptoErrorTypeInvalidAccess,
   kWebCryptoErrorTypeData,
   kWebCryptoErrorTypeOperation,
+};
+
+enum WebCryptoWarningType {
+  kWebCryptoWarningTypeNone,
+  kWebCryptoWarningTypeDeriveBitsTruncated,
 };
 
 class BLINK_PLATFORM_EXPORT WebCryptoResult {
@@ -88,6 +94,8 @@ class BLINK_PLATFORM_EXPORT WebCryptoResult {
   // Returns true if the underlying operation was cancelled.
   // This method can be called from any thread.
   bool Cancelled() const;
+
+  ExecutionContext* GetExecutionContext() const;
 
 #if INSIDE_BLINK
   WebCryptoResult(CryptoResult*, scoped_refptr<CryptoResultCancel>);

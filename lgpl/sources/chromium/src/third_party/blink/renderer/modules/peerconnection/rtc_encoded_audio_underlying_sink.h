@@ -21,28 +21,26 @@ class MODULES_EXPORT RTCEncodedAudioUnderlyingSink final
  public:
   RTCEncodedAudioUnderlyingSink(
       ScriptState*,
-      scoped_refptr<blink::RTCEncodedAudioStreamTransformer::Broker>,
-      webrtc::TransformableFrameInterface::Direction);
+      scoped_refptr<blink::RTCEncodedAudioStreamTransformer::Broker>);
 
   // UnderlyingSinkBase
-  ScriptPromise start(ScriptState*,
-                      WritableStreamDefaultController*,
-                      ExceptionState&) override;
-  ScriptPromise write(ScriptState*,
-                      ScriptValue chunk,
-                      WritableStreamDefaultController*,
-                      ExceptionState&) override;
-  ScriptPromise close(ScriptState*, ExceptionState&) override;
-  ScriptPromise abort(ScriptState*,
-                      ScriptValue reason,
-                      ExceptionState&) override;
+  ScriptPromise<IDLUndefined> start(ScriptState*,
+                                    WritableStreamDefaultController*,
+                                    ExceptionState&) override;
+  ScriptPromise<IDLUndefined> write(ScriptState*,
+                                    ScriptValue chunk,
+                                    WritableStreamDefaultController*,
+                                    ExceptionState&) override;
+  ScriptPromise<IDLUndefined> close(ScriptState*, ExceptionState&) override;
+  ScriptPromise<IDLUndefined> abort(ScriptState*,
+                                    ScriptValue reason,
+                                    ExceptionState&) override;
 
   void Trace(Visitor*) const override;
 
  private:
   scoped_refptr<blink::RTCEncodedAudioStreamTransformer::Broker>
       transformer_broker_;
-  webrtc::TransformableFrameInterface::Direction expected_direction_;
   THREAD_CHECKER(thread_checker_);
 };
 

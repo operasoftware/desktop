@@ -148,6 +148,7 @@ class CORE_EXPORT InspectorCSSAgent final
   void GetTextPosition(wtf_size_t offset,
                        const String* text,
                        TextPosition* result);
+  void DidReplaceStyleSheetText(CSSStyleSheet* style_sheet, const String& text);
   void LocalFontsEnabled(bool* result);
 
   void enable(std::unique_ptr<EnableCallback>) override;
@@ -164,6 +165,11 @@ class CORE_EXPORT InspectorCSSAgent final
           protocol::Array<protocol::CSS::InheritedPseudoElementMatches>>*,
       protocol::Maybe<protocol::Array<protocol::CSS::CSSKeyframesRule>>*,
       protocol::Maybe<protocol::Array<protocol::CSS::CSSPositionFallbackRule>>*,
+      protocol::Maybe<protocol::Array<protocol::CSS::CSSPositionTryRule>>*,
+      protocol::Maybe<protocol::Array<protocol::CSS::CSSPropertyRule>>*,
+      protocol::Maybe<protocol::Array<protocol::CSS::CSSPropertyRegistration>>*,
+      protocol::Maybe<protocol::CSS::CSSFontPaletteValuesRule>*
+          out_cssFontPaletteValuesRule,
       protocol::Maybe<int>*) override;
   protocol::Response getInlineStylesForNode(
       int node_id,
@@ -191,6 +197,11 @@ class CORE_EXPORT InspectorCSSAgent final
       std::unique_ptr<protocol::CSS::SourceRange>,
       const String& selector,
       std::unique_ptr<protocol::CSS::SelectorList>*) override;
+  protocol::Response setPropertyRulePropertyName(
+      const String& in_styleSheetId,
+      std::unique_ptr<protocol::CSS::SourceRange> in_range,
+      const String& in_propertyName,
+      std::unique_ptr<protocol::CSS::Value>* out_propertyName) override;
   protocol::Response setKeyframeKey(
       const String& style_sheet_id,
       std::unique_ptr<protocol::CSS::SourceRange>,
@@ -199,6 +210,7 @@ class CORE_EXPORT InspectorCSSAgent final
   protocol::Response setStyleTexts(
       std::unique_ptr<protocol::Array<protocol::CSS::StyleDeclarationEdit>>
           edits,
+      protocol::Maybe<int> node_for_property_syntax_validation,
       std::unique_ptr<protocol::Array<protocol::CSS::CSSStyle>>* styles)
       override;
   protocol::Response setMediaText(
@@ -223,10 +235,12 @@ class CORE_EXPORT InspectorCSSAgent final
       std::unique_ptr<protocol::CSS::CSSSupports>*) override;
   protocol::Response createStyleSheet(const String& frame_id,
                                       String* style_sheet_id) override;
-  protocol::Response addRule(const String& style_sheet_id,
-                             const String& rule_text,
-                             std::unique_ptr<protocol::CSS::SourceRange>,
-                             std::unique_ptr<protocol::CSS::CSSRule>*) override;
+  protocol::Response addRule(
+      const String& style_sheet_id,
+      const String& rule_text,
+      std::unique_ptr<protocol::CSS::SourceRange>,
+      protocol::Maybe<int> node_for_property_syntax_validation,
+      std::unique_ptr<protocol::CSS::CSSRule>*) override;
   protocol::Response forcePseudoState(
       int node_id,
       std::unique_ptr<protocol::Array<String>> forced_pseudo_classes) override;
@@ -235,6 +249,11 @@ class CORE_EXPORT InspectorCSSAgent final
   protocol::Response getLayersForNode(
       int node_id,
       std::unique_ptr<protocol::CSS::CSSLayerData>* root_layer) override;
+  protocol::Response getLocationForSelector(
+      const String& style_sheet_id,
+      const String& selector_text,
+      std::unique_ptr<protocol::Array<protocol::CSS::SourceRange>>* ranges)
+      override;
   protocol::Response setEffectivePropertyValueForNode(
       int node_id,
       const String& property_name,
@@ -328,8 +347,15 @@ class CORE_EXPORT InspectorCSSAgent final
       std::unique_ptr<protocol::Array<protocol::CSS::StyleDeclarationEdit>>,
       HeapVector<Member<StyleSheetAction>>* actions);
 
-  std::unique_ptr<protocol::Array<protocol::CSS::CSSPositionFallbackRule>>
-  PositionFallbackRulesForNode(Element* element);
+  std::unique_ptr<protocol::Array<protocol::CSS::CSSPositionTryRule>>
+  PositionTryRulesForElement(Element* element);
+
+  std::pair<
+      std::unique_ptr<protocol::Array<protocol::CSS::CSSPropertyRule>>,
+      std::unique_ptr<protocol::Array<protocol::CSS::CSSPropertyRegistration>>>
+  CustomPropertiesForNode(Element* element);
+  std::unique_ptr<protocol::CSS::CSSFontPaletteValuesRule> FontPalettesForNode(
+      Element& element);
 
   // If the |animating_element| is a pseudo element, then |element| is a
   // reference to its originating DOM element.
@@ -344,7 +370,7 @@ class CORE_EXPORT InspectorCSSAgent final
 
   void CollectPlatformFontsForLayoutObject(
       LayoutObject*,
-      HashCountedSet<std::pair<int, String>>*,
+      HashMap<std::pair<int, String>, std::pair<int, String>>*,
       unsigned descendants_depth);
 
   InspectorStyleSheet* BindStyleSheet(CSSStyleSheet*);
@@ -361,11 +387,19 @@ class CORE_EXPORT InspectorCSSAgent final
   String DetectOrigin(CSSStyleSheet* page_style_sheet,
                       Document* owner_document);
 
-  std::unique_ptr<protocol::CSS::CSSRule> BuildObjectForRule(CSSStyleRule*);
+  std::unique_ptr<protocol::CSS::CSSRule> BuildObjectForRule(
+      CSSStyleRule*,
+      Element* element,
+      PseudoId pseudo_id = kPseudoIdNone,
+      const AtomicString& pseudo_argument = g_null_atom);
   std::unique_ptr<protocol::CSS::RuleUsage> BuildCoverageInfo(CSSStyleRule*,
                                                               bool);
   std::unique_ptr<protocol::Array<protocol::CSS::RuleMatch>>
-  BuildArrayForMatchedRuleList(RuleIndexList*);
+  BuildArrayForMatchedRuleList(
+      RuleIndexList*,
+      Element*,
+      PseudoId pseudo_id = kPseudoIdNone,
+      const AtomicString& pseudo_argument = g_null_atom);
   std::unique_ptr<protocol::CSS::CSSStyle> BuildObjectForAttributesStyle(
       Element*);
   std::unique_ptr<protocol::Array<int>>

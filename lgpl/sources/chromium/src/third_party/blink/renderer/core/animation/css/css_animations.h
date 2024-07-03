@@ -67,7 +67,15 @@ class CORE_EXPORT CSSAnimations final {
   CSSAnimations(const CSSAnimations&) = delete;
   CSSAnimations& operator=(const CSSAnimations&) = delete;
 
-  static const StylePropertyShorthand& PropertiesForTransitionAll();
+  // When |with_discrete| is set to true, this method returns not just
+  // interpolable properties, but properties which can be transitioned with
+  // transition-behavior:allow-discrete. |with_discrete| returns almost 3x as
+  // many properties, which may result in slower style update performance, so
+  // they are worth separating.
+  static const StylePropertyShorthand& PropertiesForTransitionAll(
+      bool with_discrete,
+      const ExecutionContext* execution_context);
+
   static bool IsAnimationAffectingProperty(const CSSProperty&);
   static bool IsAffectedByKeyframesFromScope(const Element&, const TreeScope&);
   static bool IsAnimatingCustomProperties(const ElementAnimations*);
@@ -77,6 +85,7 @@ class CORE_EXPORT CSSAnimations final {
   static bool IsAnimatingFontAffectingProperties(const ElementAnimations*);
   static bool IsAnimatingLineHeightProperty(const ElementAnimations*);
   static bool IsAnimatingRevert(const ElementAnimations*);
+  static bool IsAnimatingDisplayProperty(const ElementAnimations*);
   static void CalculateTimelineUpdate(CSSAnimationUpdate&,
                                       Element& animating_element,
                                       const ComputedStyleBuilder&);
@@ -157,10 +166,10 @@ class CORE_EXPORT CSSAnimations final {
     AnimationTimeline* Timeline() const {
       return animation->TimelineInternal();
     }
-    const absl::optional<TimelineOffset>& RangeStart() const {
+    const std::optional<TimelineOffset>& RangeStart() const {
       return animation->GetRangeStartInternal();
     }
-    const absl::optional<TimelineOffset>& RangeEnd() const {
+    const std::optional<TimelineOffset>& RangeEnd() const {
       return animation->GetRangeEndInternal();
     }
 
@@ -188,14 +197,28 @@ class CORE_EXPORT CSSAnimations final {
 
   struct RunningTransition : public GarbageCollected<RunningTransition> {
    public:
-    virtual ~RunningTransition() = default;
+    RunningTransition(Animation* animation,
+                      const ComputedStyle* from,
+                      const ComputedStyle* to,
+                      const ComputedStyle* reversing_adjusted_start_value,
+                      double reversing_shortening_factor)
+        : animation(animation),
+          from(from),
+          to(to),
+          reversing_adjusted_start_value(reversing_adjusted_start_value),
+          reversing_shortening_factor(reversing_shortening_factor) {}
 
-    void Trace(Visitor* visitor) const { visitor->Trace(animation); }
+    void Trace(Visitor* visitor) const {
+      visitor->Trace(animation);
+      visitor->Trace(from);
+      visitor->Trace(to);
+      visitor->Trace(reversing_adjusted_start_value);
+    }
 
     Member<Animation> animation;
-    scoped_refptr<const ComputedStyle> from;
-    scoped_refptr<const ComputedStyle> to;
-    scoped_refptr<const ComputedStyle> reversing_adjusted_start_value;
+    Member<const ComputedStyle> from;
+    Member<const ComputedStyle> to;
+    Member<const ComputedStyle> reversing_adjusted_start_value;
     double reversing_shortening_factor;
   };
 
@@ -261,7 +284,7 @@ class CORE_EXPORT CSSAnimations final {
     Element& animating_element;
     const ComputedStyle& old_style;
     const ComputedStyle& base_style;
-    scoped_refptr<const ComputedStyle> before_change_style;
+    const ComputedStyle* before_change_style;
     const TransitionMap* active_transitions;
     HashSet<PropertyHandle>* listed_properties;
     const CSSTransitionData* transition_data;
@@ -294,6 +317,7 @@ class CORE_EXPORT CSSAnimations final {
 
   static void CalculateTransitionUpdateForPropertyHandle(
       TransitionUpdateState&,
+      const CSSTransitionData::TransitionAnimationType type,
       const PropertyHandle&,
       wtf_size_t transition_index,
       bool animate_all);
@@ -380,7 +404,7 @@ class CORE_EXPORT CSSAnimations final {
   // on the element as of the previous style change event, except with any
   // styles derived from declarative animations updated to the current time.
   // https://drafts.csswg.org/css-transitions-1/#before-change-style
-  static scoped_refptr<const ComputedStyle> CalculateBeforeChangeStyle(
+  static const ComputedStyle* CalculateBeforeChangeStyle(
       Element& animating_element,
       const ComputedStyle& base_style);
 
@@ -390,7 +414,7 @@ class CORE_EXPORT CSSAnimations final {
         Element* animation_target,
         const AtomicString& name,
         Timing::Phase previous_phase = Timing::kPhaseNone,
-        absl::optional<double> previous_iteration = absl::nullopt)
+        std::optional<double> previous_iteration = std::nullopt)
         : animation_target_(animation_target),
           name_(name),
           previous_phase_(previous_phase),
@@ -400,7 +424,7 @@ class CORE_EXPORT CSSAnimations final {
 
     bool IsAnimationEventDelegate() const override { return true; }
     Timing::Phase getPreviousPhase() const { return previous_phase_; }
-    absl::optional<double> getPreviousIteration() const {
+    std::optional<double> getPreviousIteration() const {
       return previous_iteration_;
     }
 
@@ -417,7 +441,7 @@ class CORE_EXPORT CSSAnimations final {
     Member<Element> animation_target_;
     const AtomicString name_;
     Timing::Phase previous_phase_;
-    absl::optional<double> previous_iteration_;
+    std::optional<double> previous_iteration_;
   };
 
   class TransitionEventDelegate final : public AnimationEffect::EventDelegate {

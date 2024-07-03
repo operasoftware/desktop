@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 using ::testing::Truly;
 
@@ -156,7 +157,11 @@ TEST_F(HTMLInputElementTest, create) {
       GetDocument(), CreateElementFlags::ByParser(&GetDocument()));
   EXPECT_EQ(nullptr, input->UserAgentShadowRoot());
   input->ParserSetAttributes(Vector<Attribute, kAttributePrealloc>());
-  EXPECT_NE(nullptr, input->UserAgentShadowRoot());
+  if (RuntimeEnabledFeatures::CreateInputShadowTreeDuringLayoutEnabled()) {
+    EXPECT_EQ(nullptr, input->UserAgentShadowRoot());
+  } else {
+    EXPECT_NE(nullptr, input->UserAgentShadowRoot());
+  }
 }
 
 TEST_F(HTMLInputElementTest, NoAssertWhenMovedInNewDocument) {
@@ -188,16 +193,15 @@ TEST_F(HTMLInputElementTest, NoAssertWhenMovedInNewDocument) {
 }
 
 TEST_F(HTMLInputElementTest, DefaultToolTip) {
-  auto* input_without_form = MakeGarbageCollected<HTMLInputElement>(
-      GetDocument(), CreateElementFlags());
+  auto* input_without_form =
+      MakeGarbageCollected<HTMLInputElement>(GetDocument());
   input_without_form->SetBooleanAttribute(html_names::kRequiredAttr, true);
   GetDocument().body()->AppendChild(input_without_form);
   EXPECT_EQ("<<ValidationValueMissing>>", input_without_form->DefaultToolTip());
 
   auto* form = MakeGarbageCollected<HTMLFormElement>(GetDocument());
   GetDocument().body()->AppendChild(form);
-  auto* input_with_form = MakeGarbageCollected<HTMLInputElement>(
-      GetDocument(), CreateElementFlags());
+  auto* input_with_form = MakeGarbageCollected<HTMLInputElement>(GetDocument());
   input_with_form->SetBooleanAttribute(html_names::kRequiredAttr, true);
   form->AppendChild(input_with_form);
   EXPECT_EQ("<<ValidationValueMissing>>", input_with_form->DefaultToolTip());
@@ -208,8 +212,7 @@ TEST_F(HTMLInputElementTest, DefaultToolTip) {
 
 // crbug.com/589838
 TEST_F(HTMLInputElementTest, ImageTypeCrash) {
-  auto* input = MakeGarbageCollected<HTMLInputElement>(GetDocument(),
-                                                       CreateElementFlags());
+  auto* input = MakeGarbageCollected<HTMLInputElement>(GetDocument());
   input->setAttribute(html_names::kTypeAttr, AtomicString("image"));
   input->EnsureFallbackContent();
   // Make sure ensurePrimaryContent() recreates UA shadow tree, and updating
@@ -245,13 +248,12 @@ TEST_F(HTMLInputElementTest, DateTimeChooserSizeParamRespectsScale) {
   DateTimeChooserParameters params;
   bool success = input->SetupDateTimeChooserParameters(params);
   EXPECT_TRUE(success);
-  EXPECT_EQ("date", params.type);
+  EXPECT_EQ(InputType::Type::kDate, params.type);
   EXPECT_EQ(gfx::Rect(16, 16, 400, 100), params.anchor_rect_in_screen);
 }
 
 TEST_F(HTMLInputElementTest, StepDownOverflow) {
-  auto* input = MakeGarbageCollected<HTMLInputElement>(GetDocument(),
-                                                       CreateElementFlags());
+  auto* input = MakeGarbageCollected<HTMLInputElement>(GetDocument());
   input->setAttribute(html_names::kTypeAttr, AtomicString("date"));
   input->setAttribute(html_names::kMinAttr, AtomicString("2010-02-10"));
   input->setAttribute(html_names::kStepAttr,
@@ -312,6 +314,31 @@ TEST_F(HTMLInputElementTest, UpdateTypeDcheck) {
   input->setAttribute(html_names::kTypeAttr, AtomicString("radio"));
   // Test succeeds if the above setAttribute() didn't trigger a DCHECK failure
   // in Document::UpdateFocusAppearanceAfterLayout().
+}
+
+TEST_F(HTMLInputElementTest, LazilyCreateShadowTree) {
+  GetDocument().body()->setInnerHTML("<input/>");
+  auto* input = To<HTMLInputElement>(GetDocument().body()->firstChild());
+  ASSERT_TRUE(input);
+  EXPECT_FALSE(IsShadowHost(*input));
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_TRUE(IsShadowHost(*input));
+}
+
+TEST_F(HTMLInputElementTest, LazilyCreateShadowTreeWithPlaceholder) {
+  GetDocument().body()->setInnerHTML("<input placeholder='x'/>");
+  auto* input = To<HTMLInputElement>(GetDocument().body()->firstChild());
+  ASSERT_TRUE(input);
+  EXPECT_FALSE(IsShadowHost(*input));
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_TRUE(IsShadowHost(*input));
+}
+
+TEST_F(HTMLInputElementTest, LazilyCreateShadowTreeWithValue) {
+  GetDocument().body()->setInnerHTML("<input value='x'/>");
+  auto* input = To<HTMLInputElement>(GetDocument().body()->firstChild());
+  ASSERT_TRUE(input);
+  EXPECT_FALSE(IsShadowHost(*input));
 }
 
 struct PasswordFieldResetParam {

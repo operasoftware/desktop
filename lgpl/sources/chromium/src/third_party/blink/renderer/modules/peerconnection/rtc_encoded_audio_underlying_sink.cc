@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_underlying_sink.h"
 
-#include "base/feature_list.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
@@ -14,34 +13,24 @@
 #include "third_party/webrtc/api/frame_transformer_interface.h"
 
 namespace blink {
-// Limit on the size of encoded frames, to ensure they're not silently dropped
-// later by the RTPSender. See https://crbug.com/1248479.
-const int kMaxAudioFramePayloadByteLength = 1000;
-
-// Killswitch base feature
-BASE_FEATURE(kRTCEncodedAudioFrameLimitSize,
-             "RTCEncodedAudioFrameLimitSize",
-             base::FEATURE_ENABLED_BY_DEFAULT);
 
 RTCEncodedAudioUnderlyingSink::RTCEncodedAudioUnderlyingSink(
     ScriptState* script_state,
     scoped_refptr<blink::RTCEncodedAudioStreamTransformer::Broker>
-        transformer_broker,
-    webrtc::TransformableFrameInterface::Direction expected_direction)
-    : transformer_broker_(std::move(transformer_broker)),
-      expected_direction_(expected_direction) {
+        transformer_broker)
+    : transformer_broker_(std::move(transformer_broker)) {
   DCHECK(transformer_broker_);
 }
 
-ScriptPromise RTCEncodedAudioUnderlyingSink::start(
+ScriptPromise<IDLUndefined> RTCEncodedAudioUnderlyingSink::start(
     ScriptState* script_state,
     WritableStreamDefaultController* controller,
     ExceptionState&) {
   // No extra setup needed.
-  return ScriptPromise::CastUndefined(script_state);
+  return ToResolvedUndefinedPromise(script_state);
 }
 
-ScriptPromise RTCEncodedAudioUnderlyingSink::write(
+ScriptPromise<IDLUndefined> RTCEncodedAudioUnderlyingSink::write(
     ScriptState* script_state,
     ScriptValue chunk,
     WritableStreamDefaultController* controller,
@@ -51,49 +40,37 @@ ScriptPromise RTCEncodedAudioUnderlyingSink::write(
       script_state->GetIsolate(), chunk.V8Value());
   if (!encoded_frame) {
     exception_state.ThrowTypeError("Invalid frame");
-    return ScriptPromise();
+    return ScriptPromise<IDLUndefined>();
   }
 
   if (!transformer_broker_) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "Stream closed");
-    return ScriptPromise();
-  }
-
-  if (base::FeatureList::IsEnabled(kRTCEncodedAudioFrameLimitSize) &&
-      encoded_frame->data()->ByteLength() > kMaxAudioFramePayloadByteLength) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kOperationError,
-                                      "Frame too large");
-    return ScriptPromise();
+    return ScriptPromise<IDLUndefined>();
   }
 
   auto webrtc_frame = encoded_frame->PassWebRtcFrame();
   if (!webrtc_frame) {
     exception_state.ThrowDOMException(DOMExceptionCode::kOperationError,
                                       "Empty frame");
-    return ScriptPromise();
-  }
-
-  if (webrtc_frame->GetDirection() != expected_direction_) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kOperationError,
-                                      "Invalid frame");
-    return ScriptPromise();
+    return ScriptPromise<IDLUndefined>();
   }
 
   transformer_broker_->SendFrameToSink(std::move(webrtc_frame));
-  return ScriptPromise::CastUndefined(script_state);
+  return ToResolvedUndefinedPromise(script_state);
 }
 
-ScriptPromise RTCEncodedAudioUnderlyingSink::close(ScriptState* script_state,
-                                                   ExceptionState&) {
+ScriptPromise<IDLUndefined> RTCEncodedAudioUnderlyingSink::close(
+    ScriptState* script_state,
+    ExceptionState&) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // Disconnect from the transformer if the sink is closed.
   if (transformer_broker_)
     transformer_broker_.reset();
-  return ScriptPromise::CastUndefined(script_state);
+  return ToResolvedUndefinedPromise(script_state);
 }
 
-ScriptPromise RTCEncodedAudioUnderlyingSink::abort(
+ScriptPromise<IDLUndefined> RTCEncodedAudioUnderlyingSink::abort(
     ScriptState* script_state,
     ScriptValue reason,
     ExceptionState& exception_state) {

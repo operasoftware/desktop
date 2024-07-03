@@ -24,12 +24,12 @@ namespace {
 // provided to ContainerChanged, since there are multiple sources of
 // applied containment (e.g. the 'contain' property itself).
 PhysicalAxes ContainerTypeAxes(const ComputedStyle& style) {
-  LogicalAxes axes = kLogicalAxisNone;
+  LogicalAxes axes = kLogicalAxesNone;
   if (style.ContainerType() & kContainerTypeInlineSize) {
-    axes |= kLogicalAxisInline;
+    axes |= kLogicalAxesInline;
   }
   if (style.ContainerType() & kContainerTypeBlockSize) {
-    axes |= kLogicalAxisBlock;
+    axes |= kLogicalAxesBlock;
   }
   return ToPhysicalAxes(axes, style.GetWritingMode());
 }
@@ -70,6 +70,9 @@ bool NameMatches(const ComputedStyle& style,
 
 bool TypeMatches(const ComputedStyle& style,
                  const ContainerSelector& container_selector) {
+  DCHECK(
+      !container_selector.HasUnknownFeature() ||
+      !RuntimeEnabledFeatures::CSSUnknownContainerQueriesNoSelectionEnabled());
   unsigned type = container_selector.Type(style.GetWritingMode());
   return !type || ((style.ContainerType() & type) == type);
 }
@@ -89,7 +92,7 @@ Element* CachedContainer(Element* starting_element,
       container_selector_cache.Find<ScopedContainerSelectorHashTranslator>(
           ScopedContainerSelector(container_selector, selector_tree_scope));
   if (it != container_selector_cache.end()) {
-    return it->value;
+    return it->value.Get();
   }
   Element* container = ContainerQueryEvaluator::FindContainer(
       starting_element, container_selector, selector_tree_scope);
@@ -103,7 +106,7 @@ Element* CachedContainer(Element* starting_element,
 
 ContainerQueryEvaluator::ContainerQueryEvaluator(Element& container) {
   auto* query_values = MakeGarbageCollected<CSSContainerValues>(
-      container.GetDocument(), container, absl::nullopt, absl::nullopt,
+      container.GetDocument(), container, std::nullopt, std::nullopt,
       ContainerStuckPhysical::kNo, ContainerStuckPhysical::kNo);
   media_query_evaluator_ =
       MakeGarbageCollected<MediaQueryEvaluator>(query_values);
@@ -136,10 +139,14 @@ bool ContainerQueryEvaluator::EvalAndAdd(
     ContainerSelectorCache& container_selector_cache,
     MatchResult& match_result) {
   const ContainerSelector& selector = query.Selector();
+  if (selector.HasUnknownFeature() &&
+      RuntimeEnabledFeatures::CSSUnknownContainerQueriesNoSelectionEnabled()) {
+    return false;
+  }
   bool selects_size = selector.SelectsSizeContainers();
   bool selects_style = selector.SelectsStyleContainers();
-  bool selects_sticky = selector.SelectsStickyContainers();
-  if (!selects_size && !selects_style && !selects_sticky) {
+  bool selects_state = selector.SelectsStateContainers();
+  if (!selects_size && !selects_style && !selects_state) {
     return false;
   }
 
@@ -149,8 +156,8 @@ bool ContainerQueryEvaluator::EvalAndAdd(
   if (selects_style) {
     match_result.SetDependsOnStyleContainerQueries();
   }
-  if (selects_sticky) {
-    match_result.SetDependsOnStickyContainerQueries();
+  if (selects_state) {
+    match_result.SetDependsOnStateContainerQueries();
   }
 
   Element* starting_element =
@@ -167,12 +174,12 @@ bool ContainerQueryEvaluator::EvalAndAdd(
   return false;
 }
 
-absl::optional<double> ContainerQueryEvaluator::Width() const {
+std::optional<double> ContainerQueryEvaluator::Width() const {
   CHECK(media_query_evaluator_);
   return media_query_evaluator_->GetMediaValues().Width();
 }
 
-absl::optional<double> ContainerQueryEvaluator::Height() const {
+std::optional<double> ContainerQueryEvaluator::Height() const {
   CHECK(media_query_evaluator_);
   return media_query_evaluator_->GetMediaValues().Height();
 }
@@ -250,9 +257,9 @@ bool ContainerQueryEvaluator::EvalAndAdd(const ContainerQuery& query,
   if (!depends_on_style_) {
     depends_on_style_ = query.Selector().SelectsStyleContainers();
   }
-  if (!depends_on_sticky_) {
-    depends_on_sticky_ = query.Selector().SelectsStickyContainers();
-    if (depends_on_sticky_ && !snapshot_) {
+  if (!depends_on_state_) {
+    depends_on_state_ = query.Selector().SelectsStateContainers();
+    if (depends_on_state_ && !snapshot_) {
       CHECK(media_query_evaluator_);
       Element* container_element =
           media_query_evaluator_->GetMediaValues().ContainerElement();
@@ -336,8 +343,8 @@ void ContainerQueryEvaluator::UpdateContainerSize(PhysicalSize size,
   size_ = size;
   contained_axes_ = contained_axes;
 
-  absl::optional<double> width;
-  absl::optional<double> height;
+  std::optional<double> width;
+  std::optional<double> height;
 
   const MediaValues& existing_values = media_query_evaluator_->GetMediaValues();
   Element* container = existing_values.ContainerElement();
@@ -349,13 +356,13 @@ void ContainerQueryEvaluator::UpdateContainerSize(PhysicalSize size,
   PhysicalAxes supported_axes =
       ContainerTypeAxes(container->ComputedStyleRef()) & contained_axes;
 
-  if ((supported_axes & PhysicalAxes(kPhysicalAxisHorizontal)) !=
-      PhysicalAxes(kPhysicalAxisNone)) {
+  if ((supported_axes & PhysicalAxes(kPhysicalAxesHorizontal)) !=
+      PhysicalAxes(kPhysicalAxesNone)) {
     width = size.width.ToDouble();
   }
 
-  if ((supported_axes & PhysicalAxes(kPhysicalAxisVertical)) !=
-      PhysicalAxes(kPhysicalAxisNone)) {
+  if ((supported_axes & PhysicalAxes(kPhysicalAxesVertical)) !=
+      PhysicalAxes(kPhysicalAxesNone)) {
     height = size.height.ToDouble();
   }
 

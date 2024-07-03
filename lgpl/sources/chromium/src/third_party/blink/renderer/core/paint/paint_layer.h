@@ -47,12 +47,13 @@
 
 #include <memory>
 
+#include "base/auto_reset.h"
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
 #include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/geometry/static_position.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
-#include "third_party/blink/renderer/core/layout/ng/geometry/ng_static_position.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_clipper.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_fragment.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_resource_info.h"
@@ -88,6 +89,20 @@ enum PaintLayerIteration {
       kNormalFlowChildren | kPositiveZOrderChildren,
   kAllChildren =
       kNegativeZOrderChildren | kNormalFlowChildren | kPositiveZOrderChildren
+};
+
+// TODO(crbug.com/332933527): Support anchors-valid.
+// If the size of this enum changes, make sure to update the bits needed for
+// `invisible_for_position_visibility_`.
+enum class LayerPositionVisibility : uint8_t {
+  // anchors-visible, anchor intersection.
+  kAnchorsIntersectionVisible = 1,
+  // anchors-visible, anchor CSS visibility.
+  kAnchorsCssVisible = 1 << 1,
+  // anchors-visible, chained anchor visibility.
+  kChainedAnchorsVisible = 1 << 2,
+  // no-overflow.
+  kNoOverflow = 1 << 3,
 };
 
 // PaintLayer is an old object that handles lots of unrelated operations.
@@ -134,7 +149,7 @@ enum PaintLayerIteration {
 //   PaintLayers.
 // - If the flag is false, the LayoutObject is painted like normal children (ie
 //   as if it didn't have a PaintLayer). The paint order is handled by
-//   NGBoxFragmentPainter.
+//   BoxFragmentPainter.
 // This means that the self-painting flag changes the painting order in a subtle
 // way, which can potentially have visible consequences. Those bugs are called
 // painting inversion as we invert the order of painting for 2 elements
@@ -178,11 +193,11 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // Returns |GetLayoutBox()| if it exists and has fragments.
   const LayoutBox* GetLayoutBoxWithBlockFragments() const;
 
-  PaintLayer* Parent() const { return parent_; }
-  PaintLayer* PreviousSibling() const { return previous_; }
-  PaintLayer* NextSibling() const { return next_; }
-  PaintLayer* FirstChild() const { return first_; }
-  PaintLayer* LastChild() const { return last_; }
+  PaintLayer* Parent() const { return parent_.Get(); }
+  PaintLayer* PreviousSibling() const { return previous_.Get(); }
+  PaintLayer* NextSibling() const { return next_.Get(); }
+  PaintLayer* FirstChild() const { return first_.Get(); }
+  PaintLayer* LastChild() const { return last_.Get(); }
 
   // TODO(wangxianzhu): Find a better name for it. 'paintContainer' might be
   // good but we can't use it for now because it conflicts with
@@ -225,8 +240,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
 
   void UpdateScrollingAfterLayout();
 
-  void UpdateLayerPositionsAfterLayout();
-
   void UpdateTransform();
 
   bool HasVisibleContent() const {
@@ -246,12 +259,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // of this layer. Normally the parent layer is the containing layer, except
   // for out of flow positioned, floating and multicol spanner layers whose
   // containing layer might be an ancestor of the parent layer.
-  // If |ancestor| is specified, |*skippedAncestor| will be set to true if
-  // |ancestor| is found in the ancestry chain between this layer and the
-  // containing block layer; if not found, it will be set to false. Either both
-  // |ancestor| and |skippedAncestor| should be nullptr, or none of them should.
-  PaintLayer* ContainingLayer(const PaintLayer* ancestor = nullptr,
-                              bool* skipped_ancestor = nullptr) const;
+  PaintLayer* ContainingLayer() const;
 
   // The hitTest() method looks for mouse events by walking layers that
   // intersect the point from front to back.
@@ -268,8 +276,8 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     static_block_position_ = position;
   }
 
-  using InlineEdge = NGLogicalStaticPosition::InlineEdge;
-  using BlockEdge = NGLogicalStaticPosition::BlockEdge;
+  using InlineEdge = LogicalStaticPosition::InlineEdge;
+  using BlockEdge = LogicalStaticPosition::BlockEdge;
   InlineEdge StaticInlineEdge() const {
     return static_cast<InlineEdge>(static_inline_edge_);
   }
@@ -277,15 +285,15 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return static_cast<BlockEdge>(static_block_edge_);
   }
 
-  void SetStaticPositionFromNG(const NGLogicalStaticPosition& position) {
+  void SetStaticPositionFromNG(const LogicalStaticPosition& position) {
     static_inline_position_ = position.offset.inline_offset;
     static_block_position_ = position.offset.block_offset;
     static_inline_edge_ = position.inline_edge;
     static_block_edge_ = position.block_edge;
   }
 
-  NGLogicalStaticPosition GetStaticPosition() const {
-    NGLogicalStaticPosition position;
+  LogicalStaticPosition GetStaticPosition() const {
+    LogicalStaticPosition position;
     position.offset.inline_offset = static_inline_position_;
     position.offset.block_offset = static_block_position_;
     position.inline_edge = StaticInlineEdge();
@@ -360,13 +368,13 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return has_filter_that_moves_pixels_;
   }
 
+  PaintLayerResourceInfo* ResourceInfo() const { return resource_info_.Get(); }
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   bool HasFiltersThatNeedReferenceBox() const {
     return has_filter_that_need_reference_box_;
   }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
-  PaintLayerResourceInfo* ResourceInfo() const { return resource_info_; }
   PaintLayerResourceInfo& EnsureResourceInfo();
 
   // Filter reference box is the area over which the filter is computed, in the
@@ -533,13 +541,24 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
 
   void Trace(Visitor*) const override;
 
+  PhysicalRect LocalBoundingBoxIncludingSelfPaintingDescendants() const;
+
+  // If `invisible` is true, the whole subtree will be omitted in painting and
+  // hit-testing. The invisible status of each LayerPositionVisibility value is
+  // tracked separately.
+  void SetInvisibleForPositionVisibility(LayerPositionVisibility visibility,
+                                         bool invisible);
+  // Returns true if any bit of the flag is set.
+  bool InvisibleForPositionVisibility() const {
+    return invisible_for_position_visibility_;
+  }
+  bool HasAncestorInvisibleForPositionVisibility() const;
+
  private:
   void Update3DTransformedDescendantStatus();
 
   // Bounding box in the coordinates of this layer.
   PhysicalRect LocalBoundingBox() const;
-
-  void UpdateLayerPositionRecursive();
 
   void SetNextSibling(PaintLayer* next) { next_ = next; }
   void SetPreviousSibling(PaintLayer* prev) { previous_ = prev; }
@@ -610,7 +629,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
       const HitTestingTransformState* root_transform_state) const;
 
   bool HitTestFragmentWithPhase(HitTestResult&,
-                                const NGPhysicalBoxFragment*,
+                                const PhysicalBoxFragment*,
                                 const PhysicalOffset& fragment_offset,
                                 const HitTestLocation&,
                                 HitTestPhase phase) const;
@@ -673,7 +692,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
 
   // This is private because PaintLayerStackingNode is only for PaintLayer and
   // PaintLayerPaintOrderIterator.
-  PaintLayerStackingNode* StackingNode() const { return stacking_node_; }
+  PaintLayerStackingNode* StackingNode() const { return stacking_node_.Get(); }
 
   void SetNeedsReorderOverlayOverflowControls(bool);
 
@@ -749,6 +768,9 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   unsigned static_inline_edge_ : 2;
   unsigned static_block_edge_ : 2;
 
+  unsigned invisible_for_position_visibility_ : 4 = 0;
+  unsigned descendant_needs_check_position_visibility_ : 1 = false;
+
 #if DCHECK_IS_ON()
   mutable unsigned layer_list_mutation_allowed_ : 1;
   bool is_destroyed_ = false;
@@ -780,6 +802,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   friend class PaintLayerPaintOrderIterator;
   friend class PaintLayerPaintOrderReverseIterator;
   friend class PaintLayerStackingNode;
+  friend class CheckAncestorPositionVisibilityScope;
 
   FRIEND_TEST_ALL_PREFIXES(PaintLayerTest,
                            DescendantDependentFlagsStopsAtThrottledFrames);
@@ -795,15 +818,37 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
                            NestedFixedUsesExpandedBoundingBoxForOverlap);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
-
                            FixedWithExpandedBoundsForChild);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
                            FixedWithClippedExpandedBoundsForChild);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
                            FixedWithExpandedBoundsForGrandChild);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
-
                            FixedWithExpandedBoundsForFixedChild);
+};
+
+// This scope should be instantiated for each stacking context during hit-test
+// and paint. In rare cases, a non-stacking-context PaintLayer containing
+// self-painting descendants sets descendant_needs_check_position_visibility_
+// to true on the containing stacking context to let descendants (not across
+// descendant stacking contexts) check if they need to hide due to the position
+// visibility hidden flag on that layer.
+class CheckAncestorPositionVisibilityScope {
+  STACK_ALLOCATED();
+
+ public:
+  explicit CheckAncestorPositionVisibilityScope(
+      const PaintLayer& stacking_context)
+      : reset_(&should_check_,
+               stacking_context.descendant_needs_check_position_visibility_) {
+    CHECK(stacking_context.GetLayoutObject().IsStackingContext());
+  }
+
+  static bool ShouldCheck() { return should_check_; }
+
+ private:
+  static bool should_check_;
+  base::AutoReset<bool> reset_;
 };
 
 #if DCHECK_IS_ON()

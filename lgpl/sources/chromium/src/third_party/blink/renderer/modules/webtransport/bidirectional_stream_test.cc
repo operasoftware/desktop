@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/webtransport/test_utils.h"
 #include "third_party/blink/renderer/modules/webtransport/web_transport.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -160,6 +161,10 @@ class StubWebTransport : public network::mojom::blink::WebTransport {
 
   void SetOutgoingDatagramExpirationDuration(base::TimeDelta) override {}
 
+  void GetStats(GetStatsCallback callback) override {
+    std::move(callback).Run(nullptr);
+  }
+
   void Close(network::mojom::blink::WebTransportCloseInfoPtr) override {}
 
  private:
@@ -197,7 +202,7 @@ class ScopedWebTransport {
 
   BidirectionalStream* CreateBidirectionalStream(const V8TestingScope& scope) {
     auto* script_state = scope.GetScriptState();
-    ScriptPromise bidirectional_stream_promise =
+    ScriptPromiseUntyped bidirectional_stream_promise =
         GetWebTransport()->createBidirectionalStream(script_state,
                                                      ASSERT_NO_EXCEPTION);
     ScriptPromiseTester tester(script_state, bidirectional_stream_promise);
@@ -249,7 +254,7 @@ void TestWrite(const V8TestingScope& scope,
       script_state, ASSERT_NO_EXCEPTION);
   auto* chunk = DOMUint8Array::Create(1);
   *chunk->Data() = 'A';
-  ScriptPromise result =
+  ScriptPromiseUntyped result =
       writer->write(script_state, ScriptValue::From(script_state, chunk),
                     ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(script_state, result);
@@ -260,7 +265,7 @@ void TestWrite(const V8TestingScope& scope,
   mojo::ScopedDataPipeConsumerHandle& output_consumer =
       scoped_web_transport->Stub()->OutputConsumer();
   const void* buffer = nullptr;
-  uint32_t buffer_num_bytes = 0;
+  size_t buffer_num_bytes = 0;
   MojoResult mojo_result = output_consumer->BeginReadData(
       &buffer, &buffer_num_bytes, MOJO_BEGIN_READ_DATA_FLAG_NONE);
 
@@ -272,6 +277,7 @@ void TestWrite(const V8TestingScope& scope,
 }
 
 TEST(BidirectionalStreamTest, CreateLocallyAndWrite) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -282,6 +288,7 @@ TEST(BidirectionalStreamTest, CreateLocallyAndWrite) {
 }
 
 TEST(BidirectionalStreamTest, CreateRemotelyAndWrite) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -299,7 +306,7 @@ void TestRead(V8TestingScope& scope,
   mojo::ScopedDataPipeProducerHandle& input_producer =
       scoped_web_transport->Stub()->InputProducer();
   constexpr char input[] = {'B'};
-  uint32_t input_num_bytes = sizeof(input);
+  size_t input_num_bytes = sizeof(input);
   MojoResult mojo_result = input_producer->WriteData(
       input, &input_num_bytes, MOJO_WRITE_DATA_FLAG_ALL_OR_NONE);
 
@@ -317,6 +324,7 @@ void TestRead(V8TestingScope& scope,
 }
 
 TEST(BidirectionalStreamTest, CreateLocallyAndRead) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -327,6 +335,7 @@ TEST(BidirectionalStreamTest, CreateLocallyAndRead) {
 }
 
 TEST(BidirectionalStreamTest, CreateRemotelyAndRead) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -337,6 +346,7 @@ TEST(BidirectionalStreamTest, CreateRemotelyAndRead) {
 }
 
 TEST(BidirectionalStreamTest, IncomingStreamCleanClose) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -351,7 +361,8 @@ TEST(BidirectionalStreamTest, IncomingStreamCleanClose) {
   auto* reader = bidirectional_stream->readable()->GetDefaultReaderForTesting(
       script_state, ASSERT_NO_EXCEPTION);
 
-  ScriptPromise read_promise = reader->read(script_state, ASSERT_NO_EXCEPTION);
+  ScriptPromiseUntyped read_promise =
+      reader->read(script_state, ASSERT_NO_EXCEPTION);
 
   ScriptPromiseTester read_tester(script_state, read_promise);
   read_tester.WaitUntilSettled();
@@ -367,6 +378,7 @@ TEST(BidirectionalStreamTest, IncomingStreamCleanClose) {
 }
 
 TEST(BidirectionalStreamTest, OutgoingStreamCleanClose) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -374,7 +386,7 @@ TEST(BidirectionalStreamTest, OutgoingStreamCleanClose) {
   ASSERT_TRUE(bidirectional_stream);
 
   auto* script_state = scope.GetScriptState();
-  ScriptPromise close_promise = bidirectional_stream->writable()->close(
+  ScriptPromiseUntyped close_promise = bidirectional_stream->writable()->close(
       script_state, ASSERT_NO_EXCEPTION);
 
   scoped_web_transport.GetWebTransport()->OnOutgoingStreamClosed(
@@ -395,6 +407,7 @@ TEST(BidirectionalStreamTest, OutgoingStreamCleanClose) {
 }
 
 TEST(BidirectionalStreamTest, CloseWebTransport) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -408,6 +421,7 @@ TEST(BidirectionalStreamTest, CloseWebTransport) {
 }
 
 TEST(BidirectionalStreamTest, RemoteDropWebTransport) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -423,6 +437,7 @@ TEST(BidirectionalStreamTest, RemoteDropWebTransport) {
 }
 
 TEST(BidirectionalStreamTest, WriteAfterCancellingIncoming) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -430,8 +445,9 @@ TEST(BidirectionalStreamTest, WriteAfterCancellingIncoming) {
   ASSERT_TRUE(bidirectional_stream);
 
   auto* script_state = scope.GetScriptState();
-  ScriptPromise cancel_promise = bidirectional_stream->readable()->cancel(
-      script_state, ASSERT_NO_EXCEPTION);
+  ScriptPromiseUntyped cancel_promise =
+      bidirectional_stream->readable()->cancel(script_state,
+                                               ASSERT_NO_EXCEPTION);
   ScriptPromiseTester cancel_tester(script_state, cancel_promise);
   cancel_tester.WaitUntilSettled();
   EXPECT_TRUE(cancel_tester.IsFulfilled());
@@ -443,6 +459,7 @@ TEST(BidirectionalStreamTest, WriteAfterCancellingIncoming) {
 }
 
 TEST(BidirectionalStreamTest, WriteAfterIncomingClosed) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -462,6 +479,7 @@ TEST(BidirectionalStreamTest, WriteAfterIncomingClosed) {
 }
 
 TEST(BidirectionalStreamTest, ReadAfterClosingOutgoing) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -469,7 +487,7 @@ TEST(BidirectionalStreamTest, ReadAfterClosingOutgoing) {
   ASSERT_TRUE(bidirectional_stream);
 
   auto* script_state = scope.GetScriptState();
-  ScriptPromise close_promise = bidirectional_stream->writable()->close(
+  ScriptPromiseUntyped close_promise = bidirectional_stream->writable()->close(
       script_state, ASSERT_NO_EXCEPTION);
 
   scoped_web_transport.GetWebTransport()->OnOutgoingStreamClosed(
@@ -483,6 +501,7 @@ TEST(BidirectionalStreamTest, ReadAfterClosingOutgoing) {
 }
 
 TEST(BidirectionalStreamTest, ReadAfterAbortingOutgoing) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =
@@ -490,7 +509,7 @@ TEST(BidirectionalStreamTest, ReadAfterAbortingOutgoing) {
   ASSERT_TRUE(bidirectional_stream);
 
   auto* script_state = scope.GetScriptState();
-  ScriptPromise abort_promise = bidirectional_stream->writable()->abort(
+  ScriptPromiseUntyped abort_promise = bidirectional_stream->writable()->abort(
       script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester abort_tester(script_state, abort_promise);
   abort_tester.WaitUntilSettled();
@@ -500,6 +519,7 @@ TEST(BidirectionalStreamTest, ReadAfterAbortingOutgoing) {
 }
 
 TEST(BidirectionalStreamTest, ReadAfterOutgoingAborted) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
   ScopedWebTransport scoped_web_transport(scope);
   auto* bidirectional_stream =

@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme_overlay.h"
 
 #include "third_party/blink/public/platform/web_theme_engine.h"
+#include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
@@ -71,8 +72,9 @@ ScrollbarPart ScrollbarThemeOverlay::PartsToInvalidateOnThumbPositionChange(
   return kNoPart;
 }
 
-int ScrollbarThemeOverlay::ScrollbarThickness(float scale_from_dip,
-                                              EScrollbarWidth scrollbar_width) {
+int ScrollbarThemeOverlay::ScrollbarThickness(
+    float scale_from_dip,
+    EScrollbarWidth scrollbar_width) const {
   return ThumbThickness(scale_from_dip, scrollbar_width) +
          ScrollbarMargin(scale_from_dip, scrollbar_width);
 }
@@ -194,10 +196,13 @@ void ScrollbarThemeOverlay::PaintThumb(GraphicsContext& context,
   if (scrollbar.Orientation() == kVerticalScrollbar)
     part = WebThemeEngine::kPartScrollbarVerticalThumb;
 
-  blink::WebThemeEngine::ExtraParams params;
-  params.scrollbar_thumb.scrollbar_theme =
-      static_cast<WebScrollbarOverlayColorTheme>(
-          scrollbar.GetScrollbarOverlayColorTheme());
+  blink::WebThemeEngine::ScrollbarThumbExtraParams scrollbar_thumb;
+  scrollbar_thumb.scrollbar_theme = static_cast<WebScrollbarOverlayColorTheme>(
+      scrollbar.GetScrollbarOverlayColorTheme());
+  if (scrollbar.ScrollbarThumbColor().has_value()) {
+    scrollbar_thumb.thumb_color =
+        scrollbar.ScrollbarThumbColor().value().toSkColor4f().toSkColor();
+  }
 
   // Horizontally flip the canvas if it is left vertical scrollbar.
   if (scrollbar.IsLeftSideVerticalScrollbar()) {
@@ -206,8 +211,14 @@ void ScrollbarThemeOverlay::PaintThumb(GraphicsContext& context,
     canvas->scale(-1, 1);
   }
 
+  blink::WebThemeEngine::ExtraParams params(scrollbar_thumb);
+  mojom::blink::ColorScheme color_scheme = scrollbar.UsedColorScheme();
+  const ui::ColorProvider* color_provider =
+      scrollbar.GetScrollableArea()->GetColorProvider(color_scheme);
+
   WebThemeEngineHelper::GetNativeThemeEngine()->Paint(
-      canvas, part, state, rect, &params, scrollbar.UsedColorScheme());
+      canvas, part, state, rect, &params, color_scheme,
+      scrollbar.GetScrollableArea()->InForcedColorsMode(), color_provider);
 
   if (scrollbar.IsLeftSideVerticalScrollbar())
     canvas->restore();

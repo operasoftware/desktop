@@ -22,9 +22,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_BREAK_ITERATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_BREAK_ITERATOR_H_
 
-#include <type_traits>
-
 #include <unicode/brkiter.h>
+
+#include <memory>
+#include <type_traits>
 
 #include "base/check_op.h"
 #include "base/containers/span.h"
@@ -39,6 +40,24 @@ namespace blink {
 
 typedef icu::BreakIterator TextBreakIterator;
 
+struct PLATFORM_EXPORT ReturnBreakIteratorToPool {
+  void operator()(void* ptr) const;
+};
+
+//
+// LineBreakIterator is stocked in a pool to save the construction time.
+// `PooledBreakIterator`, when destructed, returns the instance to the pool
+// instead of deleting it.
+//
+using PooledBreakIterator =
+    std::unique_ptr<TextBreakIterator, ReturnBreakIteratorToPool>;
+
+//
+// Returns a new instance from a pool, or create a new one if the pool is empty.
+//
+PLATFORM_EXPORT PooledBreakIterator
+AcquireLineBreakIterator(StringView, const AtomicString& locale);
+
 // Note: The returned iterator is good only until you get another iterator, with
 // the exception of acquireLineBreakIterator.
 
@@ -52,17 +71,6 @@ PLATFORM_EXPORT TextBreakIterator* WordBreakIterator(const String&,
                                                      int start,
                                                      int length);
 PLATFORM_EXPORT TextBreakIterator* WordBreakIterator(base::span<const UChar>);
-PLATFORM_EXPORT TextBreakIterator* AcquireLineBreakIterator(
-    base::span<const LChar>,
-    const AtomicString& locale,
-    const UChar* prior_context,
-    unsigned prior_context_length);
-PLATFORM_EXPORT TextBreakIterator* AcquireLineBreakIterator(
-    base::span<const UChar>,
-    const AtomicString& locale,
-    const UChar* prior_context,
-    unsigned prior_context_length);
-PLATFORM_EXPORT void ReleaseLineBreakIterator(TextBreakIterator*);
 PLATFORM_EXPORT TextBreakIterator* SentenceBreakIterator(
     base::span<const UChar>);
 
@@ -125,9 +133,7 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
       LineBreakType break_type = LineBreakType::kNormal)
       : string_(string),
         locale_(locale),
-        iterator_(nullptr),
         break_type_(break_type) {
-    ResetPriorContext();
   }
 
   LazyLineBreakIterator(const String& string,
@@ -144,63 +150,7 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
     SetStrictness(other.Strictness());
   }
 
-  ~LazyLineBreakIterator() {
-    if (iterator_)
-      ReleaseLineBreakIterator(iterator_);
-  }
-
   const String& GetString() const { return string_; }
-
-  UChar LastCharacter() const {
-    static_assert(std::extent<decltype(prior_context_)>() == 2,
-                  "TextBreakIterator has unexpected prior context length");
-    return prior_context_[1];
-  }
-
-  UChar SecondToLastCharacter() const {
-    static_assert(std::extent<decltype(prior_context_)>() == 2,
-                  "TextBreakIterator has unexpected prior context length");
-    return prior_context_[0];
-  }
-
-  void SetPriorContext(UChar last, UChar second_to_last) {
-    static_assert(std::extent<decltype(prior_context_)>() == 2,
-                  "TextBreakIterator has unexpected prior context length");
-    prior_context_[0] = second_to_last;
-    prior_context_[1] = last;
-  }
-
-  void UpdatePriorContext(UChar last) {
-    static_assert(std::extent<decltype(prior_context_)>() == 2,
-                  "TextBreakIterator has unexpected prior context length");
-    prior_context_[0] = prior_context_[1];
-    prior_context_[1] = last;
-  }
-
-  void ResetPriorContext() {
-    static_assert(std::extent<decltype(prior_context_)>() == 2,
-                  "TextBreakIterator has unexpected prior context length");
-    prior_context_[0] = 0;
-    prior_context_[1] = 0;
-  }
-
-  struct PriorContext {
-    const UChar* text = nullptr;
-    unsigned length = 0;
-  };
-
-  PriorContext GetPriorContext() const {
-    static_assert(std::extent<decltype(prior_context_)>() == 2,
-                  "TextBreakIterator has unexpected prior context length");
-    if (prior_context_[1]) {
-      if (prior_context_[0])
-        return PriorContext{&prior_context_[0], 2};
-      return PriorContext{&prior_context_[1], 1};
-    }
-    return PriorContext{nullptr, 0};
-  }
-
-  unsigned PriorContextLength() const { return GetPriorContext().length; }
 
   void ResetStringAndReleaseIterator(String string,
                                      const LayoutLocale* locale) {
@@ -240,27 +190,14 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
   bool IsSoftHyphenEnabled() const { return !disable_soft_hyphen_; }
   void EnableSoftHyphen(bool value) { disable_soft_hyphen_ = !value; }
 
-  inline bool IsBreakable(int pos,
-                          int& next_breakable,
-                          LineBreakType line_break_type) const {
-    if (pos > next_breakable) {
-      next_breakable = NextBreakablePosition(pos, line_break_type);
-    }
-    return pos == next_breakable;
-  }
-
-  inline bool IsBreakable(int pos, int& next_breakable) const {
-    return IsBreakable(pos, next_breakable, break_type_);
-  }
-
-  inline bool IsBreakable(int pos) const {
+  inline bool IsBreakable(unsigned pos) const {
     // No need to scan the entire string for the next breakable position when
     // all we need to determine is whether the current position is breakable.
     // Limit length to pos + 1.
     // TODO(layout-dev): We should probably try to break out an actual
     // IsBreakable method from NextBreakablePosition and get rid of this hack.
-    int len = std::min(pos + 1, static_cast<int>(string_.length()));
-    int next_breakable = NextBreakablePosition(pos, break_type_, len);
+    const unsigned len = std::min(pos + 1, string_.length());
+    unsigned next_breakable = NextBreakablePosition(pos, len);
     return pos == next_breakable;
   }
 
@@ -279,31 +216,21 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
  private:
   FRIEND_TEST_ALL_PREFIXES(TextBreakIteratorTest, Strictness);
 
+  template <typename CharacterType>
+  struct Context;
+
   const AtomicString& LocaleWithKeyword() const;
   void InvalidateLocaleWithKeyword();
 
-  void ReleaseIterator() const {
-    if (!iterator_) {
-      return;
-    }
-    ReleaseLineBreakIterator(iterator_);
-    iterator_ = nullptr;
-    cached_prior_context_.text = nullptr;
-    cached_prior_context_.length = 0;
-  }
+  void ReleaseIterator() const { iterator_ = nullptr; }
 
   // Obtain text break iterator, possibly previously cached, where this iterator
   // is (or has been) initialized to use the previously stored string as the
   // primary breaking context and using previously stored prior context if
   // non-empty.
-  TextBreakIterator* GetIterator(const PriorContext& prior_context) const {
-    DCHECK(prior_context.length <= kPriorContextCapacity);
+  TextBreakIterator* GetIterator() const {
     if (iterator_) {
-      if (prior_context.length == cached_prior_context_.length) {
-        DCHECK_EQ(prior_context.text, cached_prior_context_.text);
-        return iterator_;
-      }
-      ReleaseIterator();
+      return iterator_.get();
     }
 
     // Create the iterator, or get one from the cache, for the text after
@@ -313,47 +240,30 @@ class PLATFORM_EXPORT LazyLineBreakIterator final {
     //
     // For this reason, the offset for the TextBreakIterator must be adjusted by
     // |start_offset_|.
-    cached_prior_context_ = prior_context;
     CHECK_LE(start_offset_, string_.length());
     const AtomicString& locale = LocaleWithKeyword();
-    if (string_.Is8Bit()) {
-      iterator_ = AcquireLineBreakIterator(
-          string_.Span8().subspan(start_offset_), locale, prior_context.text,
-          prior_context.length);
-    } else {
-      iterator_ = AcquireLineBreakIterator(
-          string_.Span16().subspan(start_offset_), locale, prior_context.text,
-          prior_context.length);
-    }
-    return iterator_;
-  }
-
-  template <typename CharacterType>
-  bool IsOtherSpaceSeparator(UChar ch) const {
-    return Character::IsOtherSpaceSeparator(ch);
-  }
-  template <LChar>
-  bool IsOtherSpaceSeparator(UChar ch) const {
-    return false;
+    iterator_ =
+        AcquireLineBreakIterator(StringView{string_, start_offset_}, locale);
+    return iterator_.get();
   }
 
   template <typename CharacterType, LineBreakType, BreakSpaceType>
-  int NextBreakablePosition(int pos, const CharacterType* str, int len) const;
+  unsigned NextBreakablePosition(unsigned pos,
+                                 const CharacterType* str,
+                                 unsigned len) const;
   template <typename CharacterType, LineBreakType>
-  int NextBreakablePosition(int pos, const CharacterType* str, int len) const;
+  unsigned NextBreakablePosition(unsigned pos,
+                                 const CharacterType* str,
+                                 unsigned len) const;
   template <LineBreakType>
-  int NextBreakablePosition(int pos, int len) const;
-  int NextBreakablePositionBreakCharacter(int pos) const;
-  int NextBreakablePosition(int pos, LineBreakType, int len) const;
-  int NextBreakablePosition(int pos, LineBreakType) const;
+  unsigned NextBreakablePosition(unsigned pos, unsigned len) const;
+  unsigned NextBreakablePositionBreakCharacter(unsigned pos) const;
+  unsigned NextBreakablePosition(unsigned pos, unsigned len) const;
 
-  static const unsigned kPriorContextCapacity = 2;
   String string_;
   const LayoutLocale* locale_ = nullptr;
   mutable AtomicString locale_with_keyword_;
-  mutable TextBreakIterator* iterator_;
-  UChar prior_context_[kPriorContextCapacity];
-  mutable PriorContext cached_prior_context_;
+  mutable PooledBreakIterator iterator_;
   unsigned start_offset_ = 0;
   LineBreakType break_type_;
   BreakSpaceType break_space_ = BreakSpaceType::kAfterSpaceRun;

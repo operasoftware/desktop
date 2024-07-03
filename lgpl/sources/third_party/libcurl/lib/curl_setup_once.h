@@ -7,7 +7,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2022, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -33,12 +33,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <ctype.h>
 #include <time.h>
-
-#ifdef HAVE_ERRNO_H
 #include <errno.h>
-#endif
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
@@ -73,6 +69,20 @@
 #include <unistd.h>
 #endif
 
+#ifdef USE_WOLFSSL
+#  if defined(HAVE_STDINT_H)
+#    include <stdint.h>
+#  elif defined(HAVE_INTTYPES_H)
+#    include <inttypes.h>
+#  endif
+#endif
+
+#ifdef USE_SCHANNEL
+/* Must set this before <schannel.h> is included directly or indirectly by
+   another Windows header. */
+#  define SCHANNEL_USE_BLACKLISTS 1
+#endif
+
 #ifdef __hpux
 #  if !defined(_XOPEN_SOURCE_EXTENDED) || defined(_KERNEL)
 #    ifdef _APP32_64BIT_OFF_T
@@ -87,6 +97,8 @@
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
+
+#include "functypes.h"
 
 #ifdef __hpux
 #  if !defined(_XOPEN_SOURCE_EXTENDED) || defined(_KERNEL)
@@ -150,20 +162,10 @@ struct timeval {
  * SEND_TYPE_RETV must also be defined.
  */
 
-#if !defined(RECV_TYPE_ARG1) || \
-    !defined(RECV_TYPE_ARG2) || \
-    !defined(RECV_TYPE_ARG3) || \
-    !defined(RECV_TYPE_ARG4) || \
-    !defined(RECV_TYPE_RETV)
-  /* */
-  Error Missing_definition_of_return_and_arguments_types_of_recv
-  /* */
-#else
 #define sread(x,y,z) (ssize_t)recv((RECV_TYPE_ARG1)(x), \
                                    (RECV_TYPE_ARG2)(y), \
                                    (RECV_TYPE_ARG3)(z), \
                                    (RECV_TYPE_ARG4)(0))
-#endif
 #else /* HAVE_RECV */
 #ifndef sread
   /* */
@@ -180,21 +182,10 @@ struct timeval {
                                     (SEND_TYPE_ARG3)(z))
 
 #elif defined(HAVE_SEND)
-#if !defined(SEND_TYPE_ARG1) || \
-    !defined(SEND_QUAL_ARG2) || \
-    !defined(SEND_TYPE_ARG2) || \
-    !defined(SEND_TYPE_ARG3) || \
-    !defined(SEND_TYPE_ARG4) || \
-    !defined(SEND_TYPE_RETV)
-  /* */
-  Error Missing_definition_of_return_and_arguments_types_of_send
-  /* */
-#else
 #define swrite(x,y,z) (ssize_t)send((SEND_TYPE_ARG1)(x), \
                                     (SEND_QUAL_ARG2 SEND_TYPE_ARG2)(y), \
                                     (SEND_TYPE_ARG3)(z), \
                                     (SEND_TYPE_ARG4)(SEND_4TH_ARG))
-#endif
 #else /* HAVE_SEND */
 #ifndef swrite
   /* */
@@ -228,9 +219,6 @@ struct timeval {
 #else
 #  define sfcntl  fcntl
 #endif
-
-#define TOLOWER(x)  (tolower((int)  ((unsigned char)x)))
-
 
 /*
  * 'bool' stuff compatible with HP-UX headers.
@@ -310,7 +298,7 @@ typedef unsigned int bit;
  */
 
 #undef DEBUGASSERT
-#if defined(DEBUGBUILD) && defined(HAVE_ASSERT_H)
+#if defined(DEBUGBUILD)
 #define DEBUGASSERT(x) assert(x)
 #else
 #define DEBUGASSERT(x) do { } while(0)

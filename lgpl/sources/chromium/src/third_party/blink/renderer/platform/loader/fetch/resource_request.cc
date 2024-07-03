@@ -90,7 +90,6 @@ ResourceRequestHead::ResourceRequestHead(const KURL& url)
     : url_(url),
       timeout_interval_(default_timeout_interval_),
       http_method_(http_names::kGET),
-      allow_stored_credentials_(true),
       report_upload_progress_(false),
       has_user_gesture_(false),
       has_text_fragment_token_(false),
@@ -99,7 +98,8 @@ ResourceRequestHead::ResourceRequestHead(const KURL& url)
       keepalive_(false),
       browsing_topics_(false),
       ad_auction_headers_(false),
-      shared_storage_writable_(false),
+      shared_storage_writable_opted_in_(false),
+      shared_storage_writable_eligible_(false),
       allow_stale_response_(false),
       cache_mode_(mojom::blink::FetchCacheMode::kDefault),
       skip_service_worker_(false),
@@ -119,7 +119,8 @@ ResourceRequestHead::ResourceRequestHead(const KURL& url)
       referrer_string_(Referrer::ClientReferrerString()),
       referrer_policy_(network::mojom::ReferrerPolicy::kDefault),
       cors_preflight_policy_(
-          network::mojom::CorsPreflightPolicy::kConsiderPreflight) {}
+          network::mojom::CorsPreflightPolicy::kConsiderPreflight),
+      target_address_space_(network::mojom::IPAddressSpace::kUnknown) {}
 
 ResourceRequestHead::ResourceRequestHead(const ResourceRequestHead&) = default;
 
@@ -210,7 +211,7 @@ std::unique_ptr<ResourceRequest> ResourceRequestHead::CreateRedirectRequest(
   request->SetKeepalive(GetKeepalive());
   request->SetBrowsingTopics(GetBrowsingTopics());
   request->SetAdAuctionHeaders(GetAdAuctionHeaders());
-  request->SetSharedStorageWritable(GetSharedStorageWritable());
+  request->SetSharedStorageWritableOptedIn(GetSharedStorageWritableOptedIn());
   request->SetPriority(Priority());
   request->SetPriorityIncremental(PriorityIncremental());
 
@@ -227,6 +228,7 @@ std::unique_ptr<ResourceRequest> ResourceRequestHead::CreateRedirectRequest(
   request->SetFromOriginDirtyStyleSheet(IsFromOriginDirtyStyleSheet());
   request->SetRecursivePrefetchToken(RecursivePrefetchToken());
   request->SetFetchLikeAPI(IsFetchLikeAPI());
+  request->SetFetchLaterAPI(IsFetchLaterAPI());
   request->SetFavicon(IsFavicon());
   request->SetAttributionReportingSupport(GetAttributionReportingSupport());
   request->SetAttributionReportingEligibility(
@@ -351,14 +353,6 @@ const scoped_refptr<EncodedFormData>& ResourceRequest::HttpBody() const {
 
 void ResourceRequest::SetHttpBody(scoped_refptr<EncodedFormData> http_body) {
   body_.SetFormBody(std::move(http_body));
-}
-
-bool ResourceRequestHead::AllowStoredCredentials() const {
-  return allow_stored_credentials_;
-}
-
-void ResourceRequestHead::SetAllowStoredCredentials(bool allow_credentials) {
-  allow_stored_credentials_ = allow_credentials;
 }
 
 ResourceLoadPriority ResourceRequestHead::InitialPriority() const {
@@ -494,7 +488,7 @@ bool ResourceRequest::IsFeatureEnabledForSubresourceRequestAssumingOptIn(
       GetBrowsingTopics();
   bool shared_storage_opted_in =
       feature == mojom::blink::PermissionsPolicyFeature::kSharedStorage &&
-      GetSharedStorageWritable();
+      GetSharedStorageWritableOptedIn();
 
   if (!browsing_topics_opted_in && !shared_storage_opted_in) {
     return false;

@@ -55,6 +55,21 @@ enum class UADefinedVariable {
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_BROWSER_COLORS)
   // OperaSpecific variables
+  kOperaAccentColor,
+  kOperaAccentColorH,
+  kOperaAccentColorS,
+  kOperaAccentColorL,
+  kOperaAccentColorR,
+  kOperaAccentColorG,
+  kOperaAccentColorB,
+  kOperaBackgroundColor,
+  kOperaBackgroundColorH,
+  kOperaBackgroundColorS,
+  kOperaBackgroundColorL,
+  kOperaBackgroundColorR,
+  kOperaBackgroundColorG,
+  kOperaBackgroundColorB,
+  // For backward compatibility
   kOperaGxAccentColor,
   kOperaGxAccentColorH,
   kOperaGxAccentColorS,
@@ -117,13 +132,15 @@ class CORE_EXPORT StyleEnvironmentVariables
   void SetVariable(UADefinedTwoDimensionalVariable variable,
                    unsigned first_dimension,
                    unsigned second_dimenison,
-                   const String& value);
+                   const String& value,
+                   const FeatureContext* feature_context);
 
   // Remove the variable |name| and invalidate any dependents.
   void RemoveVariable(UADefinedVariable variable);
   // Remove all the indexed variables referenced by the enum, and invalidate any
   // dependents.
-  void RemoveVariable(UADefinedTwoDimensionalVariable variable);
+  void RemoveVariable(UADefinedTwoDimensionalVariable variable,
+                      const FeatureContext* feature_context);
 
   // Resolve the variable |name| by traversing the tree of
   // |StyleEnvironmentVariables|.

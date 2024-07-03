@@ -8,7 +8,6 @@
 
 #include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_keyframe_rule.h"
-#include "third_party/blink/renderer/core/css/css_try_rule.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_fast_paths.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_impl.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_stream.h"
@@ -48,6 +47,7 @@ base::span<CSSSelector> CSSParser::ParseSelector(
     const CSSParserContext* context,
     CSSNestingType nesting_type,
     StyleRule* parent_rule_for_nesting,
+    bool is_within_scope,
     StyleSheetContents* style_sheet_contents,
     const String& selector,
     HeapVector<CSSSelector>& arena) {
@@ -55,7 +55,7 @@ base::span<CSSSelector> CSSParser::ParseSelector(
   const auto tokens = tokenizer.TokenizeToEOF();
   return CSSSelectorParser::ParseSelector(
       CSSParserTokenRange(tokens), context, nesting_type,
-      parent_rule_for_nesting,
+      parent_rule_for_nesting, is_within_scope,
       /* semicolon_aborts_nested_selector */ false, style_sheet_contents,
       arena);
 }
@@ -156,10 +156,12 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValue(
 
   CSSPropertyID resolved_property = ResolveCSSPropertyID(unresolved_property);
   CSSParserMode parser_mode = declaration->CssParserMode();
+  const CSSParserContext* context = GetParserContext(
+      secure_context_mode, style_sheet, execution_context, parser_mode);
 
   // See if this property has a specific fast-path parser.
-  const CSSValue* value = CSSParserFastPaths::MaybeParseValue(
-      resolved_property, string, parser_mode);
+  const CSSValue* value =
+      CSSParserFastPaths::MaybeParseValue(resolved_property, string, context);
   if (value) {
     return declaration->SetLonghandProperty(CSSPropertyValue(
         CSSPropertyName(resolved_property), *value, important));
@@ -173,8 +175,6 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValue(
   //
   // We only allow this path in standards mode, which rules out situations
   // like @font-face parsing etc. (which have their own rules).
-  const CSSParserContext* context = GetParserContext(
-      secure_context_mode, style_sheet, execution_context, parser_mode);
   const CSSProperty& property = CSSProperty::Get(resolved_property);
   if (parser_mode == kHTMLStandardMode && property.IsProperty() &&
       !property.IsShorthand()) {
@@ -239,8 +239,8 @@ const CSSValue* CSSParser::ParseSingleValue(CSSPropertyID property_id,
   if (string.empty()) {
     return nullptr;
   }
-  if (CSSValue* value = CSSParserFastPaths::MaybeParseValue(property_id, string,
-                                                            context->Mode())) {
+  if (CSSValue* value =
+          CSSParserFastPaths::MaybeParseValue(property_id, string, context)) {
     return value;
   }
   CSSTokenizer tokenizer(string);
@@ -258,9 +258,10 @@ ImmutableCSSPropertyValueSet* CSSParser::ParseInlineStyleDeclaration(
 ImmutableCSSPropertyValueSet* CSSParser::ParseInlineStyleDeclaration(
     const String& style_string,
     CSSParserMode parser_mode,
-    SecureContextMode secure_context_mode) {
-  return CSSParserImpl::ParseInlineStyleDeclaration(style_string, parser_mode,
-                                                    secure_context_mode);
+    SecureContextMode secure_context_mode,
+    const Document* document) {
+  return CSSParserImpl::ParseInlineStyleDeclaration(
+      style_string, parser_mode, secure_context_mode, document);
 }
 
 std::unique_ptr<Vector<KeyframeOffset>> CSSParser::ParseKeyframeKeyList(
@@ -277,13 +278,10 @@ StyleRuleKeyframe* CSSParser::ParseKeyframeRule(const CSSParserContext* context,
   return To<StyleRuleKeyframe>(keyframe);
 }
 
-StyleRuleTry* CSSParser::ParseTryRule(const CSSParserContext* context,
-                                      const String& rule) {
-  StyleRuleBase* try_rule = CSSParserImpl::ParseRule(
-      rule, context, CSSNestingType::kNone, /*parent_rule_for_nesting=*/nullptr,
-      nullptr, CSSParserImpl::kTryRules);
-  return To<StyleRuleTry>(try_rule);
+String CSSParser::ParseCustomPropertyName(const String& name_text) {
+  return CSSParserImpl::ParseCustomPropertyName(name_text);
 }
+
 bool CSSParser::ParseSupportsCondition(
     const String& condition,
     const ExecutionContext* execution_context) {
@@ -352,13 +350,14 @@ bool CSSParser::ParseColor(Color& color, const String& string, bool strict) {
 
 bool CSSParser::ParseSystemColor(Color& color,
                                  const String& color_string,
-                                 mojom::blink::ColorScheme color_scheme) {
+                                 mojom::blink::ColorScheme color_scheme,
+                                 const ui::ColorProvider* color_provider) {
   CSSValueID id = CssValueKeywordID(color_string);
   if (!StyleColor::IsSystemColorIncludingDeprecated(id)) {
     return false;
   }
 
-  color = LayoutTheme::GetTheme().SystemColor(id, color_scheme);
+  color = LayoutTheme::GetTheme().SystemColor(id, color_scheme, color_provider);
   return true;
 }
 

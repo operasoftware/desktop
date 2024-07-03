@@ -12,11 +12,9 @@
 
 namespace blink {
 
-namespace {
-
-bool CanChangeToUrlForHistoryApiNew(const KURL& url,
-                                    const SecurityOrigin* document_origin,
-                                    const KURL& document_url) {
+bool CanChangeToUrlForHistoryApi(const KURL& url,
+                                 const SecurityOrigin* document_origin,
+                                 const KURL& document_url) {
   if (!url.IsValid()) {
     return false;
   }
@@ -25,7 +23,8 @@ bool CanChangeToUrlForHistoryApiNew(const KURL& url,
   // host, or port components, then return false."
   if (url.Protocol() != document_url.Protocol() ||
       url.User() != document_url.User() || url.Pass() != document_url.Pass() ||
-      url.Host() != document_url.Host() || url.Port() != document_url.Port()) {
+      url.HostView() != document_url.HostView() ||
+      url.Port() != document_url.Port()) {
     return false;
   }
 
@@ -98,56 +97,6 @@ bool CanChangeToUrlForHistoryApiNew(const KURL& url,
   }
 
   return true;
-}
-
-bool EqualIgnoringPathQueryAndFragment(const KURL& a, const KURL& b) {
-  return StringView(a.GetString(), 0, a.PathStart()) ==
-         StringView(b.GetString(), 0, b.PathStart());
-}
-
-bool EqualIgnoringQueryAndFragment(const KURL& a, const KURL& b) {
-  return StringView(a.GetString(), 0, a.PathEnd()) ==
-         StringView(b.GetString(), 0, b.PathEnd());
-}
-
-// This is a legacy version of the `CanChangeToUrlForHistoryApiNew()` function
-// above. It is preserved in case the above function causes unexpected breakages
-// while rolling it out. This legacy function will be delete soon.
-bool CanChangeToUrlForHistoryApiOld(const KURL& url,
-                                    const SecurityOrigin* document_origin,
-                                    const KURL& document_url) {
-  if (!url.IsValid())
-    return false;
-
-  // We allow sandboxed documents, `data:`/`file:` URLs, etc. to use
-  // 'pushState'/'replaceState' to modify the URL fragment: see
-  // https://crbug.com/528681 for the compatibility concerns.
-  if (document_origin->IsOpaque() || document_origin->IsLocal())
-    return EqualIgnoringQueryAndFragment(url, document_url);
-  if (!EqualIgnoringPathQueryAndFragment(url, document_url))
-    return false;
-
-  scoped_refptr<const SecurityOrigin> requested_origin =
-      SecurityOrigin::Create(url);
-  if (requested_origin->IsOpaque() ||
-      !requested_origin->IsSameOriginWith(document_origin)) {
-    return false;
-  }
-  return true;
-}
-
-}  // namespace
-
-// Implements https://html.spec.whatwg.org/C/#can-have-its-url-rewritten.
-bool CanChangeToUrlForHistoryApi(const KURL& url,
-                                 const SecurityOrigin* document_origin,
-                                 const KURL& document_url) {
-  if (base::FeatureList::IsEnabled(
-          features::kCanChangeToUrlForHistoryApiUpdate)) {
-    return CanChangeToUrlForHistoryApiNew(url, document_origin, document_url);
-  }
-
-  return CanChangeToUrlForHistoryApiOld(url, document_origin, document_url);
 }
 
 }  // namespace blink

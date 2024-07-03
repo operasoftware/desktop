@@ -13,6 +13,7 @@
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/web/web_link_preview_triggerer.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/dom/focus_params.h"
@@ -197,7 +198,8 @@ bool KeyboardEventManager::HandleAccessKey(const WebKeyboardEvent& evt) {
   if (!elem)
     return false;
   elem->Focus(FocusParams(SelectionBehaviorOnFocus::kReset,
-                          mojom::blink::FocusType::kAccessKey, nullptr));
+                          mojom::blink::FocusType::kAccessKey, nullptr,
+                          FocusOptions::Create(), FocusTrigger::kUserGesture));
   elem->AccessKeyAction(SimulatedClickCreationScope::kFromUserAgent);
   return true;
 }
@@ -207,6 +209,8 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
   base::AutoReset<bool> is_handling_key_event(&is_handling_key_event_, true);
   if (initial_key_event.windows_key_code == VK_CAPITAL)
     CapsLockStateMayHaveChanged();
+
+  KeyEventModifierMayHaveChanged(initial_key_event.GetModifiers());
 
   if (scroll_manager_->MiddleClickAutoscrollInProgress()) {
     DCHECK(RuntimeEnabledFeatures::MiddleClickAutoscrollEnabled());
@@ -256,7 +260,9 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
     should_send_key_events_to_js =
         display_mode == blink::mojom::DisplayMode::kMinimalUi ||
         display_mode == blink::mojom::DisplayMode::kStandalone ||
-        display_mode == blink::mojom::DisplayMode::kFullscreen;
+        display_mode == blink::mojom::DisplayMode::kFullscreen ||
+        display_mode == blink::mojom::DisplayMode::kBorderless ||
+        display_mode == blink::mojom::DisplayMode::kWindowControlsOverlay;
   }
 
   // We have 2 level of not exposing key event to js, not send and send but not
@@ -375,7 +381,7 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
       if (initial_key_event.text[0] == 0) {
         return WebInputEventResult::kNotHandled;
       }
-      U_FALLTHROUGH;
+      [[fallthrough]];
     }
     case WebInputEvent::Type::kChar: {
       WebKeyboardEvent char_event = initial_key_event;
@@ -400,6 +406,16 @@ void KeyboardEventManager::CapsLockStateMayHaveChanged() {
     if (auto* text_control = DynamicTo<HTMLInputElement>(element))
       text_control->CapsLockStateMayHaveChanged();
   }
+}
+
+void KeyboardEventManager::KeyEventModifierMayHaveChanged(int modifiers) {
+  WebLinkPreviewTriggerer* triggerer =
+      frame_->GetOrCreateLinkPreviewTriggerer();
+  if (!triggerer) {
+    return;
+  }
+
+  triggerer->MaybeChangedKeyEventModifier(modifiers);
 }
 
 void KeyboardEventManager::DefaultKeyboardEventHandler(
@@ -500,8 +516,7 @@ void KeyboardEventManager::DefaultArrowEventHandler(
     return;
 
   ExecutionContext* context = frame_->GetDocument()->GetExecutionContext();
-  if ((RuntimeEnabledFeatures::FocusgroupEnabled(context) ||
-       RuntimeEnabledFeatures::CSSTogglesEnabled(context)) &&
+  if (RuntimeEnabledFeatures::FocusgroupEnabled(context) &&
       FocusgroupController::HandleArrowKeyboardEvent(event, frame_)) {
     event->SetDefaultHandled();
     return;
@@ -628,19 +643,12 @@ void KeyboardEventManager::DefaultEscapeEventHandler(KeyboardEvent* event) {
     page->GetSpatialNavigationController().HandleEscapeKeyboardEvent(event);
   }
 
-  bool cancel_skipped = false;
-  frame_->DomWindow()->closewatcher_stack()->EscapeKeyHandler(event,
-                                                              &cancel_skipped);
+  frame_->DomWindow()->closewatcher_stack()->EscapeKeyHandler(event);
 
   HTMLDialogElement* dialog = frame_->GetDocument()->ActiveModalDialog();
   if (dialog && !RuntimeEnabledFeatures::CloseWatcherEnabled()) {
     auto* cancel_event = Event::CreateCancelable(event_type_names::kCancel);
     dialog->DispatchEvent(*cancel_event);
-    if (cancel_event->defaultPrevented() && cancel_skipped) {
-      UseCounter::Count(
-          frame_->GetDocument(),
-          WebFeature::kDialogCloseWatcherCancelSkippedAndDefaultPrevented);
-    }
     if (!cancel_event->defaultPrevented()) {
       dialog->close();
     }

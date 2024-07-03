@@ -34,6 +34,7 @@ class GPUComputePipeline;
 class GPUComputePipelineDescriptor;
 class GPUDeviceDescriptor;
 class GPUDeviceLostInfo;
+class GPUError;
 class GPUExternalTexture;
 class GPUExternalTextureDescriptor;
 class GPUPipelineLayout;
@@ -53,7 +54,6 @@ class GPUSupportedFeatures;
 class GPUSupportedLimits;
 class GPUTexture;
 class GPUTextureDescriptor;
-class ScriptPromiseResolver;
 class ScriptState;
 class V8GPUErrorFilter;
 
@@ -64,7 +64,6 @@ class V8GPUErrorFilter;
 enum class GPUSingletonWarning {
   kNonPreferredFormat,
   kDepthKey,
-  kTimestampArray,
   kCount,  // Must be last
 };
 
@@ -92,8 +91,8 @@ class GPUDevice final : public EventTarget,
   // gpu_device.idl
   GPUAdapter* adapter() const;
   GPUSupportedFeatures* features() const;
-  GPUSupportedLimits* limits() const { return limits_; }
-  ScriptPromise lost(ScriptState* script_state);
+  GPUSupportedLimits* limits() const { return limits_.Get(); }
+  ScriptPromise<GPUDeviceLostInfo> lost(ScriptState* script_state);
 
   GPUQueue* queue();
   bool destroyed() const;
@@ -107,7 +106,6 @@ class GPUDevice final : public EventTarget,
   GPUSampler* createSampler(const GPUSamplerDescriptor* descriptor);
 
   GPUExternalTexture* importExternalTexture(
-      ScriptState* script_state,
       const GPUExternalTextureDescriptor* descriptor,
       ExceptionState& exception_state);
 
@@ -128,10 +126,10 @@ class GPUDevice final : public EventTarget,
   GPUComputePipeline* createComputePipeline(
       const GPUComputePipelineDescriptor* descriptor,
       ExceptionState& exception_state);
-  ScriptPromise createRenderPipelineAsync(
+  ScriptPromise<GPURenderPipeline> createRenderPipelineAsync(
       ScriptState* script_state,
       const GPURenderPipelineDescriptor* descriptor);
-  ScriptPromise createComputePipelineAsync(
+  ScriptPromise<GPUComputePipeline> createComputePipelineAsync(
       ScriptState* script_state,
       const GPUComputePipelineDescriptor* descriptor);
 
@@ -145,7 +143,7 @@ class GPUDevice final : public EventTarget,
                               ExceptionState& exception_state);
 
   void pushErrorScope(const V8GPUErrorFilter& filter);
-  ScriptPromise popErrorScope(ScriptState* script_state);
+  ScriptPromise<IDLNullable<GPUError>> popErrorScope(ScriptState* script_state);
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(uncapturederror, kUncapturederror)
 
@@ -173,8 +171,7 @@ class GPUDevice final : public EventTarget,
   void UntrackMappableBuffer(GPUBuffer* buffer);
 
  private:
-  using LostProperty =
-      ScriptPromiseProperty<Member<GPUDeviceLostInfo>, ToV8UndefinedGenerator>;
+  using LostProperty = ScriptPromiseProperty<GPUDeviceLostInfo, IDLUndefined>;
 
   // Used by USING_PRE_FINALIZER.
   void Dispose();
@@ -185,18 +182,20 @@ class GPUDevice final : public EventTarget,
   void OnLogging(WGPULoggingType loggingType, const char* message);
   void OnDeviceLostError(WGPUDeviceLostReason, const char* message);
 
-  void OnPopErrorScopeCallback(ScriptPromiseResolver* resolver,
-                               WGPUErrorType type,
-                               const char* message);
+  void OnPopErrorScopeCallback(
+      ScriptPromiseResolver<IDLNullable<GPUError>>* resolver,
+      WGPUErrorType type,
+      const char* message);
 
-  void OnCreateRenderPipelineAsyncCallback(ScriptPromiseResolver* resolver,
-                                           absl::optional<String> label,
-                                           WGPUCreatePipelineAsyncStatus status,
-                                           WGPURenderPipeline render_pipeline,
-                                           const char* message);
+  void OnCreateRenderPipelineAsyncCallback(
+      const String& label,
+      ScriptPromiseResolver<GPURenderPipeline>* resolver,
+      WGPUCreatePipelineAsyncStatus status,
+      WGPURenderPipeline render_pipeline,
+      const char* message);
   void OnCreateComputePipelineAsyncCallback(
-      ScriptPromiseResolver* resolver,
-      absl::optional<String> label,
+      const String& label,
+      ScriptPromiseResolver<GPUComputePipeline>* resolver,
       WGPUCreatePipelineAsyncStatus status,
       WGPUComputePipeline compute_pipeline,
       const char* message);

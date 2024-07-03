@@ -25,31 +25,76 @@
 
 #include <cmath>
 #include <cstring>
+#include <optional>
 
 #include "base/check_op.h"
+#include "base/functional/function_ref.h"
+#include "base/memory/stack_allocated.h"
 #include "base/notreached.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
+namespace WTF {
+class String;
+}  // namespace WTF
+
 namespace blink {
 
 struct PixelsAndPercent {
   DISALLOW_NEW();
-  PixelsAndPercent(float pixels, float percent)
-      : pixels(pixels), percent(percent) {}
+  explicit PixelsAndPercent(float pixels)
+      : pixels(pixels),
+        percent(0.0f),
+        has_explicit_pixels(true),
+        has_explicit_percent(false) {}
+  PixelsAndPercent(float pixels,
+                   float percent,
+                   bool has_explicit_pixels,
+                   bool has_explicit_percent)
+      : pixels(pixels),
+        percent(percent),
+        has_explicit_pixels(has_explicit_pixels),
+        has_explicit_percent(has_explicit_percent) {}
+
+  PixelsAndPercent& operator+=(const PixelsAndPercent& rhs) {
+    pixels += rhs.pixels;
+    percent += rhs.percent;
+    has_explicit_pixels |= rhs.has_explicit_pixels;
+    has_explicit_percent |= rhs.has_explicit_percent;
+    return *this;
+  }
+  friend PixelsAndPercent operator+(PixelsAndPercent lhs,
+                                    const PixelsAndPercent& rhs) {
+    lhs += rhs;
+    return lhs;
+  }
+  PixelsAndPercent& operator-=(const PixelsAndPercent& rhs) {
+    pixels -= rhs.pixels;
+    percent -= rhs.percent;
+    has_explicit_pixels |= rhs.has_explicit_pixels;
+    has_explicit_percent |= rhs.has_explicit_percent;
+    return *this;
+  }
+  PixelsAndPercent& operator*=(float number) {
+    pixels *= number;
+    percent *= number;
+    return *this;
+  }
+
   float pixels;
   float percent;
+  bool has_explicit_pixels;
+  bool has_explicit_percent;
 };
 
-class CalculationExpressionNode;
 class CalculationValue;
 class Length;
 
 PLATFORM_EXPORT extern const Length& g_auto_length;
 PLATFORM_EXPORT extern const Length& g_none_length;
+PLATFORM_EXPORT extern const Length& g_fixed_zero_length;
 
 class PLATFORM_EXPORT Length {
   DISALLOW_NEW();
@@ -72,6 +117,7 @@ class PLATFORM_EXPORT Length {
     kFillAvailable,
     kFitContent,
     kCalculated,
+    kFlex,
     kExtendToZoom,
     kDeviceWidth,
     kDeviceHeight,
@@ -145,6 +191,7 @@ class PLATFORM_EXPORT Length {
     return Length(number, kFixed);
   }
   static Length Fixed() { return Length(kFixed); }
+  static const Length& FixedZero() { return g_fixed_zero_length; }
   static const Length& Auto() { return g_auto_length; }
   static Length FillAvailable() { return Length(kFillAvailable); }
   static Length MinContent() { return Length(kMinContent); }
@@ -160,6 +207,7 @@ class PLATFORM_EXPORT Length {
   static Length Percent(NUMBER_TYPE number) {
     return Length(number, kPercent);
   }
+  static Length Flex(float value) { return Length(value, kFlex); }
 
   // FIXME: Make this private (if possible) or at least rename it
   // (http://crbug.com/432707).
@@ -214,36 +262,26 @@ class PLATFORM_EXPORT Length {
 
     return !value_;
   }
-  bool IsPositive() const {
-    if (IsNone())
-      return false;
-    if (IsCalculated())
-      return true;
 
-    return GetFloatValue() > 0;
-  }
-  bool IsNegative() const {
-    if (IsNone() || IsCalculated())
-      return false;
-
-    return GetFloatValue() < 0;
-  }
-
-  // For the layout purposes, if this |Length| is a block-axis size, see
-  // |IsAutoOrContentOrIntrinsic()|, it is usually a better choice.
+  // If this is a length in a property that accepts calc-size(), use
+  // |HasAuto()|.  If this |Length| is a block-axis size
+  // |HasAutoOrContentOrIntrinsic()| is usually a better choice.
   bool IsAuto() const { return GetType() == kAuto; }
   bool IsFixed() const { return GetType() == kFixed; }
 
   // For the block axis, intrinsic sizes such as `min-content` behave the same
   // as `auto`. https://www.w3.org/TR/css-sizing-3/#valdef-width-min-content
-  bool IsContentOrIntrinsic() const {
-    return GetType() == kMinContent || GetType() == kMaxContent ||
-           GetType() == kFitContent || GetType() == kMinIntrinsic ||
-           GetType() == kContent;
-  }
-  bool IsAutoOrContentOrIntrinsic() const {
-    return GetType() == kAuto || IsContentOrIntrinsic();
-  }
+  // This includes content-based sizes in calc-size().
+  bool HasAuto() const;
+  bool HasContentOrIntrinsic() const;
+  bool HasAutoOrContentOrIntrinsic() const;
+  // HasPercent and HasPercentOrStretch refer to whether the toplevel value
+  // should be treated as a percentage type for web-exposed behavior
+  // decisions.  However, a value can still depend on a percentage when
+  // HasPercent() is false:  for example, calc-size(any, 20%).
+  bool HasPercent() const;
+  bool HasPercentOrStretch() const;
+  bool HasStretch() const;
 
   bool IsSpecified() const {
     return GetType() == kFixed || GetType() == kPercent ||
@@ -259,18 +297,21 @@ class PLATFORM_EXPORT Length {
   bool IsFillAvailable() const { return GetType() == kFillAvailable; }
   bool IsFitContent() const { return GetType() == kFitContent; }
   bool IsPercent() const { return GetType() == kPercent; }
+  // IsPercentOrCalc should be used for decisions about whether to optimize
+  // away computing the value on which percentages depend or optimize away
+  // recomputation that results from changes to that value.  It is intended to
+  // be used *only* in cases where the implementation could be changed to one
+  // that returns true only if there are percentage values somewhere in the
+  // expression (that is, one that still returns true for calc-size(any, 30%)
+  // for which HasPercent() is false, but is false for calc-size(any, 30px)).
+  // TODO(https://crbug.com/313072): Rename this.
   bool IsPercentOrCalc() const {
     return GetType() == kPercent || GetType() == kCalculated;
   }
-  bool IsPercentOrCalcOrStretch() const {
-    return GetType() == kPercent || GetType() == kCalculated ||
-           GetType() == kFillAvailable;
-  }
+  bool IsFlex() const { return GetType() == kFlex; }
   bool IsExtendToZoom() const { return GetType() == kExtendToZoom; }
   bool IsDeviceWidth() const { return GetType() == kDeviceWidth; }
   bool IsDeviceHeight() const { return GetType() == kDeviceHeight; }
-  bool HasAnchorQueries() const;
-  bool HasAutoAnchorPositioning() const;
 
   Length Blend(const Length& from, double progress, ValueRange range) const {
     DCHECK(IsSpecified());
@@ -300,22 +341,25 @@ class PLATFORM_EXPORT Length {
     return value_;
   }
 
-  class PLATFORM_EXPORT AnchorEvaluator {
+  using IntrinsicLengthEvaluator = base::FunctionRef<LayoutUnit(const Length&)>;
+
+  struct EvaluationInput {
+    STACK_ALLOCATED();
+
    public:
-    // Evaluates an anchor() or anchor-size() function given by the
-    // CalculationExpressionNode. Returns |nullopt| if the query is invalid
-    // (e.g., no targets or wrong axis.)
-    virtual absl::optional<LayoutUnit> Evaluate(
-        const CalculationExpressionNode&) const = 0;
+    std::optional<float> size_keyword_basis = std::nullopt;
+    std::optional<IntrinsicLengthEvaluator> intrinsic_evaluator = std::nullopt;
   };
-  float NonNanCalculatedValue(float max_value,
-                              const AnchorEvaluator* = nullptr) const;
+
+  float NonNanCalculatedValue(float max_value, const EvaluationInput&) const;
 
   Length SubtractFromOneHundredPercent() const;
 
+  Length Add(const Length& other) const;
+
   Length Zoom(double factor) const;
 
-  String ToString() const;
+  WTF::String ToString() const;
 
  private:
   Length BlendMixedTypes(const Length& from, double progress, ValueRange) const;

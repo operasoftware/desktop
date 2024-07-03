@@ -97,7 +97,7 @@ void MimeSniffingURLLoader::OnReceiveEarlyHints(
 void MimeSniffingURLLoader::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head,
     mojo::ScopedDataPipeConsumerHandle body,
-    absl::optional<mojo_base::BigBuffer> cached_metadata) {
+    std::optional<mojo_base::BigBuffer> cached_metadata) {
   // OnReceiveResponse() shouldn't be called because MimeSniffingURLLoader is
   // created by MimeSniffingThrottle::WillProcessResponse(), which is equivalent
   // to OnReceiveResponse().
@@ -164,7 +164,7 @@ void MimeSniffingURLLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
     const net::HttpRequestHeaders& modified_cors_exempt_headers,
-    const absl::optional<GURL>& new_url) {
+    const std::optional<GURL>& new_url) {
   // MimeSniffingURLLoader starts handling the request after
   // OnReceivedResponse(). A redirect response is not expected.
   NOTREACHED();
@@ -199,7 +199,7 @@ void MimeSniffingURLLoader::OnBodyReadable(MojoResult) {
   DCHECK_EQ(State::kSniffing, state_);
 
   size_t start_size = buffered_body_.size();
-  uint32_t read_bytes = net::kMaxBytesToSniff;
+  size_t read_bytes = net::kMaxBytesToSniff;
   buffered_body_.resize(start_size + read_bytes);
   MojoResult result =
       body_consumer_handle_->ReadData(buffered_body_.data() + start_size,
@@ -303,7 +303,7 @@ void MimeSniffingURLLoader::SendReceivedBodyToClient() {
   // Send the buffered data first.
   DCHECK_GT(bytes_remaining_in_buffer_, 0u);
   size_t start_position = buffered_body_.size() - bytes_remaining_in_buffer_;
-  uint32_t bytes_sent = bytes_remaining_in_buffer_;
+  size_t bytes_sent = bytes_remaining_in_buffer_;
   MojoResult result =
       body_producer_handle_->WriteData(buffered_body_.data() + start_position,
                                        &bytes_sent, MOJO_WRITE_DATA_FLAG_NONE);
@@ -330,7 +330,7 @@ void MimeSniffingURLLoader::ForwardBodyToClient() {
   DCHECK_EQ(0u, bytes_remaining_in_buffer_);
   // Send the body from the consumer to the producer.
   const void* buffer;
-  uint32_t buffer_size = 0;
+  size_t buffer_size = 0;
   MojoResult result = body_consumer_handle_->BeginReadData(
       &buffer, &buffer_size, MOJO_BEGIN_READ_DATA_FLAG_NONE);
   switch (result) {

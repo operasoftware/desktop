@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/bindings/to_v8.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 
@@ -27,16 +26,15 @@ class ReadableStreamBYOBReader::BYOBReaderReadIntoRequest final
       : resolver_(resolver) {}
 
   void ChunkSteps(ScriptState* script_state,
-                  DOMArrayBufferView* chunk) const override {
+                  DOMArrayBufferView* chunk,
+                  ExceptionState& exception_state) const override {
     auto* read_result = ReadableStreamReadResult::Create();
     read_result->setValue(
         ScriptValue(script_state->GetIsolate(),
-                    ToV8Traits<DOMArrayBufferView>::ToV8(script_state, chunk)
-                        .ToLocalChecked()));
+                    ToV8Traits<DOMArrayBufferView>::ToV8(script_state, chunk)));
     read_result->setDone(false);
-    resolver_->Resolve(script_state,
-                       ToV8(read_result, script_state->GetContext()->Global(),
-                            script_state->GetIsolate()));
+    resolver_->Resolve(script_state, ToV8Traits<ReadableStreamReadResult>::ToV8(
+                                         script_state, read_result));
   }
 
   void CloseSteps(ScriptState* script_state,
@@ -45,13 +43,11 @@ class ReadableStreamBYOBReader::BYOBReaderReadIntoRequest final
     read_result->setValue(ScriptValue(
         script_state->GetIsolate(),
         chunk ? ToV8Traits<DOMArrayBufferView>::ToV8(script_state, chunk)
-                    .ToLocalChecked()
               : static_cast<v8::Local<v8::Value>>(
                     v8::Undefined(script_state->GetIsolate()))));
     read_result->setDone(true);
-    resolver_->Resolve(script_state,
-                       ToV8(read_result, script_state->GetContext()->Global(),
-                            script_state->GetIsolate()));
+    resolver_->Resolve(script_state, ToV8Traits<ReadableStreamReadResult>::ToV8(
+                                         script_state, read_result));
   }
 
   void ErrorSteps(ScriptState* script_state,
@@ -89,9 +85,10 @@ ReadableStreamBYOBReader::ReadableStreamBYOBReader(
 
 ReadableStreamBYOBReader::~ReadableStreamBYOBReader() = default;
 
-ScriptPromise ReadableStreamBYOBReader::read(ScriptState* script_state,
-                                             NotShared<DOMArrayBufferView> view,
-                                             ExceptionState& exception_state) {
+ScriptPromiseUntyped ReadableStreamBYOBReader::read(
+    ScriptState* script_state,
+    NotShared<DOMArrayBufferView> view,
+    ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#byob-reader-read
   // 1. If view.[[ByteLength]] is 0, return a promise rejected with a TypeError
   // exception.
@@ -99,7 +96,7 @@ ScriptPromise ReadableStreamBYOBReader::read(ScriptState* script_state,
     exception_state.ThrowTypeError(
         "This readable stream reader cannot be used to read as the view has "
         "byte length equal to 0");
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   // 2. If view.[[ViewedArrayBuffer]].[[ArrayBufferByteLength]] is 0, return a
@@ -108,7 +105,7 @@ ScriptPromise ReadableStreamBYOBReader::read(ScriptState* script_state,
     exception_state.ThrowTypeError(
         "This readable stream reader cannot be used to read as the viewed "
         "array buffer has 0 byte length");
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   // 3. If ! IsDetachedBuffer(view.[[ViewedArrayBuffer]]) is true, return a
@@ -117,7 +114,7 @@ ScriptPromise ReadableStreamBYOBReader::read(ScriptState* script_state,
     exception_state.ThrowTypeError(
         "This readable stream reader cannot be used to read as the viewed "
         "array buffer is detached");
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   // 4. If this.[[stream]] is undefined, return a promise rejected with a
@@ -126,11 +123,12 @@ ScriptPromise ReadableStreamBYOBReader::read(ScriptState* script_state,
     exception_state.ThrowTypeError(
         "This readable stream reader has been released and cannot be used to "
         "read from its previous owner stream");
-    return ScriptPromise();
+    return ScriptPromiseUntyped();
   }
 
   // 5. Let promise be a new promise.
-  auto* promise = MakeGarbageCollected<StreamPromiseResolver>(script_state);
+  auto* promise = MakeGarbageCollected<StreamPromiseResolver>(script_state,
+                                                              exception_state);
 
   // 6. Let readIntoRequest be a new read-into request with the following items:
   //    chunk steps, given chunk
@@ -145,7 +143,7 @@ ScriptPromise ReadableStreamBYOBReader::read(ScriptState* script_state,
   // 7. Perform ! ReadableStreamBYOBReaderRead(this, view, readIntoRequest).
   Read(script_state, this, view, read_into_request, exception_state);
   // 8. Return promise.
-  return promise->GetScriptPromise(script_state);
+  return promise->GetScriptPromiseUntyped(script_state);
 }
 
 void ReadableStreamBYOBReader::Read(ScriptState* script_state,
@@ -186,12 +184,13 @@ void ReadableStreamBYOBReader::ErrorReadIntoRequests(
   // https://streams.spec.whatwg.org/#abstract-opdef-readablestreambyobreadererrorreadintorequests
   // 1. Let readIntoRequests be reader.[[readIntoRequests]].
   // 2. Set reader.[[readIntoRequests]] to a new empty list.
+  HeapDeque<Member<ReadIntoRequest>> read_into_requests;
+  read_into_requests.Swap(reader->read_into_requests_);
   // 3. For each readIntoRequest of readIntoRequests,
-  for (ReadIntoRequest* request : reader->read_into_requests_) {
+  for (ReadIntoRequest* request : read_into_requests) {
     //   a. Perform readIntoRequest’s error steps, given e.
     request->ErrorSteps(script_state, e);
   }
-  reader->read_into_requests_.clear();
 }
 
 void ReadableStreamBYOBReader::Release(ScriptState* script_state,

@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "third_party/blink/renderer/modules/webcodecs/video_decoder_broker.h"
+
 #include <memory>
 #include <vector>
 
 #include "base/features/scoped_test_feature_override.h"
 #include "base/features/submodule_features.h"
 #include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/decoder_buffer.h"
@@ -33,20 +37,18 @@
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
-#include "base/task/single_thread_task_runner.h"
-#include "base/time/time.h"
-#include "third_party/blink/renderer/modules/webcodecs/video_decoder_broker.h"
-
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-#include "base/features/feature_utils.h"
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 #if BUILDFLAG(IS_MAC)
-#include "media/filters/vt_video_decoder.h"
+#include "base/features/feature_utils.h"
+#include "media/gpu/mac/video_toolbox_software_video_decoder.h"
+#include "media/gpu/mac/vt_video_decoder.h"
 #elif BUILDFLAG(IS_WIN)
 #include "media/filters/wmf_video_decoder.h"
 #endif
-#endif // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 
 using ::testing::_;
 using ::testing::Invoke;
@@ -73,11 +75,12 @@ class FakeGpuVideoDecoder : public media::FakeVideoDecoder {
 
   scoped_refptr<media::VideoFrame> MakeVideoFrame(
       const media::DecoderBuffer& buffer) override {
-    gpu::MailboxHolder mailbox_holders[media::VideoFrame::kMaxPlanes];
-    mailbox_holders[0].mailbox.name[0] = 1;
+    scoped_refptr<gpu::ClientSharedImage>
+        shared_image[media::VideoFrame::kMaxPlanes] = {
+            gpu::ClientSharedImage::CreateForTesting()};
     scoped_refptr<media::VideoFrame> frame =
-        media::VideoFrame::WrapNativeTextures(
-            media::PIXEL_FORMAT_ARGB, mailbox_holders,
+        media::VideoFrame::WrapSharedImages(
+            media::PIXEL_FORMAT_ARGB, shared_image, gpu::SyncToken(), 0,
             media::VideoFrame::ReleaseMailboxCB(), current_config_.coded_size(),
             current_config_.visible_rect(), current_config_.natural_size(),
             buffer.timestamp());
@@ -104,19 +107,23 @@ class FakeMojoMediaClient : public media::MojoMediaClient {
       const gfx::ColorSpace& target_color_space,
       mojo::PendingRemote<media::stable::mojom::StableVideoDecoder>
           oop_video_decoder) override {
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-    if (base::IsFeatureEnabled(base::kFeaturePlatformH264DecoderInGpu) &&
-        !command_buffer_id) {
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
+    if (!command_buffer_id) {
       // HW-acceleration is not available => use the platform decoder in SW
       // mode.
 #if BUILDFLAG(IS_MAC)
-      return std::make_unique<media::VTVideoDecoder>(std::move(task_runner),
-                                                     media_log->Clone());
+      if (base::IsFeatureEnabled(base::kFeatureVTVDAsPlatformSWDecoder)) {
+        return media::CreateVideoToolboxSoftwareVideoDecoder(
+            task_runner, task_runner, media_log->Clone());
+      } else {
+        return std::make_unique<media::VTVideoDecoder>(std::move(task_runner),
+                                                       media_log->Clone());
+      }
 #elif BUILDFLAG(IS_WIN)
       return std::make_unique<media::WMFVideoDecoder>(std::move(task_runner));
 #endif
     }
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
     return std::make_unique<FakeGpuVideoDecoder>();
   }
 };
@@ -150,6 +157,14 @@ class FakeInterfaceFactory : public media::mojom::InterfaceFactory {
             mojo::PendingRemote<media::stable::mojom::StableVideoDecoder>()),
         std::move(receiver));
   }
+
+#if BUILDFLAG(ALLOW_OOP_VIDEO_DECODER)
+  void CreateStableVideoDecoder(
+      mojo::PendingReceiver<media::stable::mojom::StableVideoDecoder>
+          video_decoder) override {
+    // TODO(b/327268445): we'll need to complete this for GTFO OOP-VD testing.
+  }
+#endif  // BUILDFLAG(ALLOW_OOP_VIDEO_DECODER)
 
   // Stub out other mojom::InterfaceFactory interfaces.
   void CreateAudioDecoder(
@@ -223,13 +238,18 @@ class VideoDecoderBrokerTest : public testing::Test {
   }
 
   ~VideoDecoderBrokerTest() override {
-    if (media_thread_)
-      media_thread_->Stop();
-
     // Clean up this override, or else we we fail or DCHECK in SetupMojo().
     Platform::Current()->GetBrowserInterfaceBroker()->SetBinderForTesting(
         media::mojom::InterfaceFactory::Name_,
         base::RepeatingCallback<void(mojo::ScopedMessagePipeHandle)>());
+
+    // `decoder_broker` schedules deletion of internal data including decoders
+    // which keep pointers to `gpu_factories_`. The deletion is scheduled in
+    // `media_thread_`, wait for completion of all its tasks.
+    decoder_broker_.reset();
+    if (media_thread_) {
+      media_thread_->FlushForTesting();
+    }
   }
 
   void OnInitWithClosure(base::RepeatingClosure done_cb,
@@ -361,19 +381,25 @@ class VideoDecoderBrokerTest : public testing::Test {
   int GetMaxDecodeRequests() { return decoder_broker_->GetMaxDecodeRequests(); }
 
  protected:
-  base::ScopedTestFeatureOverride enable_aac_decoder_in_gpu_{
-      base::kFeaturePlatformAacDecoderInGpu, true};
-  base::ScopedTestFeatureOverride enable_h264_decoder_in_gpu_{
-      base::kFeaturePlatformH264DecoderInGpu, true};
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_MAC)
+  base::ScopedTestFeatureOverride enable_vtvd_as_platform_sw_decoder_{
+      base::kFeatureVTVDAsPlatformSWDecoder, true};
+#else
+  base::ScopedTestFeatureOverride enable_vtvd_as_platform_sw_decoder_{
+      base::kFeatureVTVDAsPlatformSWDecoder, false};
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS) && BUILDFLAG(IS_MAC)
 
   media::NullMediaLog null_media_log_;
+  std::unique_ptr<base::Thread> media_thread_;
+  // `gpu_factories_` must outlive `decoder_broker_` because it's stored as a
+  // raw_ptr.
+  std::unique_ptr<media::MockGpuVideoAcceleratorFactories> gpu_factories_;
   std::unique_ptr<VideoDecoderBroker> decoder_broker_;
   std::vector<scoped_refptr<media::VideoFrame>> output_frames_;
-  std::unique_ptr<media::MockGpuVideoAcceleratorFactories> gpu_factories_;
   std::unique_ptr<FakeInterfaceFactory> interface_factory_;
-  std::unique_ptr<base::Thread> media_thread_;
 
   base::test::ScopedFeatureList feature_list_;
+  test::TaskEnvironment task_environment_;
 };
 
 TEST_F(VideoDecoderBrokerTest, Decode_Uninitialized) {
@@ -399,7 +425,7 @@ TEST_F(VideoDecoderBrokerTest, Decode_NoMojoDecoder) {
   ConstructDecoder(*v8_scope.GetExecutionContext());
   EXPECT_EQ(GetDecoderType(), media::VideoDecoderType::kBroker);
 
-  InitializeDecoder(media::TestVideoConfig::Normal());
+  InitializeDecoder(media::TestVideoConfig::Normal(media::VideoCodec::kVP8));
   EXPECT_NE(GetDecoderType(), media::VideoDecoderType::kBroker);
 
   DecodeBuffer(media::ReadTestDataFile("vp8-I-frame-320x120"));
@@ -425,7 +451,8 @@ TEST_F(VideoDecoderBrokerTest, Init_RequireAcceleration) {
 
   decoder_broker_->SetHardwarePreference(HardwarePreference::kPreferHardware);
 
-  InitializeDecoder(media::TestVideoConfig::Normal(), /*expect_success*/ false);
+  InitializeDecoder(media::TestVideoConfig::Normal(media::VideoCodec::kVP8),
+                    /*expect_success*/ false);
   EXPECT_EQ(GetDecoderType(), media::VideoDecoderType::kBroker);
 }
 
@@ -456,7 +483,7 @@ TEST_F(VideoDecoderBrokerTest, Decode_MultipleAccelerationPreferences) {
 
   // Make sure we can decode software only.
   decoder_broker_->SetHardwarePreference(HardwarePreference::kPreferSoftware);
-  InitializeDecoder(media::TestVideoConfig::Normal());
+  InitializeDecoder(media::TestVideoConfig::Normal(media::VideoCodec::kVP8));
   DecodeBuffer(media::ReadTestDataFile("vp8-I-frame-320x120"));
   DecodeBuffer(media::DecoderBuffer::CreateEOSBuffer());
   ASSERT_EQ(1U, output_frames_.size());
@@ -485,7 +512,7 @@ TEST_F(VideoDecoderBrokerTest, Decode_MultipleAccelerationPreferences) {
 
   // Use a small frame to force software decode, without changing the
   // acceleration preference.
-  InitializeDecoder(media::TestVideoConfig::Normal());
+  InitializeDecoder(media::TestVideoConfig::Normal(media::VideoCodec::kVP8));
   DecodeBuffer(media::ReadTestDataFile("vp8-I-frame-320x120"));
   DecodeBuffer(media::DecoderBuffer::CreateEOSBuffer());
   ASSERT_EQ(4U, output_frames_.size());

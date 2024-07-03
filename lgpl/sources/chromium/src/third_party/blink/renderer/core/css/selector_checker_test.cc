@@ -5,13 +5,16 @@
 #include "third_party/blink/renderer/core/css/selector_checker.h"
 
 #include <bitset>
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
 #include "third_party/blink/renderer/core/css/selector_checker-inl.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
@@ -20,7 +23,7 @@ namespace blink {
 struct ScopeProximityTestData {
   const char* html;
   const char* rule;
-  absl::optional<unsigned> proximity;
+  std::optional<unsigned> proximity;
 };
 
 ScopeProximityTestData scope_proximity_test_data[] = {
@@ -170,8 +173,7 @@ TEST_P(ScopeProximityTest, All) {
   while (IsA<StyleRuleScope>(rule)) {
     auto& scope_rule = To<StyleRuleScope>(*rule);
     scope = scope_rule.GetStyleScope().CopyWithParent(scope);
-    const HeapVector<Member<StyleRuleBase>>& child_rules =
-        scope_rule.ChildRules();
+    const StyleRuleBase::ChildRuleVector& child_rules = scope_rule.ChildRules();
     ASSERT_EQ(1u, child_rules.size());
     rule = child_rules[0].Get();
   }
@@ -195,7 +197,7 @@ TEST_P(ScopeProximityTest, All) {
   bool match = checker.Match(context, result);
 
   EXPECT_EQ(param.proximity,
-            match ? absl::optional<unsigned>(result.proximity) : absl::nullopt);
+            match ? std::optional<unsigned>(result.proximity) : std::nullopt);
 }
 
 struct MatchFlagsTestData {
@@ -626,9 +628,9 @@ INSTANTIATE_TEST_SUITE_P(SelectorChecker,
 TEST_P(MatchFlagsShadowTest, Host) {
   MatchFlagsTestData param = GetParam();
 
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div id=host>
-      <template shadowroot="open">
+      <template shadowrootmode="open">
         <div></div>
       </template>
     </div>
@@ -658,6 +660,112 @@ TEST_P(MatchFlagsShadowTest, Host) {
 
   SCOPED_TRACE(param.selector);
   EXPECT_EQ(Bits(param.expected), Bits(result.flags));
+}
+
+class MatchFlagsScopeTest : public PageTestBase {
+ public:
+  void SetUp() override {
+    PageTestBase::SetUp();
+    GetDocument().body()->setInnerHTML(R"HTML(
+      <style id=style>
+      </style>
+      <div id=outer>
+        <div id=inner></div>
+      </div>
+    )HTML");
+    UpdateAllLifecyclePhasesForTest();
+  }
+
+  void SetStyle(String text) {
+    Element* style = GetDocument().getElementById(AtomicString("style"));
+    DCHECK(style);
+    style->setTextContent(text);
+    UpdateAllLifecyclePhasesForTest();
+  }
+
+  Element& Outer() const {
+    return *GetDocument().getElementById(AtomicString("outer"));
+  }
+  Element& Inner() const {
+    return *GetDocument().getElementById(AtomicString("inner"));
+  }
+
+  bool AffectedByHover(Element& element) {
+    return element.ComputedStyleRef().AffectedByHover();
+  }
+};
+
+TEST_F(MatchFlagsScopeTest, NoHover) {
+  SetStyle(R"HTML(
+    @scope (#inner) to (.unknown) {
+      :scope { --x:1; }
+    }
+    @scope (#outer) to (.unknown) {
+      :scope #inner { --x:1; }
+    }
+  )HTML");
+  EXPECT_FALSE(AffectedByHover(Outer()));
+  EXPECT_FALSE(AffectedByHover(Inner()));
+}
+
+TEST_F(MatchFlagsScopeTest, HoverSubject) {
+  SetStyle(R"HTML(
+    @scope (#outer) {
+      :scope #inner:hover { --x:1; }
+    }
+  )HTML");
+  EXPECT_FALSE(AffectedByHover(Outer()));
+  EXPECT_TRUE(AffectedByHover(Inner()));
+}
+
+TEST_F(MatchFlagsScopeTest, HoverNonSubject) {
+  SetStyle(R"HTML(
+    @scope (#outer) {
+      :scope:hover #inner { --x:1; }
+    }
+  )HTML");
+  EXPECT_FALSE(AffectedByHover(Outer()));
+  EXPECT_FALSE(AffectedByHover(Inner()));
+}
+
+TEST_F(MatchFlagsScopeTest, ScopeSubject) {
+  SetStyle(R"HTML(
+    @scope (#inner:hover) {
+      :scope { --x:1; }
+    }
+  )HTML");
+  EXPECT_FALSE(AffectedByHover(Outer()));
+  EXPECT_TRUE(AffectedByHover(Inner()));
+}
+
+TEST_F(MatchFlagsScopeTest, ScopeNonSubject) {
+  SetStyle(R"HTML(
+    @scope (#outer:hover) {
+      :scope #inner { --x:1; }
+    }
+  )HTML");
+  EXPECT_FALSE(AffectedByHover(Outer()));
+  EXPECT_FALSE(AffectedByHover(Inner()));
+}
+
+TEST_F(MatchFlagsScopeTest, ScopeLimit) {
+  SetStyle(R"HTML(
+    @scope (#inner) to (#inner:hover) {
+      :scope { --x:1; }
+    }
+  )HTML");
+  EXPECT_FALSE(AffectedByHover(Outer()));
+  EXPECT_TRUE(AffectedByHover(Inner()));
+}
+
+TEST_F(MatchFlagsScopeTest, ScopeLimitNonSubject) {
+  SetStyle(R"HTML(
+    @scope (#middle) to (#middle:hover) {
+      :scope #inner { --x:1; }
+    }
+  )HTML");
+  EXPECT_FALSE(AffectedByHover(Outer()));
+  EXPECT_FALSE(AffectedByHover(Inner()));
 }
 
 class EasySelectorCheckerTest : public PageTestBase {
@@ -797,9 +905,9 @@ TEST_F(SelectorCheckerTest, PseudoTrue) {
 }
 
 TEST_F(SelectorCheckerTest, PseudoTrueMatchesHost) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div id=host>
-      <template shadowroot=open>
+      <template shadowrootmode=open>
       </template>
     </div>
   )HTML");

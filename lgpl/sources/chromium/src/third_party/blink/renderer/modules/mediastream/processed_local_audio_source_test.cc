@@ -2,14 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
+
 #include <memory>
 #include <string>
 
 #include "base/functional/bind.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/audio_bus.h"
+#include "media/base/audio_glitch_info.h"
 #include "media/base/audio_parameters.h"
+#include "media/base/audio_timestamp_helper.h"
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -19,13 +24,13 @@
 #include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/modules/mediastream/media_constraints.h"
-#include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
 #include "third_party/blink/renderer/modules/mediastream/testing_platform_support_with_mock_audio_capture_source.h"
 #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h"
 
 using ::testing::_;
 using ::testing::AtLeast;
@@ -243,12 +248,24 @@ TEST_P(ProcessedLocalAudioSourceTest, VerifyAudioFlowWithoutAudioProcessing) {
   double volume = 0.9;
   const base::TimeTicks capture_time =
       base::TimeTicks::Now() + base::Milliseconds(delay_ms);
+  const media::AudioGlitchInfo glitch_info{.duration = base::Milliseconds(123),
+                                           .count = 1};
   std::unique_ptr<media::AudioBus> audio_bus =
       media::AudioBus::Create(2, expected_source_buffer_size_);
   audio_bus->Zero();
   EXPECT_CALL(*sink, OnDataCallback()).Times(AtLeast(1));
-  capture_source_callback()->Capture(audio_bus.get(), capture_time, volume,
-                                     key_pressed);
+  capture_source_callback()->Capture(audio_bus.get(), capture_time, glitch_info,
+                                     volume, key_pressed);
+
+  // Expect glitches to have been propagated.
+  MediaStreamTrackPlatform::AudioFrameStats audio_stats;
+  audio_track()->GetPlatformTrack()->TransferAudioFrameStatsTo(audio_stats);
+  EXPECT_EQ(audio_stats.TotalFrames() - audio_stats.DeliveredFrames(),
+            static_cast<unsigned int>(media::AudioTimestampHelper::TimeToFrames(
+                glitch_info.duration, kSampleRate)));
+  EXPECT_EQ(
+      audio_stats.TotalFramesDuration() - audio_stats.DeliveredFramesDuration(),
+      glitch_info.duration);
 
   // Expect the ProcessedLocalAudioSource to auto-stop the MockCapturerSource
   // when the track is stopped.
@@ -363,15 +380,24 @@ enum AecState {
   SYSTEM_AEC,
 };
 
+enum VoiceIsolationState {
+  kEnabled,
+  kDisabled,
+  kDefault,
+};
+
 class ProcessedLocalAudioSourceVoiceIsolationTest
     : public ProcessedLocalAudioSourceBase,
       public testing::WithParamInterface<
-          testing::tuple<bool, bool, AecState, bool>> {
+          testing::tuple<bool, bool, VoiceIsolationState, AecState, bool>> {
  public:
   bool IsVoiceIsolationOptionEnabled() { return std::get<0>(GetParam()); }
   bool IsVoiceIsolationSupported() { return std::get<1>(GetParam()); }
-  AecState GetAecState() { return std::get<2>(GetParam()); }
-  bool IsSystemAecDefaultEnabled() { return std::get<3>(GetParam()); }
+  VoiceIsolationState GetVoiceIsolationState() {
+    return std::get<2>(GetParam());
+  }
+  AecState GetAecState() { return std::get<3>(GetParam()); }
+  bool IsSystemAecDefaultEnabled() { return std::get<4>(GetParam()); }
 
   void SetUp() override {
     if (IsVoiceIsolationOptionEnabled()) {
@@ -400,6 +426,21 @@ class ProcessedLocalAudioSourceVoiceIsolationTest
             EchoCancellationType::kEchoCancellationSystem;
         break;
     }
+
+    switch (GetVoiceIsolationState()) {
+      case VoiceIsolationState::kEnabled:
+        properties->voice_isolation = AudioProcessingProperties::
+            VoiceIsolationType::kVoiceIsolationEnabled;
+        break;
+      case VoiceIsolationState::kDisabled:
+        properties->voice_isolation = AudioProcessingProperties::
+            VoiceIsolationType::kVoiceIsolationDisabled;
+        break;
+      case VoiceIsolationState::kDefault:
+        properties->voice_isolation = AudioProcessingProperties::
+            VoiceIsolationType::kVoiceIsolationDefault;
+        break;
+    }
   }
 
   void SetUpAudioParameters() {
@@ -422,9 +463,10 @@ class ProcessedLocalAudioSourceVoiceIsolationTest
   base::test::ScopedFeatureList feature_list_;
 };
 
-MATCHER_P3(VoiceIsolationAsExpected,
+MATCHER_P4(VoiceIsolationAsExpected,
            voice_isolation_option_enabled,
            voice_isolation_supported,
+           voice_isolation_state,
            aec_state,
            "") {
   // Only if voice isolation is supported and browser AEC is enabled while voice
@@ -433,15 +475,23 @@ MATCHER_P3(VoiceIsolationAsExpected,
   // `VOICE_ISOLATION` should be off.
   // Otherwise, `CLIENT_CONTROLLED_VOICE_ISOLATION` should be off and
   // `VOICE_ISOLATION` bit is don't-care.
-  if (voice_isolation_supported && aec_state == BROWSER_AEC &&
-      voice_isolation_option_enabled) {
-    return (arg.effects() &
-            media::AudioParameters::CLIENT_CONTROLLED_VOICE_ISOLATION) &&
-           ((arg.effects() & media::AudioParameters::VOICE_ISOLATION) == 0);
-  } else {
-    return (arg.effects() &
-            media::AudioParameters::CLIENT_CONTROLLED_VOICE_ISOLATION) == 0;
+  const bool client_controlled_voice_isolation =
+      arg.effects() & media::AudioParameters::CLIENT_CONTROLLED_VOICE_ISOLATION;
+  const bool voice_isolation_activated =
+      arg.effects() & media::AudioParameters::VOICE_ISOLATION;
+
+  if (voice_isolation_supported && voice_isolation_option_enabled) {
+    if (aec_state == BROWSER_AEC) {
+      return client_controlled_voice_isolation && !voice_isolation_activated;
+    }
+    if (voice_isolation_state == VoiceIsolationState::kEnabled) {
+      return client_controlled_voice_isolation && voice_isolation_activated;
+    }
+    if (voice_isolation_state == VoiceIsolationState::kDisabled) {
+      return client_controlled_voice_isolation && !voice_isolation_activated;
+    }
   }
+  return !client_controlled_voice_isolation;
 }
 
 TEST_P(ProcessedLocalAudioSourceVoiceIsolationTest,
@@ -456,7 +506,8 @@ TEST_P(ProcessedLocalAudioSourceVoiceIsolationTest,
   EXPECT_CALL(*mock_audio_capturer_source(),
               Initialize(VoiceIsolationAsExpected(
                              IsVoiceIsolationOptionEnabled(),
-                             IsVoiceIsolationSupported(), GetAecState()),
+                             IsVoiceIsolationSupported(),
+                             GetVoiceIsolationState(), GetAecState()),
                          capture_source_callback()));
   EXPECT_CALL(*mock_audio_capturer_source(), Start())
       .WillOnce(Invoke(
@@ -470,6 +521,9 @@ INSTANTIATE_TEST_SUITE_P(
     ProcessedLocalAudioSourceVoiceIsolationTest,
     ::testing::Combine(::testing::Bool(),
                        ::testing::Bool(),
+                       ::testing::ValuesIn({VoiceIsolationState::kEnabled,
+                                            VoiceIsolationState::kDisabled,
+                                            VoiceIsolationState::kDefault}),
                        ::testing::ValuesIn({AecState::AEC_DISABLED,
                                             AecState::BROWSER_AEC,
                                             AecState::SYSTEM_AEC}),

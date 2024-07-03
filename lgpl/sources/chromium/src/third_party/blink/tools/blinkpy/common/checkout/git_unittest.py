@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import functools
 import sys
 import unittest
 
@@ -9,7 +10,7 @@ from blinkpy.common.system.executive import Executive, ScriptError
 from blinkpy.common.system.executive_mock import MockExecutive
 from blinkpy.common.system.filesystem import FileSystem
 from blinkpy.common.system.filesystem_mock import MockFileSystem
-from blinkpy.common.checkout.git import Git
+from blinkpy.common.checkout.git import CommitRange, Git
 
 
 # These tests could likely be run on Windows if we first used Git.find_executable_name.
@@ -93,6 +94,26 @@ class GitTestWithRealFilesystemAndExecutive(unittest.TestCase):
         git.add_list(['added_dir/added_file'])
         self.assertIn('added_dir/added_file', git.added_files())
 
+    def test_added_files(self):
+        self._chdir(self.untracking_checkout_path)
+        git = self.untracking_git
+        self._write_text_file('cat_file', 'new stuff')
+        git.add_list(['cat_file'])
+        self.assertIn('cat_file', git.added_files())
+
+    def test_deleted_files(self):
+        self._chdir(self.untracking_checkout_path)
+        git = self.untracking_git
+        git.delete_list(['foo_file'])
+        self.assertIn('foo_file', git.deleted_files())
+
+    def test_added_deleted_files_with_rename(self):
+        self._chdir(self.untracking_checkout_path)
+        git = self.untracking_git
+        git.move('foo_file', 'bar_file')
+        self.assertIn('foo_file', git.deleted_files())
+        self.assertIn('bar_file', git.added_files())
+
     def test_delete_recursively(self):
         self._chdir(self.untracking_checkout_path)
         git = self.untracking_git
@@ -128,6 +149,57 @@ class GitTestWithRealFilesystemAndExecutive(unittest.TestCase):
         git.delete_list(['foo.txt'])
         git.commit_locally_with_message('deleting foo')
         self.assertFalse(git.exists('foo.txt'))
+
+    def test_show_blob(self):
+        self._chdir(self.untracking_checkout_path)
+        git = self.untracking_git
+        self._chdir(git.checkout_root)
+        self.filesystem.write_binary_file('foo.txt',
+                                          b'some stuff, possibly binary \xff')
+        git.add_list(['foo.txt'])
+        git.commit_locally_with_message('adding foo')
+        self.assertEqual(git.show_blob('foo.txt', ref='HEAD'),
+                         b'some stuff, possibly binary \xff')
+
+    def test_most_recent_log_matching(self):
+        self._chdir(self.untracking_checkout_path)
+        git = self.untracking_git
+        self._chdir(git.checkout_root)
+        self.filesystem.write_text_file('foo.txt', 'a')
+        git.add_list(['foo.txt'])
+        git.commit_locally_with_message('commit 1')
+        self.filesystem.write_text_file('bar.txt', 'b')
+        git.add_list(['bar.txt'])
+        git.commit_locally_with_message('commit 2')
+
+        subject = functools.partial(git.most_recent_log_matching,
+                                    format_pattern='%s')
+        self.assertEqual(subject('commit'), 'commit 2\n')
+        self.assertEqual(subject('1'), 'commit 1\n')
+        self.assertEqual(subject('1', path='bar.txt'), '')
+        self.assertEqual(subject('1', path='foo.txt'), 'commit 1\n')
+        self.assertEqual(subject('1', commits=CommitRange('HEAD~1', 'HEAD')),
+                         '')
+        self.assertEqual(subject('1', commits='HEAD~1'), 'commit 1\n')
+
+    def test_changed_files_across_commit_range(self):
+        self._chdir(self.untracking_checkout_path)
+        git = self.untracking_git
+        self._chdir(git.checkout_root)
+
+        self.filesystem.write_binary_file('a', b'\xff')
+        self.filesystem.write_binary_file('b', b'\xff')
+        git.add_list(['a', 'b'])
+        git.commit_locally_with_message('commit 1')
+
+        self.filesystem.write_binary_file('a', b'abc\xff')
+        git.add_list(['a'])
+        git.commit_locally_with_message('commit 2')
+
+        self.assertEqual(set(git.changed_files(CommitRange('HEAD~1', 'HEAD'))),
+                         {'a'})
+        self.assertEqual(set(git.changed_files(CommitRange('HEAD~2', 'HEAD'))),
+                         {'a', 'b'})
 
     def test_move(self):
         self._chdir(self.untracking_checkout_path)

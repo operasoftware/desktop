@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/html/client_hints_util.h"
 
+#include "base/containers/contains.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/permissions_policy/origin_with_possible_wildcards.h"
@@ -28,8 +29,7 @@ void UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
   // If it's not http-equiv="accept-ch" and it's not a preload-or-sync-parser
   // visible meta tag, then we need to warn the dev that js injected the tag.
   if (type != network::MetaCHType::HttpEquivAcceptCH && !is_doc_preloader &&
-      !is_sync_parser && local_dom_window &&
-      RuntimeEnabledFeatures::ClientHintThirdPartyDelegationEnabled()) {
+      !is_sync_parser && local_dom_window) {
     AuditsIssue::ReportClientHintIssue(
         local_dom_window, ClientHintIssueReason::kMetaTagModifiedHTML);
   }
@@ -40,8 +40,7 @@ void UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
   if (!client_hints_preferences.UpdateFromMetaCH(
           header_value, url, context, type, is_doc_preloader, is_sync_parser) ||
       type == network::MetaCHType::HttpEquivAcceptCH ||
-      !(is_doc_preloader || is_sync_parser) || !local_dom_window ||
-      !RuntimeEnabledFeatures::ClientHintThirdPartyDelegationEnabled()) {
+      !(is_doc_preloader || is_sync_parser) || !local_dom_window) {
     return;
   }
 
@@ -95,8 +94,7 @@ void UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
 void UpdateIFrameContainerPolicyWithDelegationSupportForClientHints(
     ParsedPermissionsPolicy& container_policy,
     LocalDOMWindow* local_dom_window) {
-  if (!RuntimeEnabledFeatures::ClientHintThirdPartyDelegationEnabled() ||
-      !local_dom_window ||
+  if (!local_dom_window ||
       !local_dom_window->GetSecurityContext().GetPermissionsPolicy()) {
     return;
   }
@@ -108,8 +106,8 @@ void UpdateIFrameContainerPolicyWithDelegationSupportForClientHints(
            ParsedPermissionsPolicyDeclaration>
       feature_to_container_policy;
   for (const auto& candidate_policy : container_policy) {
-    if (feature_to_container_policy.find(candidate_policy.feature) ==
-        feature_to_container_policy.end()) {
+    if (!base::Contains(feature_to_container_policy,
+                        candidate_policy.feature)) {
       feature_to_container_policy[candidate_policy.feature] = candidate_policy;
     }
   }

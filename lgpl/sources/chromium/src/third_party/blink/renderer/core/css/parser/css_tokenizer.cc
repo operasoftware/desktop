@@ -78,6 +78,13 @@ CSSTokenizer::TokenizeToEOFWithOffsets() {
   }
 }
 
+Vector<CSSParserToken, 32> CSSTokenizer::TokenizeToEOFWithUnicodeRanges() {
+  unicode_ranges_allowed_ = true;
+  Vector<CSSParserToken, 32> tokens = TokenizeToEOF();
+  unicode_ranges_allowed_ = false;
+  return tokens;
+}
+
 StringView CSSTokenizer::StringRangeAt(wtf_size_t start,
                                        wtf_size_t length) const {
   return input_.RangeAt(start, length);
@@ -286,7 +293,7 @@ CSSParserToken CSSTokenizer::AsciiDigit(UChar cc) {
 }
 
 CSSParserToken CSSTokenizer::LetterU(UChar cc) {
-  if (input_.PeekWithoutReplacement(0) == '+' &&
+  if (unicode_ranges_allowed_ && input_.PeekWithoutReplacement(0) == '+' &&
       (IsASCIIHexDigit(input_.PeekWithoutReplacement(1)) ||
        input_.PeekWithoutReplacement(1) == '?')) {
     input_.Advance();
@@ -453,13 +460,16 @@ CSSParserToken CSSTokenizer::ConsumeNumber() {
   NumericValueType type = kIntegerValueType;
   NumericSign sign = kNoSign;
   unsigned number_length = 0;
+  unsigned sign_length = 0;
 
   UChar next = input_.PeekWithoutReplacement(0);
   if (next == '+') {
     ++number_length;
+    ++sign_length;
     sign = kPlusSign;
   } else if (next == '-') {
     ++number_length;
+    ++sign_length;
     sign = kMinusSign;
   }
 
@@ -486,8 +496,19 @@ CSSParserToken CSSTokenizer::ConsumeNumber() {
     }
   }
 
-  double value = input_.GetDouble(0, number_length);
-  input_.Advance(number_length);
+  double value;
+  if (type == kIntegerValueType) {
+    // Fast path.
+    value = input_.GetNaturalNumberAsDouble(sign_length, number_length);
+    if (sign == kMinusSign) {
+      value = -value;
+    }
+    DCHECK_EQ(value, input_.GetDouble(0, number_length));
+    input_.Advance(number_length);
+  } else {
+    value = input_.GetDouble(0, number_length);
+    input_.Advance(number_length);
+  }
 
   return CSSParserToken(kNumberToken, value, type, sign);
 }

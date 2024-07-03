@@ -242,6 +242,12 @@ inline EDisplay CssValueIDToPlatformEnum(CSSValueID v) {
   if (v == CSSValueID::kMath) {
     return EDisplay::kMath;
   }
+  if (v == CSSValueID::kRuby) {
+    return EDisplay::kRuby;
+  }
+  if (v == CSSValueID::kRubyText) {
+    return EDisplay::kRubyText;
+  }
 
   NOTREACHED();
   return EDisplay::kInline;
@@ -329,6 +335,12 @@ inline CSSValueID PlatformEnumToCSSValueID(EDisplay v) {
   if (v == EDisplay::kMath) {
     return CSSValueID::kMath;
   }
+  if (v == EDisplay::kRuby) {
+    return CSSValueID::kRuby;
+  }
+  if (v == EDisplay::kRubyText) {
+    return CSSValueID::kRubyText;
+  }
 
   NOTREACHED();
   return CSSValueID::kInline;
@@ -403,13 +415,6 @@ inline CSSValueID PlatformEnumToCSSValueID(EWhiteSpace v) {
     case EWhiteSpace::kBreakSpaces:
       return CSSValueID::kBreakSpaces;
   }
-  if (ToTextWrap(v) == TextWrap::kBalance &&
-      !RuntimeEnabledFeatures::CSSWhiteSpaceShorthandEnabled()) {
-    // If `text-wrap: balance` but the shorthandifying `white-space` is off,
-    // pretend as if `text-wrap: wrap`.
-    return PlatformEnumToCSSValueID(
-        ToWhiteSpace(ToWhiteSpaceCollapse(v), TextWrap::kWrap));
-  }
   NOTREACHED();
   return CSSValueID::kNone;
 }
@@ -448,17 +453,83 @@ inline CSSValueID PlatformEnumToCSSValueID(WhiteSpaceCollapse v) {
 }
 
 template <>
+inline TextBoxEdge::TextBoxEdgeType CssValueIDToPlatformEnum(CSSValueID id) {
+  switch (id) {
+    case CSSValueID::kLeading:
+      return TextBoxEdge::TextBoxEdgeType::kLeading;
+    case CSSValueID::kText:
+      return TextBoxEdge::TextBoxEdgeType::kText;
+    case CSSValueID::kCap:
+      return TextBoxEdge::TextBoxEdgeType::kCap;
+    case CSSValueID::kEx:
+      return TextBoxEdge::TextBoxEdgeType::kEx;
+    case CSSValueID::kAlphabetic:
+      return TextBoxEdge::TextBoxEdgeType::kAlphabetic;
+    default:
+      NOTREACHED_NORETURN();
+  }
+}
+
+template <>
+inline CSSValueID PlatformEnumToCSSValueID(TextBoxEdge::TextBoxEdgeType type) {
+  using enum TextBoxEdge::TextBoxEdgeType;
+  switch (type) {
+    case kLeading:
+      return CSSValueID::kLeading;
+    case kText:
+      return CSSValueID::kText;
+    case kCap:
+      return CSSValueID::kCap;
+    case kEx:
+      return CSSValueID::kEx;
+    case kAlphabetic:
+      return CSSValueID::kAlphabetic;
+  }
+}
+
+template <>
+inline TextSpacingTrim CssValueIDToPlatformEnum(CSSValueID v) {
+  switch (v) {
+    case CSSValueID::kNormal:
+      return TextSpacingTrim::kNormal;
+    case CSSValueID::kTrimStart:
+      return TextSpacingTrim::kTrimStart;
+    case CSSValueID::kSpaceAll:
+      return TextSpacingTrim::kSpaceAll;
+    case CSSValueID::kSpaceFirst:
+      return TextSpacingTrim::kSpaceFirst;
+    default:
+      NOTREACHED();
+      return TextSpacingTrim::kNormal;
+  }
+}
+
+template <>
+inline CSSValueID PlatformEnumToCSSValueID(TextSpacingTrim v) {
+  switch (v) {
+    case TextSpacingTrim::kNormal:
+      return CSSValueID::kNormal;
+    case TextSpacingTrim::kTrimStart:
+      return CSSValueID::kTrimStart;
+    case TextSpacingTrim::kSpaceAll:
+      return CSSValueID::kSpaceAll;
+    case TextSpacingTrim::kSpaceFirst:
+      return CSSValueID::kSpaceFirst;
+  }
+  NOTREACHED();
+  return CSSValueID::kNone;
+}
+
+template <>
 inline TextWrap CssValueIDToPlatformEnum(CSSValueID v) {
   switch (v) {
     case CSSValueID::kWrap:
       return TextWrap::kWrap;
     case CSSValueID::kNowrap:
-      DCHECK(RuntimeEnabledFeatures::CSSWhiteSpaceShorthandEnabled());
       return TextWrap::kNoWrap;
     case CSSValueID::kBalance:
       return TextWrap::kBalance;
     case CSSValueID::kPretty:
-      DCHECK(RuntimeEnabledFeatures::CSSTextWrapPrettyEnabled());
       return TextWrap::kPretty;
     default:
       NOTREACHED();
@@ -472,20 +543,44 @@ inline CSSValueID PlatformEnumToCSSValueID(TextWrap v) {
     case TextWrap::kWrap:
       return CSSValueID::kWrap;
     case TextWrap::kNoWrap:
-      if (!RuntimeEnabledFeatures::CSSWhiteSpaceShorthandEnabled()) {
-        // Note this is not right, but a compromise until `white-space` becomes
-        // a shorthand. Simulate the behavior when it's off.
-        return CSSValueID::kWrap;
-      }
       return CSSValueID::kNowrap;
     case TextWrap::kBalance:
       return CSSValueID::kBalance;
     case TextWrap::kPretty:
-      DCHECK(RuntimeEnabledFeatures::CSSTextWrapPrettyEnabled());
       return CSSValueID::kPretty;
   }
   NOTREACHED();
   return CSSValueID::kNone;
+}
+
+template <>
+inline TryTactic CssValueIDToPlatformEnum(CSSValueID v) {
+  switch (v) {
+    case CSSValueID::kFlipBlock:
+      return TryTactic::kFlipBlock;
+    case CSSValueID::kFlipInline:
+      return TryTactic::kFlipInline;
+    case CSSValueID::kFlipStart:
+      return TryTactic::kFlipStart;
+    default:
+      NOTREACHED();
+      return TryTactic::kNone;
+  }
+}
+
+template <>
+inline CSSValueID PlatformEnumToCSSValueID(TryTactic v) {
+  switch (v) {
+    case TryTactic::kNone:
+      NOTREACHED();
+      return CSSValueID::kNone;
+    case TryTactic::kFlipBlock:
+      return CSSValueID::kFlipBlock;
+    case TryTactic::kFlipInline:
+      return CSSValueID::kFlipInline;
+    case TryTactic::kFlipStart:
+      return CSSValueID::kFlipStart;
+  }
 }
 
 }  // namespace blink

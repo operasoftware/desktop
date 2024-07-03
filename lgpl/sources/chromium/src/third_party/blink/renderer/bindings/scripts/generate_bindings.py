@@ -14,7 +14,7 @@ import bind_gen
 
 def parse_output_reldirs(reldirs):
     required = ['core', 'modules']
-    valid = required + ['extensions_chromeos']
+    valid = required + ['extensions_chromeos', 'extensions_webview']
     result = {}
     for key_value_pair in reldirs:
         key, value = key_value_pair.split("=", 1)
@@ -75,6 +75,7 @@ def parse_options(valid_tasks):
 
 def main():
     dispatch_table = {
+        'async_iterator': bind_gen.generate_async_iterators,
         'callback_function': bind_gen.generate_callback_functions,
         'callback_interface': bind_gen.generate_callback_interfaces,
         'dictionary': bind_gen.generate_dictionaries,

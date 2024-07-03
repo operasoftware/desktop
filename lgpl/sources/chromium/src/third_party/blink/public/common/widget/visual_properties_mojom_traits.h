@@ -5,8 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_COMMON_WIDGET_VISUAL_PROPERTIES_MOJOM_TRAITS_H_
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_WIDGET_VISUAL_PROPERTIES_MOJOM_TRAITS_H_
 
+#include <optional>
+
 #include "base/check_op.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/widget/visual_properties.h"
 #include "third_party/blink/public/mojom/widget/visual_properties.mojom-shared.h"
@@ -23,6 +24,10 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
 
   static bool auto_resize_enabled(const blink::VisualProperties& r) {
     return r.auto_resize_enabled;
+  }
+
+  static bool resizable(const blink::VisualProperties& r) {
+    return r.resizable;
   }
 
   static const gfx::Size& min_size_for_auto_resize(
@@ -58,7 +63,7 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
     return r.scroll_focused_node_into_view;
   }
 
-  static const absl::optional<viz::LocalSurfaceId>& local_surface_id(
+  static const std::optional<viz::LocalSurfaceId>& local_surface_id(
       const blink::VisualProperties& r) {
     return r.local_surface_id;
   }
@@ -70,6 +75,11 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
   static blink::mojom::DisplayMode display_mode(
       const blink::VisualProperties& r) {
     return r.display_mode;
+  }
+
+  static const ui::WindowShowState& window_show_state(
+      const blink::VisualProperties& r) {
+    return r.window_show_state;
   }
 
   static uint32_t capture_sequence_number(const blink::VisualProperties& r) {
@@ -95,9 +105,15 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::VisualPropertiesDataView,
     return r.compositing_scale_factor;
   }
 
-  static const std::vector<gfx::Rect>& root_widget_window_segments(
+  static float cursor_accessibility_scale_factor(
       const blink::VisualProperties& r) {
-    return r.root_widget_window_segments;
+    DCHECK_GE(r.cursor_accessibility_scale_factor, 1.f);
+    return r.cursor_accessibility_scale_factor;
+  }
+
+  static const std::vector<gfx::Rect>& root_widget_viewport_segments(
+      const blink::VisualProperties& r) {
+    return r.root_widget_viewport_segments;
   }
 
   static bool is_pinch_gesture_active(const blink::VisualProperties& r) {

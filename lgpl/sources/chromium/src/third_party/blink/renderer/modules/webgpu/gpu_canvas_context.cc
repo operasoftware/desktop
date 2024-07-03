@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/modules/webgpu/gpu_queue.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_supported_features.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_texture.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
@@ -54,12 +55,7 @@ GPUCanvasContext::GPUCanvasContext(
     CanvasRenderingContextHost* host,
     const CanvasContextCreationAttributesCore& attrs)
     : CanvasRenderingContext(host, attrs, CanvasRenderingAPI::kWebgpu) {
-  // Set the default values of the member corresponding to
-  // GPUCanvasContext.[[texture_descriptor]] in the WebGPU spec.
   texture_descriptor_ = {};
-  texture_descriptor_.dimension = WGPUTextureDimension_2D;
-  texture_descriptor_.mipLevelCount = 1;
-  texture_descriptor_.sampleCount = 1;
 }
 
 GPUCanvasContext::~GPUCanvasContext() {
@@ -134,14 +130,15 @@ void GPUCanvasContext::Reshape(int width, int height) {
   Host()->SetNeedsCompositingUpdate();
 }
 
-scoped_refptr<StaticBitmapImage> GPUCanvasContext::GetImage(
-    CanvasResourceProvider::FlushReason) {
+scoped_refptr<StaticBitmapImage> GPUCanvasContext::GetImage(FlushReason) {
   if (!swap_buffers_)
     return nullptr;
 
   // If there is a current texture, create a snapshot from it.
-  if (texture_) {
+  if (texture_ && !texture_->Destroyed()) {
     return SnapshotInternal(texture_->GetHandle(), swap_buffers_->Size());
+  } else if (swap_texture_) {
+    return SnapshotInternal(swap_texture_->GetHandle(), swap_buffers_->Size());
   }
 
   // If there is no current texture, we need to get the information of the last
@@ -161,8 +158,9 @@ scoped_refptr<StaticBitmapImage> GPUCanvasContext::GetImage(
 
 bool GPUCanvasContext::PaintRenderingResultsToCanvas(
     SourceDrawingBuffer source_buffer) {
-  if (!swap_buffers_)
+  if (!swap_buffers_) {
     return false;
+  }
 
   if (Host()->ResourceProvider() &&
       Host()->ResourceProvider()->Size() != swap_buffers_->Size()) {
@@ -171,6 +169,9 @@ bool GPUCanvasContext::PaintRenderingResultsToCanvas(
 
   CanvasResourceProvider* resource_provider =
       Host()->GetOrCreateCanvasResourceProvider(RasterModeHint::kPreferGPU);
+  if (!resource_provider) {
+    return false;
+  }
 
   return CopyRenderingResultsFromDrawingBuffer(resource_provider,
                                                source_buffer);
@@ -231,21 +232,11 @@ bool GPUCanvasContext::PushFrame() {
     return false;
   }
 
-  // Acquires a CanvasResource of type ExternalCanvasResource that will
-  // encapsulate an external mailbox, synctoken and release callback.
-  SkImageInfo resource_info = SkImageInfo::Make(
-      transferable_resource.size.width(), transferable_resource.size.height(),
-      viz::ToClosestSkColorType(
-          /*gpu_compositing=*/true, transferable_resource.format),
-      kPremul_SkAlphaType);
   auto canvas_resource = ExternalCanvasResource::Create(
-      transferable_resource.mailbox_holder.mailbox, std::move(release_callback),
-      transferable_resource.mailbox_holder.sync_token, resource_info,
-      transferable_resource.mailbox_holder.texture_target,
+      transferable_resource, std::move(release_callback),
       GetContextProviderWeakPtr(), /*resource_provider=*/nullptr,
-      cc::PaintFlags::FilterQuality::kLow,
-      /*is_origin_top_left=*/kBottomLeft_GrSurfaceOrigin,
-      transferable_resource.is_overlay_candidate);
+      filter_quality_,
+      /*is_origin_top_left=*/kBottomLeft_GrSurfaceOrigin);
   if (!canvas_resource)
     return false;
 
@@ -256,7 +247,8 @@ bool GPUCanvasContext::PushFrame() {
 }
 
 ImageBitmap* GPUCanvasContext::TransferToImageBitmap(
-    ScriptState* script_state) {
+    ScriptState* script_state,
+    ExceptionState& exception_state) {
   auto MakeFallbackImageBitmap =
       [this](V8GPUCanvasAlphaMode::Enum alpha_mode) -> ImageBitmap* {
     // It is not possible to create an empty image bitmap, return null in that
@@ -372,6 +364,15 @@ void GPUCanvasContext::configure(const GPUCanvasConfiguration* descriptor,
   // canvas is "configured" and calls to getNextTexture() will return GPUTexture
   // objects (valid or invalid) and not throw.
   configured_ = true;
+
+  // Set the default values of the member corresponding to
+  // GPUCanvasContext.[[texture_descriptor]] in the WebGPU spec.
+  texture_descriptor_ = {};
+  texture_descriptor_.dimension = WGPUTextureDimension_2D;
+  texture_descriptor_.mipLevelCount = 1;
+  texture_descriptor_.sampleCount = 1;
+
+  // Set the values from the configuration descriptor
   texture_descriptor_.format = AsDawnEnum(descriptor->format());
   texture_descriptor_.usage =
       AsDawnFlags<WGPUTextureUsage>(descriptor->usage());
@@ -419,18 +420,7 @@ void GPUCanvasContext::configure(const GPUCanvasConfiguration* descriptor,
       break;
 
     case WGPUTextureFormat_RGBA16Float:
-#if BUILDFLAG(IS_CHROMEOS)
-      // TODO(crbug.com/1317015): support RGBA16Float on ChromeOS.
-      device_->InjectError(
-          WGPUErrorType_Validation,
-          ("Support for canvas context format \"" +
-           std::string(FromDawnEnum(texture_descriptor_.format)) +
-           "\" has not been implemented.")
-              .c_str());
-      return;
-#else
       break;
-#endif
 
     default:
       device_->InjectError(
@@ -480,6 +470,10 @@ void GPUCanvasContext::configure(const GPUCanvasConfiguration* descriptor,
     // In cases where a copy is necessary the swap buffers will always use the
     // preferred canvas format.
     swap_texture_descriptor_.format = GPU::preferred_canvas_format();
+
+    // The swap buffer texture doesn't need any view formats.
+    swap_texture_descriptor_.viewFormats = nullptr;
+    swap_texture_descriptor_.viewFormatCount = 0;
   }
 
   alpha_mode_ = descriptor->alphaMode().AsEnum();
@@ -504,7 +498,6 @@ void GPUCanvasContext::configure(const GPUCanvasConfiguration* descriptor,
   // actually make the contents opaque.
   switch (alpha_mode_) {
     case V8GPUCanvasAlphaMode::Enum::kOpaque: {
-      CcLayer()->SetContentsOpaque(true);
       if (!alpha_clearer_ ||
           !alpha_clearer_->IsCompatible(device_->GetHandle(),
                                         swap_texture_descriptor_.format)) {
@@ -516,7 +509,6 @@ void GPUCanvasContext::configure(const GPUCanvasConfiguration* descriptor,
     }
     case V8GPUCanvasAlphaMode::Enum::kPremultiplied:
       alpha_clearer_ = nullptr;
-      CcLayer()->SetContentsOpaque(false);
       break;
   }
 
@@ -556,14 +548,14 @@ GPUTexture* GPUCanvasContext::getCurrentTexture(
   // time, the same texture should be returned. |texture_| is set to
   // null when presented so that we know we should create a new one.
   if (texture_ && !new_texture_required_) {
-    return texture_;
+    return texture_.Get();
   }
   new_texture_required_ = false;
 
   if (!swap_buffers_) {
     device_->InjectError(WGPUErrorType_Validation,
                          "context configuration is invalid.");
-    return GPUTexture::CreateError(device_, &texture_descriptor_);
+    return GPUTexture::CreateError(device_.Get(), &texture_descriptor_);
   }
 
   ReplaceDrawingBuffer(/* destroy_swap_buffers */ false);
@@ -590,7 +582,7 @@ GPUTexture* GPUCanvasContext::getCurrentTexture(
     }
     texture_ = swap_texture_ =
         GPUTexture::CreateError(device_, &texture_descriptor_);
-    return texture_;
+    return texture_.Get();
   }
 
   mailbox_texture->SetNeedsPresent(true);
@@ -599,12 +591,22 @@ GPUTexture* GPUCanvasContext::getCurrentTexture(
   swap_texture_ = MakeGarbageCollected<GPUTexture>(
       device_, swap_texture_descriptor_.format,
       static_cast<WGPUTextureUsage>(swap_texture_descriptor_.usage),
-      std::move(mailbox_texture));
+      std::move(mailbox_texture), String(swap_texture_descriptor_.label));
 
   if (copy_to_swap_texture_required_) {
     texture_ = MakeGarbageCollected<GPUTexture>(
-        device_, GetProcs().deviceCreateTexture(device_->GetHandle(),
-                                                &texture_descriptor_));
+        device_,
+        GetProcs().deviceCreateTexture(device_->GetHandle(),
+                                       &texture_descriptor_),
+        String(texture_descriptor_.label));
+    // If the user manually destroys the texture before yielding control back
+    // to the browser, do the copy just prior to the texture destruction.
+    texture_->SetBeforeDestroyCallback(WTF::BindOnce(
+        [](GPUCanvasContext* context, GPUTexture* texture) {
+          context->CopyToSwapTexture();
+          texture->ClearBeforeDestroyCallback();
+        },
+        WrapPersistent(this), WrapPersistent(texture_.Get())));
   } else {
     texture_ = swap_texture_;
   }
@@ -613,7 +615,7 @@ GPUTexture* GPUCanvasContext::getCurrentTexture(
   UseCounter::Count(execution_context,
                     WebFeature::kWebGPUCanvasContextGetCurrentTexture);
 
-  return texture_;
+  return texture_.Get();
 }
 
 void GPUCanvasContext::ReplaceDrawingBuffer(bool destroy_swap_buffers) {
@@ -624,6 +626,7 @@ void GPUCanvasContext::ReplaceDrawingBuffer(bool destroy_swap_buffers) {
   }
 
   if (copy_to_swap_texture_required_ && texture_) {
+    texture_->ClearBeforeDestroyCallback();
     texture_->destroy();
   }
   texture_ = nullptr;
@@ -636,7 +639,7 @@ void GPUCanvasContext::ReplaceDrawingBuffer(bool destroy_swap_buffers) {
   }
 }
 
-void GPUCanvasContext::FinalizeFrame(CanvasResourceProvider::FlushReason) {
+void GPUCanvasContext::FinalizeFrame(FlushReason) {
   // In some cases, such as when a canvas is hidden or offscreen, compositing
   // will never happen and thus OnTextureTransferred will never be called. In
   // those cases, getCurrentTexture is still required to return a new texture
@@ -650,12 +653,19 @@ void GPUCanvasContext::OnTextureTransferred() {
   DCHECK(texture_);
   DCHECK(swap_texture_);
 
-  if (copy_to_swap_texture_required_ && texture_) {
+  if (copy_to_swap_texture_required_ && texture_ && !texture_->Destroyed()) {
     CopyToSwapTexture();
+    texture_->ClearBeforeDestroyCallback();
     texture_->destroy();
   }
   texture_ = nullptr;
   swap_texture_ = nullptr;
+}
+
+void GPUCanvasContext::SetNeedsCompositingUpdate() {
+  if (Host()) {
+    Host()->SetNeedsCompositingUpdate();
+  }
 }
 
 void GPUCanvasContext::CopyToSwapTexture() {
@@ -705,8 +715,12 @@ bool GPUCanvasContext::CopyTextureToResourceProvider(
     CanvasResourceProvider* resource_provider) const {
   DCHECK(resource_provider);
   DCHECK_EQ(resource_provider->Size(), size);
+
+  // This method will copy the contents of `texture` to `resource_provider`'s
+  // backing SharedImage via the WebGPU interface. Hence, WEBGPU_WRITE usage
+  // must be included on that backing SharedImage.
   DCHECK(resource_provider->GetSharedImageUsageFlags() &
-         gpu::SHARED_IMAGE_USAGE_WEBGPU);
+         gpu::SHARED_IMAGE_USAGE_WEBGPU_WRITE);
   DCHECK(resource_provider->IsOriginTopLeft());
 
   base::WeakPtr<WebGraphicsContext3DProviderWrapper> shared_context_wrapper =
@@ -741,17 +755,11 @@ bool GPUCanvasContext::CopyTextureToResourceProvider(
       WGPUTextureUsage_CopyDst | WGPUTextureUsage_RenderAttachment,
       dst_mailbox);
   WGPUImageCopyTexture source = {
-      .nextInChain = nullptr,
       .texture = texture,
-      .mipLevel = 0,
-      .origin = WGPUOrigin3D{0},
       .aspect = WGPUTextureAspect_All,
   };
   WGPUImageCopyTexture destination = {
-      .nextInChain = nullptr,
       .texture = reservation.texture,
-      .mipLevel = 0,
-      .origin = WGPUOrigin3D{0},
       .aspect = WGPUTextureAspect_All,
   };
   WGPUExtent3D copy_size = {
@@ -760,7 +768,15 @@ bool GPUCanvasContext::CopyTextureToResourceProvider(
       .depthOrArrayLayers = 1,
   };
 
-  if (alpha_mode_ == V8GPUCanvasAlphaMode::Enum::kOpaque) {
+  bool isOpaque = alpha_mode_ == V8GPUCanvasAlphaMode::Enum::kOpaque;
+
+  // If either the texture is opaque or the texture format does not match the
+  // resource provider's format then CopyTextureForBrowser will be used, which
+  // performs a blit and can fix up the texture data during the copy.
+  if (isOpaque || copy_to_swap_texture_required_) {
+    WGPUAlphaMode srcAlphaMode =
+        isOpaque ? WGPUAlphaMode_Opaque : WGPUAlphaMode_Premultiplied;
+
     // Issue a copyTextureForBrowser call with internal usage turned on.
     // There is a special step for srcAlphaMode == WGPUAlphaMode_Opaque that
     // clears alpha channel to one.
@@ -778,12 +794,12 @@ bool GPUCanvasContext::CopyTextureToResourceProvider(
         break;
       default:
         // Unknown dst alpha type, default to equal to src alpha mode
-        dstAlphaMode = WGPUAlphaMode_Opaque;
+        dstAlphaMode = srcAlphaMode;
         break;
     }
     WGPUCopyTextureForBrowserOptions options = {
         .flipY = !resource_provider->IsOriginTopLeft(),
-        .srcAlphaMode = WGPUAlphaMode_Opaque,
+        .srcAlphaMode = srcAlphaMode,
         .dstAlphaMode = dstAlphaMode,
         .internalUsage = true,
     };
@@ -842,8 +858,7 @@ scoped_refptr<StaticBitmapImage> GPUCanvasContext::SnapshotInternal(
   if (!CopyTextureToResourceProvider(texture, size, resource_provider.get()))
     return nullptr;
 
-  return resource_provider->Snapshot(
-      CanvasResourceProvider::FlushReason::kNone);
+  return resource_provider->Snapshot(FlushReason::kNone);
 }
 
 // DawnObjectBase substitute methods

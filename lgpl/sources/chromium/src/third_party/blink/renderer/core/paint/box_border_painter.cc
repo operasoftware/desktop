@@ -15,6 +15,8 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
+#include "third_party/blink/renderer/platform/graphics/stroke_data.h"
+#include "third_party/blink/renderer/platform/graphics/styled_stroke_data.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/rect_conversions.h"
@@ -258,9 +260,9 @@ void DrawSolidBorderRect(GraphicsContext& context,
   if (!was_antialias)
     context.SetShouldAntialias(true);
 
-  context.SetStrokeStyle(kSolidStroke);
   context.SetStrokeColor(color);
-  context.StrokeRect(stroke_rect, border_width, auto_dark_mode);
+  context.SetStrokeThickness(border_width);
+  context.StrokeRect(stroke_rect, auto_dark_mode);
 
   if (!was_antialias)
     context.SetShouldAntialias(false);
@@ -283,7 +285,7 @@ void DrawBleedAdjustedDRRect(GraphicsContext& context,
       path.setFillType(SkPathFillType::kInverseWinding);
 
       cc::PaintFlags flags;
-      flags.setColor(color.Rgb());
+      flags.setColor(color.toSkColor4f());
       flags.setStyle(cc::PaintFlags::kFill_Style);
       flags.setAntiAlias(true);
       context.DrawPath(path, flags, auto_dark_mode);
@@ -403,8 +405,9 @@ void DrawDashedOrDottedBoxSide(GraphicsContext& context,
   GraphicsContextStateSaver state_saver(context);
   context.SetShouldAntialias(antialias);
   context.SetStrokeColor(color);
-  context.SetStrokeThickness(thickness);
-  context.SetStrokeStyle(style == EBorderStyle::kDashed ? kDashedStroke
+  StyledStrokeData styled_stroke;
+  styled_stroke.SetThickness(thickness);
+  styled_stroke.SetStyle(style == EBorderStyle::kDashed ? kDashedStroke
                                                         : kDottedStroke);
 
   switch (side) {
@@ -412,14 +415,14 @@ void DrawDashedOrDottedBoxSide(GraphicsContext& context,
     case BoxSide::kTop: {
       int mid_y = y1 + thickness / 2;
       context.DrawLine(gfx::Point(x1, mid_y), gfx::Point(x2, mid_y),
-                       auto_dark_mode);
+                       styled_stroke, auto_dark_mode);
       break;
     }
     case BoxSide::kRight:
     case BoxSide::kLeft: {
       int mid_x = x1 + thickness / 2;
       context.DrawLine(gfx::Point(mid_x, y1), gfx::Point(mid_x, y2),
-                       auto_dark_mode);
+                       styled_stroke, auto_dark_mode);
       break;
     }
   }
@@ -666,7 +669,7 @@ void FillQuad(GraphicsContext& context,
   path.lineTo(gfx::PointFToSkPoint(quad[3]));
   cc::PaintFlags flags(context.FillFlags());
   flags.setAntiAlias(antialias);
-  flags.setColor(color.Rgb());
+  flags.setColor(color.toSkColor4f());
 
   context.DrawPath(path.detach(), flags, auto_dark_mode);
 }
@@ -910,7 +913,7 @@ void BoxBorderPainter::DrawDoubleBorder() const {
   AutoDarkMode auto_dark_mode(PaintAutoDarkMode(style_, element_role_));
 
   // outer stripe
-  const NGPhysicalBoxStrut outer_third_outsets =
+  const PhysicalBoxStrut outer_third_outsets =
       DoubleStripeOutsets(BorderEdge::kDoubleBorderStripeOuter);
   FloatRoundedRect outer_third_rect =
       RoundedBorderGeometry::PixelSnappedRoundedBorderWithOutsets(
@@ -921,7 +924,7 @@ void BoxBorderPainter::DrawDoubleBorder() const {
                           color, auto_dark_mode);
 
   // inner stripe
-  const NGPhysicalBoxStrut inner_third_outsets =
+  const PhysicalBoxStrut inner_third_outsets =
       DoubleStripeOutsets(BorderEdge::kDoubleBorderStripeInner);
   FloatRoundedRect inner_third_rect =
       RoundedBorderGeometry::PixelSnappedRoundedBorderWithOutsets(
@@ -1034,10 +1037,10 @@ BoxBorderPainter::BoxBorderPainter(GraphicsContext& context,
                                    const ComputedStyle& style,
                                    const PhysicalRect& border_rect,
                                    int width,
-                                   const NGPhysicalBoxStrut& inner_outsets)
+                                   const PhysicalBoxStrut& inner_outsets)
     : context_(context),
       border_rect_(border_rect),
-      outer_outsets_(inner_outsets + NGPhysicalBoxStrut(LayoutUnit(width))),
+      outer_outsets_(inner_outsets + PhysicalBoxStrut(LayoutUnit(width))),
       style_(style),
       bleed_avoidance_(kBackgroundBleedNone),
       sides_to_include_(PhysicalBoxSides()),
@@ -1473,10 +1476,9 @@ void BoxBorderPainter::DrawDashedDottedBoxSideFromPath(
 
   context_.SetStrokeColor(color);
 
-  if (!StrokeData::StrokeIsDashed(border_thickness,
-                                  border_style == EBorderStyle::kDashed
-                                      ? kDashedStroke
-                                      : kDottedStroke)) {
+  const StrokeStyle stroke_style =
+      border_style == EBorderStyle::kDashed ? kDashedStroke : kDottedStroke;
+  if (!StyledStrokeData::StrokeIsDashed(border_thickness, stroke_style)) {
     DrawWideDottedBoxSideFromPath(centerline_path, border_thickness);
     return;
   }
@@ -1486,27 +1488,34 @@ void BoxBorderPainter::DrawDashedDottedBoxSideFromPath(
   // the extra multiplier so that the clipping mask can antialias
   // the edges to prevent jaggies.
   const float thickness_multiplier = 2 * 1.1f;
-  context_.SetStrokeThickness(stroke_thickness * thickness_multiplier);
-  context_.SetStrokeStyle(
-      border_style == EBorderStyle::kDashed ? kDashedStroke : kDottedStroke);
+  StyledStrokeData styled_stroke;
+  styled_stroke.SetThickness(stroke_thickness * thickness_multiplier);
+  styled_stroke.SetStyle(stroke_style);
 
   // TODO(crbug.com/344234): stroking the border path causes issues with
   // tight corners.
-  context_.StrokePath(centerline_path, PaintAutoDarkMode(style_, element_role_),
-                      centerline_path.length(), border_thickness);
+  const StrokeData stroke_data = styled_stroke.ConvertToStrokeData(
+      {static_cast<int>(centerline_path.length()), border_thickness,
+       centerline_path.IsClosed()});
+  context_.SetStroke(stroke_data);
+  context_.StrokePath(centerline_path,
+                      PaintAutoDarkMode(style_, element_role_));
 }
 
 void BoxBorderPainter::DrawWideDottedBoxSideFromPath(
     const Path& border_path,
     int border_thickness) const {
-  context_.SetStrokeThickness(border_thickness);
-  context_.SetStrokeStyle(kDottedStroke);
-  context_.SetLineCap(kRoundCap);
+  StyledStrokeData styled_stroke;
+  styled_stroke.SetThickness(border_thickness);
+  styled_stroke.SetStyle(kDottedStroke);
 
   // TODO(crbug.com/344234): stroking the border path causes issues with
   // tight corners.
-  context_.StrokePath(border_path, PaintAutoDarkMode(style_, element_role_),
-                      border_path.length(), border_thickness);
+  const StrokeData stroke_data = styled_stroke.ConvertToStrokeData(
+      {static_cast<int>(border_path.length()), border_thickness,
+       border_path.IsClosed()});
+  context_.SetStroke(stroke_data);
+  context_.StrokePath(border_path, PaintAutoDarkMode(style_, element_role_));
 }
 
 void BoxBorderPainter::DrawDoubleBoxSideFromPath(const Path& border_path,
@@ -1517,7 +1526,7 @@ void BoxBorderPainter::DrawDoubleBoxSideFromPath(const Path& border_path,
   // Draw inner border line
   {
     GraphicsContextStateSaver state_saver(context_);
-    const NGPhysicalBoxStrut inner_outsets =
+    const PhysicalBoxStrut inner_outsets =
         DoubleStripeOutsets(BorderEdge::kDoubleBorderStripeInner);
     FloatRoundedRect inner_clip =
         RoundedBorderGeometry::PixelSnappedRoundedBorderWithOutsets(
@@ -1532,7 +1541,7 @@ void BoxBorderPainter::DrawDoubleBoxSideFromPath(const Path& border_path,
   {
     GraphicsContextStateSaver state_saver(context_);
     PhysicalRect used_border_rect = border_rect_;
-    NGPhysicalBoxStrut outer_outsets =
+    PhysicalBoxStrut outer_outsets =
         DoubleStripeOutsets(BorderEdge::kDoubleBorderStripeOuter);
 
     if (BleedAvoidanceIsClipping(bleed_avoidance_)) {
@@ -2024,22 +2033,22 @@ void BoxBorderPainter::ClipBorderSidePolygon(BoxSide side,
   }
 }
 
-NGPhysicalBoxStrut BoxBorderPainter::DoubleStripeOutsets(
+PhysicalBoxStrut BoxBorderPainter::DoubleStripeOutsets(
     BorderEdge::DoubleBorderStripe stripe) const {
   return outer_outsets_ -
-         NGPhysicalBoxStrut(
+         PhysicalBoxStrut(
              Edge(BoxSide::kTop).GetDoubleBorderStripeWidth(stripe),
              Edge(BoxSide::kRight).GetDoubleBorderStripeWidth(stripe),
              Edge(BoxSide::kBottom).GetDoubleBorderStripeWidth(stripe),
              Edge(BoxSide::kLeft).GetDoubleBorderStripeWidth(stripe));
 }
 
-NGPhysicalBoxStrut BoxBorderPainter::CenterOutsets() const {
+PhysicalBoxStrut BoxBorderPainter::CenterOutsets() const {
   return outer_outsets_ -
-         NGPhysicalBoxStrut(Edge(BoxSide::kTop).UsedWidth() * 0.5,
-                            Edge(BoxSide::kRight).UsedWidth() * 0.5,
-                            Edge(BoxSide::kBottom).UsedWidth() * 0.5,
-                            Edge(BoxSide::kLeft).UsedWidth() * 0.5);
+         PhysicalBoxStrut(Edge(BoxSide::kTop).UsedWidth() * 0.5,
+                          Edge(BoxSide::kRight).UsedWidth() * 0.5,
+                          Edge(BoxSide::kBottom).UsedWidth() * 0.5,
+                          Edge(BoxSide::kLeft).UsedWidth() * 0.5);
 }
 
 bool BoxBorderPainter::ColorsMatchAtCorner(BoxSide side,

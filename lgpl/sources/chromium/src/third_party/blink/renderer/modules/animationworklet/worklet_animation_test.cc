@@ -5,11 +5,11 @@
 #include "third_party/blink/renderer/modules/animationworklet/worklet_animation.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_scroll_timeline_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_animationeffect_animationeffectsequence.h"
@@ -155,18 +155,12 @@ TEST_F(WorkletAnimationTest, SetCurrentTimeInfNotCrash) {
 }
 
 TEST_F(WorkletAnimationTest, StyleHasCurrentAnimation) {
-  scoped_refptr<const ComputedStyle> style1 =
-      GetDocument()
-          .GetStyleResolver()
-          .ResolveStyle(element_, StyleRecalcContext())
-          .get();
+  const ComputedStyle* style1 = GetDocument().GetStyleResolver().ResolveStyle(
+      element_, StyleRecalcContext());
   EXPECT_FALSE(style1->HasCurrentOpacityAnimation());
   worklet_animation_->play(ASSERT_NO_EXCEPTION);
-  scoped_refptr<const ComputedStyle> style2 =
-      GetDocument()
-          .GetStyleResolver()
-          .ResolveStyle(element_, StyleRecalcContext())
-          .get();
+  const ComputedStyle* style2 = GetDocument().GetStyleResolver().ResolveStyle(
+      element_, StyleRecalcContext());
   EXPECT_TRUE(style2->HasCurrentOpacityAnimation());
 }
 

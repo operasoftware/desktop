@@ -27,6 +27,7 @@
 
 #include <stdint.h>
 #include "base/functional/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/task/task_observer.h"
 #include "base/threading/thread.h"
@@ -64,11 +65,16 @@ struct PLATFORM_EXPORT ThreadCreationParams {
 
   ThreadType thread_type;
   const char* name;
-  FrameOrWorkerScheduler* frame_or_worker_scheduler;  // NOT OWNED
+  raw_ptr<FrameOrWorkerScheduler> frame_or_worker_scheduler;  // NOT OWNED
 
   // Do NOT set the thread priority for non-WebAudio usages. Please consult
   // scheduler-dev@ first in order to use an elevated thread priority.
   base::ThreadType base_thread_type = base::ThreadType::kDefault;
+
+  // The interval at which the thread expects to have work to do. Zero if
+  // unknown. Used when configuring a thread with `base_thread_type`
+  // base::ThreadType::kRealtimeAudio.
+  base::TimeDelta realtime_period;
 
   bool supports_gc = false;
 };

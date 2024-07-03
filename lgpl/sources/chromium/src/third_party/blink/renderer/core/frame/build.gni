@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//third_party/blink/public/public_features.gni")
+import("//third_party/blink/renderer/config.gni")
 
 blink_core_sources_frame = [
   "ad_tracker.cc",
@@ -143,14 +144,6 @@ blink_core_sources_frame = [
   "page_scale_constraints.h",
   "page_scale_constraints_set.cc",
   "page_scale_constraints_set.h",
-  "pending_beacon.cc",
-  "pending_beacon.h",
-  "pending_beacon_dispatcher.cc",
-  "pending_beacon_dispatcher.h",
-  "pending_post_beacon.cc",
-  "pending_post_beacon.h",
-  "pending_get_beacon.cc",
-  "pending_get_beacon.h",
   "pausable_script_executor.cc",
   "pausable_script_executor.h",
   "performance_monitor.cc",
@@ -206,6 +199,7 @@ blink_core_sources_frame = [
   "settings.h",
   "settings_delegate.cc",
   "settings_delegate.h",
+  "settings_string_converter.h",
   "smart_clip.cc",
   "smart_clip.h",
   "sticky_ad_detector.cc",
@@ -238,6 +232,8 @@ blink_core_sources_frame = [
   "web_remote_frame_impl.cc",
   "web_remote_frame_impl.h",
   "window_event_handlers.h",
+  "window_properties.cc",
+  "window_properties.h",
   "window_or_worker_global_scope.cc",
   "window_or_worker_global_scope.h",
 ]
@@ -248,7 +244,7 @@ blink_core_sources_frame = [
 # generating the snapshot for android, blink is compiled with
 # current_os="linux" and target_os="android". Using target_os is necessary as
 # we need to compile in the same way as would happen when current_os="android".
-if (target_os != "android") {
+if (!target_os_is_android) {
   blink_core_sources_frame += [
     "window_controls_overlay_changed_delegate.cc",
     "window_controls_overlay_changed_delegate.h",
@@ -297,8 +293,6 @@ blink_core_tests_frame = [
   "mhtml_archive_test.cc",
   "mhtml_loading_test.cc",
   "performance_monitor_test.cc",
-  "pending_beacon_dispatcher_test.cc",
-  "pending_beacon_test.cc",
   "policy_container_test.cc",
   "report_test.cc",
   "reporting_context_test.cc",

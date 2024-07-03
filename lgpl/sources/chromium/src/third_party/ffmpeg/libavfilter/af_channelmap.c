@@ -58,7 +58,6 @@ enum MappingMode {
 typedef struct ChannelMapContext {
     const AVClass *class;
     char *mapping_str;
-    char *channel_layout_str;
     AVChannelLayout output_layout;
     struct ChannelMap map[MAX_CH];
     int nch;
@@ -72,7 +71,7 @@ static const AVOption channelmap_options[] = {
     { "map", "A comma-separated list of input channel numbers in output order.",
           OFFSET(mapping_str),        AV_OPT_TYPE_STRING, .flags = A|F },
     { "channel_layout", "Output channel layout.",
-          OFFSET(channel_layout_str), AV_OPT_TYPE_STRING, .flags = A|F },
+          OFFSET(output_layout),      AV_OPT_TYPE_CHLAYOUT, .flags = A|F },
     { NULL }
 };
 
@@ -122,7 +121,6 @@ static av_cold int channelmap_init(AVFilterContext *ctx)
     ChannelMapContext *s = ctx->priv;
     char *mapping, separator = '|';
     int map_entries = 0;
-    char buf[256];
     enum MappingMode mode;
     uint64_t out_ch_mask = 0;
     int i;
@@ -232,50 +230,25 @@ static av_cold int channelmap_init(AVFilterContext *ctx)
     s->nch           = map_entries;
     if (out_ch_mask)
         av_channel_layout_from_mask(&s->output_layout, out_ch_mask);
-    else
+    else if (map_entries && s->output_layout.nb_channels == 0)
         av_channel_layout_default(&s->output_layout, map_entries);
 
-    if (s->channel_layout_str) {
-        AVChannelLayout fmt = { 0 };
-        int ret;
-        if ((ret = av_channel_layout_from_string(&fmt, s->channel_layout_str)) < 0) {
-#if FF_API_OLD_CHANNEL_LAYOUT
-            uint64_t mask;
-FF_DISABLE_DEPRECATION_WARNINGS
-            if ((mask = av_get_channel_layout(s->channel_layout_str)) == 0) {
-#endif
-                av_log(ctx, AV_LOG_ERROR, "Error parsing channel layout: '%s'.\n",
-                       s->channel_layout_str);
-                return AVERROR(EINVAL);
-#if FF_API_OLD_CHANNEL_LAYOUT
-            }
-FF_ENABLE_DEPRECATION_WARNINGS
-            av_log(ctx, AV_LOG_WARNING, "Channel layout '%s' uses a deprecated syntax.\n",
-                   s->channel_layout_str);
-            av_channel_layout_from_mask(&fmt, mask);
-#endif
+    if (mode == MAP_NONE) {
+        int i;
+        s->nch = s->output_layout.nb_channels;
+        for (i = 0; i < s->nch; i++) {
+            s->map[i].in_channel_idx  = i;
+            s->map[i].out_channel_idx = i;
         }
-        if (mode == MAP_NONE) {
-            int i;
-            s->nch = fmt.nb_channels;
-            for (i = 0; i < s->nch; i++) {
-                s->map[i].in_channel_idx  = i;
-                s->map[i].out_channel_idx = i;
-            }
-        } else if (out_ch_mask && av_channel_layout_compare(&s->output_layout, &fmt)) {
-            av_channel_layout_describe(&s->output_layout, buf, sizeof(buf));
-            av_log(ctx, AV_LOG_ERROR,
-                   "Output channel layout '%s' does not match the list of channel mapped: '%s'.\n",
-                   s->channel_layout_str, buf);
-            return AVERROR(EINVAL);
-        } else if (s->nch != fmt.nb_channels) {
-            av_log(ctx, AV_LOG_ERROR,
-                   "Output channel layout %s does not match the number of channels mapped %d.\n",
-                   s->channel_layout_str, s->nch);
-            return AVERROR(EINVAL);
-        }
-        s->output_layout = fmt;
+    } else if (s->nch != s->output_layout.nb_channels) {
+        char buf[256];
+        av_channel_layout_describe(&s->output_layout, buf, sizeof(buf));
+        av_log(ctx, AV_LOG_ERROR,
+               "Output channel layout %s does not match the number of channels mapped %d.\n",
+               buf, s->nch);
+        return AVERROR(EINVAL);
     }
+
     if (!s->output_layout.nb_channels) {
         av_log(ctx, AV_LOG_ERROR, "Output channel layout is not set and "
                "cannot be guessed from the maps.\n");
@@ -351,12 +324,6 @@ static int channelmap_filter_frame(AVFilterLink *inlink, AVFrame *buf)
         memcpy(buf->data, buf->extended_data,
            FFMIN(FF_ARRAY_ELEMS(buf->data), nch_out) * sizeof(buf->data[0]));
 
-#if FF_API_OLD_CHANNEL_LAYOUT
-FF_DISABLE_DEPRECATION_WARNINGS
-    buf->channels = outlink->ch_layout.nb_channels;
-    buf->channel_layout = outlink->channel_layout;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     if ((ret = av_channel_layout_copy(&buf->ch_layout, &outlink->ch_layout)) < 0)
         return ret;
 
@@ -409,13 +376,6 @@ static const AVFilterPad avfilter_af_channelmap_inputs[] = {
     },
 };
 
-static const AVFilterPad avfilter_af_channelmap_outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_AUDIO
-    },
-};
-
 const AVFilter ff_af_channelmap = {
     .name          = "channelmap",
     .description   = NULL_IF_CONFIG_SMALL("Remap audio channels."),
@@ -423,6 +383,6 @@ const AVFilter ff_af_channelmap = {
     .priv_size     = sizeof(ChannelMapContext),
     .priv_class    = &channelmap_class,
     FILTER_INPUTS(avfilter_af_channelmap_inputs),
-    FILTER_OUTPUTS(avfilter_af_channelmap_outputs),
+    FILTER_OUTPUTS(ff_audio_default_filterpad),
     FILTER_QUERY_FUNC(channelmap_query_formats),
 };

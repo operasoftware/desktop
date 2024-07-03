@@ -18,14 +18,13 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/fetch/bytes_uploader.h"
 #include "third_party/blink/renderer/core/fetch/fetch_data_loader.h"
+#include "third_party/blink/renderer/core/streams/underlying_byte_source_base.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 
 namespace blink {
 
-class BodyStreamBufferUnderlyingByteSource;
-class BodyStreamBufferUnderlyingSource;
 class EncodedFormData;
 class ExceptionState;
 class ReadableStream;
@@ -33,7 +32,7 @@ class ScriptState;
 class ScriptCachedMetadataHandler;
 
 class CORE_EXPORT BodyStreamBuffer final
-    : public GarbageCollected<BodyStreamBuffer>,
+    : public UnderlyingByteSourceBase,
       public ExecutionContextLifecycleObserver,
       public BytesConsumer::Client {
  public:
@@ -67,12 +66,13 @@ class CORE_EXPORT BodyStreamBuffer final
   BodyStreamBuffer(const BodyStreamBuffer&) = delete;
   BodyStreamBuffer& operator=(const BodyStreamBuffer&) = delete;
 
-  ReadableStream* Stream() { return stream_; }
+  ReadableStream* Stream() { return stream_.Get(); }
 
   // Callable only when neither locked nor disturbed.
   scoped_refptr<BlobDataHandle> DrainAsBlobDataHandle(
-      BytesConsumer::BlobSizePolicy);
-  scoped_refptr<EncodedFormData> DrainAsFormData();
+      BytesConsumer::BlobSizePolicy,
+      ExceptionState&);
+  scoped_refptr<EncodedFormData> DrainAsFormData(ExceptionState&);
   void DrainAsChunkedDataPipeGetter(
       ScriptState*,
       mojo::PendingReceiver<network::mojom::blink::ChunkedDataPipeGetter>,
@@ -85,7 +85,13 @@ class CORE_EXPORT BodyStreamBuffer final
                     ExceptionState&);
   void Tee(BodyStreamBuffer**, BodyStreamBuffer**, ExceptionState&);
 
-  ScriptPromise Cancel(ScriptState*, ScriptValue reason);
+  // UnderlyingByteSourceBase
+  ScriptPromiseUntyped Pull(ReadableByteStreamController* controller,
+                            ExceptionState&) override;
+  ScriptPromiseUntyped Cancel(ExceptionState&) override;
+  ScriptPromiseUntyped Cancel(v8::Local<v8::Value> reason,
+                              ExceptionState&) override;
+  ScriptState* GetScriptState() override;
 
   // ExecutionContextLifecycleObserver
   void ContextDestroyed() override;
@@ -102,7 +108,7 @@ class CORE_EXPORT BodyStreamBuffer final
 
   // Closes the stream if necessary, and then locks and disturbs it. Should not
   // be called if |stream_broken_| is true.
-  void CloseAndLockAndDisturb();
+  void CloseAndLockAndDisturb(ExceptionState&);
 
   bool IsAborted();
 
@@ -112,7 +118,7 @@ class CORE_EXPORT BodyStreamBuffer final
   ScriptCachedMetadataHandler* GetCachedMetadataHandler() {
     DCHECK(!IsStreamLocked());
     DCHECK(!IsStreamDisturbed());
-    return cached_metadata_handler_;
+    return cached_metadata_handler_.Get();
   }
 
   // Take the blob representing any side data associated with this body
@@ -140,18 +146,16 @@ class CORE_EXPORT BodyStreamBuffer final
 
   BytesConsumer* ReleaseHandle(ExceptionState&);
   void Abort();
-  void Close();
+  void Close(ExceptionState&);
   void GetError();
   void RaiseOOMError();
   void CancelConsumer();
-  void ProcessData();
+  void ProcessData(ExceptionState&);
   void EndLoading();
   void StopLoading();
 
   Member<ScriptState> script_state_;
   Member<ReadableStream> stream_;
-  Member<BodyStreamBufferUnderlyingByteSource> underlying_byte_source_;
-  Member<BodyStreamBufferUnderlyingSource> underlying_source_;
   Member<BytesUploader> stream_uploader_;
   Member<BytesConsumer> consumer_;
   // We need this member to keep it alive while loading.

@@ -27,7 +27,7 @@
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_vector.h"
-#include "third_party/blink/public/web/modules/media/webmediaplayer_util.h"
+#include "third_party/blink/public/web/modules/media/web_media_player_util.h"
 #include "third_party/blink/renderer/platform/media/cdm_result_promise.h"
 #include "third_party/blink/renderer/platform/media/cdm_result_promise_helper.h"
 #include "third_party/blink/renderer/platform/media/cdm_session_adapter.h"
@@ -242,11 +242,15 @@ KeyStatusMixForUma GetKeyStatusMixForUma(const media::CdmKeysInfo& keys_info) {
 
 WebContentDecryptionModuleSessionImpl::WebContentDecryptionModuleSessionImpl(
     const scoped_refptr<CdmSessionAdapter>& adapter,
-    WebEncryptedMediaSessionType session_type)
+    WebEncryptedMediaSessionType session_type,
+    media::KeySystems* key_systems)
     : adapter_(adapter),
       session_type_(ConvertSessionType(session_type)),
+      key_systems_(key_systems),
       has_close_been_called_(false),
-      is_closed_(false) {}
+      is_closed_(false) {
+  DCHECK(key_systems_);
+}
 
 WebContentDecryptionModuleSessionImpl::
     ~WebContentDecryptionModuleSessionImpl() {
@@ -295,8 +299,8 @@ void WebContentDecryptionModuleSessionImpl::InitializeNewSession(
   //    implementation value does not support initDataType as an Initialization
   //    Data Type, return a promise rejected with a NotSupportedError.
   //    String comparison is case-sensitive.
-  if (!IsSupportedKeySystemWithInitDataType(adapter_->GetKeySystem(),
-                                            eme_init_data_type)) {
+  if (!key_systems_->IsSupportedInitDataType(adapter_->GetKeySystem(),
+                                             eme_init_data_type)) {
     std::string message =
         "The initialization data type is not supported by the key system.";
     result.CompleteWithError(
@@ -501,10 +505,12 @@ void WebContentDecryptionModuleSessionImpl::OnSessionExpirationUpdate(
     base::Time new_expiry_time) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // The check works around an issue in base::Time that converts null base::Time
-  // to |1601-01-01 00:00:00 UTC| in ToJsTime(). See http://crbug.com/679079
+  // to |1601-01-01 00:00:00 UTC| in InMillisecondsFSinceUnixEpoch(). See
+  // http://crbug.com/679079
   client_->OnSessionExpirationUpdate(
-      new_expiry_time.is_null() ? std::numeric_limits<double>::quiet_NaN()
-                                : new_expiry_time.ToJsTime());
+      new_expiry_time.is_null()
+          ? std::numeric_limits<double>::quiet_NaN()
+          : new_expiry_time.InMillisecondsFSinceUnixEpoch());
 }
 
 void WebContentDecryptionModuleSessionImpl::OnSessionClosed(

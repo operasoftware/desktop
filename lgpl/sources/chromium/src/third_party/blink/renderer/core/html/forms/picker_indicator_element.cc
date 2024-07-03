@@ -51,6 +51,11 @@ PickerIndicatorElement::PickerIndicatorElement(
       picker_indicator_owner_(&picker_indicator_owner) {
   SetShadowPseudoId(shadow_element_names::kPseudoCalendarPickerIndicator);
   setAttribute(html_names::kIdAttr, shadow_element_names::kIdPickerIndicator);
+  // Set the tooltip title.
+  setAttribute(
+      html_names::kTitleAttr,
+      AtomicString(
+          this->picker_indicator_owner_->AriaLabelForPickerIndicator()));
 }
 
 PickerIndicatorElement::~PickerIndicatorElement() {
@@ -138,7 +143,7 @@ void PickerIndicatorElement::ClosePopup() {
 }
 
 bool PickerIndicatorElement::HasOpenedPopup() const {
-  return chooser_;
+  return chooser_ != nullptr;
 }
 
 void PickerIndicatorElement::DetachLayoutTree(bool performing_reattach) {
@@ -147,7 +152,7 @@ void PickerIndicatorElement::DetachLayoutTree(bool performing_reattach) {
 }
 
 AXObject* PickerIndicatorElement::PopupRootAXObject() const {
-  return chooser_ ? chooser_->RootAXObject() : nullptr;
+  return chooser_ ? chooser_->RootAXObject(&OwnerElement()) : nullptr;
 }
 
 bool PickerIndicatorElement::IsPickerIndicatorElement() const {

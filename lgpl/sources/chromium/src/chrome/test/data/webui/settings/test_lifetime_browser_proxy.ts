@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {LifetimeBrowserProxy} from 'chrome://settings/settings.js';
+import type {LifetimeBrowserProxy} from 'chrome://settings/settings.js';
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 
 /**
@@ -38,8 +38,8 @@ export class TestLifetimeBrowserProxy extends TestBrowserProxy implements
   }
 
   // <if expr="not chromeos_ash">
-  shouldShowRelaunchConfirmationDialog() {
-    this.methodCalled('shouldShowRelaunchDialog');
+  shouldShowRelaunchConfirmationDialog(alwaysShowDialog: boolean) {
+    this.methodCalled('shouldShowRelaunchDialog', alwaysShowDialog);
     return Promise.resolve(this.shouldShowRelaunchDialog_);
   }
 
@@ -51,8 +51,9 @@ export class TestLifetimeBrowserProxy extends TestBrowserProxy implements
     this.relaunchConfirmationDialogDescription_ = value;
   }
 
-  getRelaunchConfirmationDialogDescription() {
-    this.methodCalled('getRelaunchConfirmationDialogDescription');
+  getRelaunchConfirmationDialogDescription(alwaysShowDialog: boolean) {
+    this.methodCalled(
+        'getRelaunchConfirmationDialogDescription', alwaysShowDialog);
     return Promise.resolve(this.relaunchConfirmationDialogDescription_);
   }
   // </if>

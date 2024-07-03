@@ -13,7 +13,13 @@ from requests.exceptions import RequestException
 from blinkpy.common import exit_codes
 from blinkpy.common.net.rpc import Build
 from blinkpy.common.net.web import Web
-from blinkpy.common.net.git_cl import BuildStatuses, GitCL, TryJobStatus
+from blinkpy.common.net.git_cl import (
+    BuildStatuses,
+    CLRevisionID,
+    GitCL,
+    TryJobStatus,
+)
+from blinkpy.tool.grammar import pluralize
 
 _log = logging.getLogger(__name__)
 
@@ -46,6 +52,7 @@ class BuildResolver:
         'builder.builder',
         'builder.bucket',
         'status',
+        'output.properties',
         'steps.*.name',
         'steps.*.logs.*.name',
         'steps.*.logs.*.view_url',
@@ -143,7 +150,19 @@ class BuildResolver:
         # TODO(crbug.com/1123077): After the switch to wptrunner, stop checking
         # the `blink_wpt_tests` step.
         run_web_tests_pattern = re.compile(
-            r'[\w_-]*blink_(web|wpt)_tests.*\(with patch\)[^|]*')
+            r'[\w_-]*(webdriver|blink_(web|wpt))_tests.*\(with patch\)[^|]*')
+        output_props = raw_build.get('output', {}).get('properties', {})
+        # Buildbucket's `FAILURE` status encompasses both normal test failures
+        # (i.e., needs rebaseline) and unrelated compile or result merge
+        # failures that should be coerced to `INFRA_FAILURE`. To distinguish
+        # them, look at the failure reason yielded by the recipe, which is
+        # opaque to Buildbucket:
+        # https://source.chromium.org/chromium/chromium/tools/depot_tools/+/main:recipes/recipe_modules/tryserver/api.py;l=295-334;drc=c868adc3689fe6ab70be6d195041debfe8faf725;bpv=0;bpt=0
+        #
+        # TODO(crbug.com/1496938): Investigate if this information can be
+        # obtained by the absence of `full_results.json` instead.
+        if output_props.get('failure_type') not in {None, 'TEST_FAILURE'}:
+            return TryJobStatus.from_bb_status('INFRA_FAILURE')
         for step in raw_build.get('steps', []):
             if run_web_tests_pattern.fullmatch(step['name']):
                 summary = self._fetch_swarming_summary(step)
@@ -179,10 +198,15 @@ class BuildResolver:
             UnresolvedBuildException: If the CL issue number is not set or no
                 try jobs are available but try jobs cannot be triggered.
         """
-        if not self._git_cl.get_issue_number().isdigit():
+        issue_number = self._git_cl.get_issue_number()
+        if not issue_number.isdigit():
             raise UnresolvedBuildException(
                 'No issue number for current branch.')
-        build_statuses = self._git_cl.latest_try_jobs(builder_names=builders,
+        cl = CLRevisionID(int(issue_number), patchset)
+        _log.info(f'Fetching status for {pluralize("build", len(builders))} '
+                  f'from {cl}.')
+        build_statuses = self._git_cl.latest_try_jobs(issue_number,
+                                                      builder_names=builders,
                                                       patchset=patchset)
         if not build_statuses and not self._can_trigger_jobs:
             raise UnresolvedBuildException(
@@ -203,7 +227,7 @@ class BuildResolver:
 
     def log_builds(self, build_statuses: BuildStatuses):
         """Log builds in a tabular format."""
-        self._warn_about_infra_failures(build_statuses)
+        self._warn_about_incomplete_results(build_statuses)
         finished_builds = {
             build: result or '--'
             for build, (status, result) in build_statuses.items()
@@ -226,15 +250,16 @@ class BuildResolver:
             _log.info('Scheduled or started builds:')
             self._log_build_statuses(unfinished_builds)
 
-    def _warn_about_infra_failures(self, build_statuses: BuildStatuses):
-        builds_with_infra_failures = GitCL.filter_infra_failed(build_statuses)
-        if builds_with_infra_failures:
-            _log.warning('Some builds have infrastructure failures:')
-            for build in sorted(builds_with_infra_failures,
+    def _warn_about_incomplete_results(self, build_statuses: BuildStatuses):
+        builds_with_incomplete_results = GitCL.filter_incomplete(
+            build_statuses)
+        if builds_with_incomplete_results:
+            _log.warning('Some builds have incomplete results:')
+            for build in sorted(builds_with_incomplete_results,
                                 key=_build_sort_key):
                 _log.warning('  "%s" build %s', build.builder_name,
                              str(build.build_number or '--'))
-            _log.warning('Examples of infrastructure failures include:')
+            _log.warning('Examples of incomplete results include:')
             _log.warning('  * Shard terminated the harness after timing out.')
             _log.warning('  * Harness exited early due to '
                          'excessive unexpected failures.')
@@ -246,7 +271,12 @@ class BuildResolver:
                 'docs/testing/web_test_expectations.md#handle-bot-timeouts')
 
     def _log_build_statuses(self, build_statuses: BuildStatuses):
-        template = '  %-20s %-7s %-9s %-6s'
+        assert build_statuses
+        builder_names = [build.builder_name for build in build_statuses]
+        # Clamp to a minimum width to visually separate the `BUILDER` and
+        # `NUMBER` columns.
+        name_column_width = max(20, *map(len, builder_names))
+        template = f'  %-{name_column_width}s %-7s %-9s %-6s'
         _log.info(template, 'BUILDER', 'NUMBER', 'STATUS', 'BUCKET')
         for build in sorted(build_statuses, key=_build_sort_key):
             _log.info(template, build.builder_name,

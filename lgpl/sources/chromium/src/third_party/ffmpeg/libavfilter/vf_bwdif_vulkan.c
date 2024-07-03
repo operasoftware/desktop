@@ -252,8 +252,6 @@ static av_cold int init_filter(AVFilterContext *ctx)
 
     s->initialized = 1;
 
-    return 0;
-
 fail:
     if (spv_opaque)
         spv->free_shader(spv, &spv_opaque);
@@ -298,6 +296,8 @@ static void bwdif_vulkan_uninit(AVFilterContext *avctx)
 
     ff_vk_uninit(&s->vkctx);
 
+    ff_yadif_uninit(avctx);
+
     s->initialized = 0;
 }
 
@@ -327,8 +327,8 @@ static int bwdif_vulkan_config_input(AVFilterLink *inlink)
 
     /* Defaults */
     vkctx->output_format = input_frames->sw_format;
-    vkctx->output_width  = input_frames->width;
-    vkctx->output_height = input_frames->height;
+    vkctx->output_width  = inlink->w;
+    vkctx->output_height = inlink->h;
 
     return 0;
 }
@@ -356,22 +356,17 @@ static int bwdif_vulkan_config_output(AVFilterLink *outlink)
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
 
-    outlink->time_base = av_mul_q(avctx->inputs[0]->time_base, (AVRational){1, 2});
-    outlink->w         = vkctx->output_width;
-    outlink->h         = vkctx->output_height;
-
-    if (y->mode & 1)
-        outlink->frame_rate = av_mul_q(avctx->inputs[0]->frame_rate,
-                                       (AVRational){2, 1});
-
-    if (outlink->w < 4 || outlink->h < 4) {
-        av_log(avctx, AV_LOG_ERROR, "Video of less than 4 columns or lines is not "
-               "supported\n");
-        return AVERROR(EINVAL);
-    }
+    err = ff_yadif_config_output_common(outlink);
+    if (err < 0)
+        return err;
 
     y->csp = av_pix_fmt_desc_get(vkctx->frames->sw_format);
     y->filter = bwdif_vulkan_filter_frame;
+
+    if (AV_CEIL_RSHIFT(outlink->w, y->csp->log2_chroma_w) < 4 || AV_CEIL_RSHIFT(outlink->h, y->csp->log2_chroma_h) < 4) {
+        av_log(avctx, AV_LOG_ERROR, "Video with planes less than 4 columns or lines is not supported\n");
+        return AVERROR(EINVAL);
+    }
 
     return init_filter(avctx);
 }

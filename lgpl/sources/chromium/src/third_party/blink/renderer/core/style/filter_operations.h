@@ -81,6 +81,7 @@ class CORE_EXPORT FilterOperations {
   bool HasFilterThatAffectsOpacity() const;
   bool HasFilterThatMovesPixels() const;
   bool HasReferenceFilter() const;
+  bool UsesCurrentColor() const;
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   bool HasFilterThatNeedReferenceBox() const;
   bool HasFilterOfType(FilterOperation::OperationType) const;

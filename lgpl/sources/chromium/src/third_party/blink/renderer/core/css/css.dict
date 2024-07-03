@@ -627,6 +627,8 @@
 "fullscreen"
 "standalone"
 "minimal-ui"
+"borderless"
+"window-controls-overlay"
 "browser"
 "sticky"
 "coarse"
@@ -718,7 +720,7 @@
 "hsl"
 "hsla"
 "hwb"
-"-internal-light-dark"
+"light-dark"
 "matrix"
 "matrix3d"
 "perspective"
@@ -938,6 +940,13 @@
 "color-contrast"
 "accentcolor"
 "accentcolortext"
+"-internal-auto-base-select"
+
+# display-state
+# normal
+# fullscreen
+"minimized"
+"maximized"
 
 # at-rules
 "@charset"

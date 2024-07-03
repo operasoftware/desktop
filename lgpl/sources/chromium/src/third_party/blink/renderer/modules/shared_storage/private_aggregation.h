@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #include "mojo/public/cpp/bindings/pending_remote.h"
-#include "third_party/blink/public/mojom/private_aggregation/aggregatable_report.mojom-blink.h"
+#include "third_party/blink/public/mojom/aggregation_service/aggregatable_report.mojom-blink.h"
 #include "third_party/blink/public/mojom/private_aggregation/private_aggregation_host.mojom-blink.h"
 #include "third_party/blink/public/mojom/shared_storage/shared_storage_worklet_service.mojom-blink-forward.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
@@ -35,12 +35,7 @@ class MODULES_EXPORT PrivateAggregation final : public ScriptWrappable {
     explicit OperationState(ContextLifecycleNotifier* notifier)
         : private_aggregation_host(notifier) {}
 
-    // Defaults to debug mode being disabled.
-    mojom::blink::DebugModeDetails debug_mode_details;
-
-    // Pending contributions
-    Vector<mojom::blink::AggregatableReportHistogramContributionPtr>
-        private_aggregation_contributions;
+    bool enable_debug_mode_called = false;
 
     // No need to be associated as message ordering (relative to shared storage
     // operations) is unimportant.
@@ -76,9 +71,11 @@ class MODULES_EXPORT PrivateAggregation final : public ScriptWrappable {
   void OnWorkletDestroyed();
 
  private:
-  void EnsureUseCountersAreRecorded();
+  void EnsureGeneralUseCountersAreRecorded();
+  void EnsureEnableDebugModeUseCounterIsRecorded();
 
-  bool has_recorded_use_counters_ = false;
+  bool has_recorded_general_use_counters_ = false;
+  bool has_recorded_enable_debug_mode_use_counter_ = false;
 
   Member<SharedStorageWorkletGlobalScope> global_scope_;
   HeapHashMap<int64_t,

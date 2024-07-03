@@ -6,9 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SCHEDULER_DOM_TASK_CONTINUATION_H_
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/probe/async_task_context.h"
 #include "third_party/blink/renderer/modules/scheduler/dom_scheduler.h"
-#include "third_party/blink/renderer/modules/scheduler/dom_task_signal.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 
@@ -21,8 +21,8 @@ namespace blink {
 // continuation will not be run.
 class DOMTaskContinuation final : public GarbageCollected<DOMTaskContinuation> {
  public:
-  DOMTaskContinuation(ScriptPromiseResolver*,
-                      DOMTaskSignal*,
+  DOMTaskContinuation(ScriptPromiseResolver<IDLUndefined>*,
+                      AbortSignal*,
                       DOMScheduler::DOMTaskQueue*);
 
   virtual void Trace(Visitor*) const;
@@ -35,9 +35,9 @@ class DOMTaskContinuation final : public GarbageCollected<DOMTaskContinuation> {
   void OnAbort();
 
   TaskHandle task_handle_;
-  Member<ScriptPromiseResolver> resolver_;
+  Member<ScriptPromiseResolver<IDLUndefined>> resolver_;
   probe::AsyncTaskContext async_task_context_;
-  Member<DOMTaskSignal> signal_;
+  Member<AbortSignal> signal_;
   Member<AbortSignal::AlgorithmHandle> abort_handle_;
   // Do not remove. For dynamic priority task queues, `task_queue_` ensures that
   // the associated WebSchedulingTaskQueue stays alive until after this task

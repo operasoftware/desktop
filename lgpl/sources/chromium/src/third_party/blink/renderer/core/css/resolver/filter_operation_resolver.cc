@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_shader_value.h"
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
@@ -246,10 +247,6 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
       case CSSValueID::kDropShadow: {
         ShadowData shadow = StyleBuilderConverter::ConvertShadow(
             conversion_data, &state, filter_value->Item(0));
-        // TODO(fs): Resolve 'currentcolor' when constructing the filter chain.
-        if (shadow.GetColor().IsCurrentColor()) {
-          shadow.OverrideColor(state.StyleBuilder().GetCurrentColor());
-        }
         operations.Operations().push_back(
             MakeGarbageCollected<DropShadowFilterOperation>(shadow));
         break;
@@ -267,10 +264,37 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
               state.GetElementStyleResources().GetGpuShaderResourceFromValue(
                   property_id, *shader_value);
 
+          auto* args_value = CSSValueList::CreateSpaceSeparated();
+          for (const CSSValue* arg : *shader_value->Args()) {
+            const auto* as_primitive =
+                DynamicTo<CSSPrimitiveValue>(arg);
+            if (as_primitive && as_primitive->IsNumber()) {
+              args_value->Append(*arg);
+              continue;
+            }
+
+            // Resolve colors and translate them into 4 numbers (r, g, b, a)
+            StyleColor color =
+                StyleBuilderConverter::ConvertStyleColor(state, *arg, false);
+            mojom::blink::ColorScheme color_scheme =
+                state.StyleBuilder().UsedColorScheme();
+            auto resolved_color = color.Resolve(Color(), color_scheme);
+            auto resolved_color4f = resolved_color.toSkColor4f();
+
+            args_value->Append(*CSSNumericLiteralValue::Create(resolved_color4f.fR,
+                                          CSSPrimitiveValue::UnitType::kNumber));
+            args_value->Append(*CSSNumericLiteralValue::Create(resolved_color4f.fG,
+                                          CSSPrimitiveValue::UnitType::kNumber));
+            args_value->Append(*CSSNumericLiteralValue::Create(resolved_color4f.fB,
+                                          CSSPrimitiveValue::UnitType::kNumber));
+            args_value->Append(*CSSNumericLiteralValue::Create(resolved_color4f.fA,
+                                          CSSPrimitiveValue::UnitType::kNumber));
+          }
+
           operations.Operations().push_back(
               MakeGarbageCollected<GpuShaderFilterOperation>(
                   shader_value->RelativeUrl(), shader_value->AbsoluteUrl(),
-                  shader_value->GetReferrer(), resource, shader_value->Args(),
+                  shader_value->GetReferrer(), resource, args_value,
                   shader_value->AnimationFrame()));
         }
         break;
@@ -302,10 +326,11 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
   CSSToLengthConversionData::LineHeightSize line_height_size;
   CSSToLengthConversionData::ViewportSize viewport_size(0, 0);
   CSSToLengthConversionData::ContainerSizes container_sizes;
+  CSSToLengthConversionData::AnchorData anchor_data;
   CSSToLengthConversionData::Flags ignored_flags = 0;
   CSSToLengthConversionData conversion_data(
       WritingMode::kHorizontalTb, font_sizes, line_height_size, viewport_size,
-      container_sizes, 1 /* zoom */, ignored_flags);
+      container_sizes, anchor_data, 1 /* zoom */, ignored_flags);
 
   for (auto& curr_value : To<CSSValueList>(in_value)) {
     if (curr_value->IsURIValue()) {
@@ -354,10 +379,6 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
       case CSSValueID::kDropShadow: {
         ShadowData shadow = StyleBuilderConverter::ConvertShadow(
             conversion_data, nullptr, filter_value->Item(0));
-        // For offscreen canvas, the default color is always black.
-        if (shadow.GetColor().IsCurrentColor()) {
-          shadow.OverrideColor(Color::kBlack);
-        }
         operations.Operations().push_back(
             MakeGarbageCollected<DropShadowFilterOperation>(shadow));
         break;

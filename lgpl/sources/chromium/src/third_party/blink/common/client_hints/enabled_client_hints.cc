@@ -26,12 +26,9 @@ bool IsDisabledByFeature(const WebClientHintsType type) {
     case WebClientHintsType::kUAFullVersionList:
     case WebClientHintsType::kUABitness:
     case WebClientHintsType::kUAWoW64:
-      if (!base::FeatureList::IsEnabled(features::kUserAgentClientHint))
-        return true;
       break;
-    case WebClientHintsType::kUAFormFactor:
-      if (!base::FeatureList::IsEnabled(features::kUserAgentClientHint) ||
-          !base::FeatureList::IsEnabled(features::kClientHintsFormFactor)) {
+    case WebClientHintsType::kUAFormFactors:
+      if (!base::FeatureList::IsEnabled(features::kClientHintsFormFactors)) {
         return true;
       }
       break;
@@ -87,6 +84,9 @@ bool IsDisabledByFeature(const WebClientHintsType type) {
       break;
     case WebClientHintsType::kPrefersReducedMotion:
       break;
+    case WebClientHintsType::kPrefersReducedTransparency:
+      return !base::FeatureList::IsEnabled(
+          features::kClientHintsPrefersReducedTransparency);
     default:
       break;
   }

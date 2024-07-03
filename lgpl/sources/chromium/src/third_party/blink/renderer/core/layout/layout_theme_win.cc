@@ -20,17 +20,4 @@ LayoutTheme& LayoutTheme::NativeTheme() {
   return *layout_theme;
 }
 
-Color LayoutThemeWin::SystemColor(
-    CSSValueID css_value_id,
-    mojom::blink::ColorScheme color_scheme) const {
-  // Fall back to the default system colors if the color scheme is dark and
-  // forced colors is not enabled.
-  if (WebTestSupport::IsRunningWebTest() ||
-      (color_scheme == mojom::blink::ColorScheme::kDark &&
-       !InForcedColorsMode())) {
-    return DefaultSystemColor(css_value_id, color_scheme);
-  }
-  return SystemColorFromNativeTheme(css_value_id, color_scheme);
-}
-
 }  // namespace blink

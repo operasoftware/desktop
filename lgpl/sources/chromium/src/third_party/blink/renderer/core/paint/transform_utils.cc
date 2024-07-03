@@ -5,25 +5,28 @@
 #include "third_party/blink/renderer/core/paint/transform_utils.h"
 
 #include "third_party/blink/renderer/core/layout/layout_box.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
 
 namespace {
 
-PhysicalRect ComputeReferenceBoxInternal(const NGPhysicalBoxFragment& fragment,
+PhysicalRect ComputeReferenceBoxInternal(const PhysicalBoxFragment& fragment,
                                          PhysicalRect border_box_rect) {
   PhysicalRect fragment_reference_box = border_box_rect;
-  switch (fragment.Style().TransformBox()) {
-    case ETransformBox::kFillBox:
+  switch (fragment.Style().UsedTransformBox(
+      ComputedStyle::TransformBoxContext::kLayoutBox)) {
     case ETransformBox::kContentBox:
       fragment_reference_box.Contract(fragment.Borders() + fragment.Padding());
       fragment_reference_box.size.ClampNegativeToZero();
       break;
-    case ETransformBox::kStrokeBox:
     case ETransformBox::kBorderBox:
+      break;
+    case ETransformBox::kFillBox:
+    case ETransformBox::kStrokeBox:
     case ETransformBox::kViewBox:
+      NOTREACHED();
       break;
   }
   return fragment_reference_box;
@@ -31,7 +34,7 @@ PhysicalRect ComputeReferenceBoxInternal(const NGPhysicalBoxFragment& fragment,
 
 }  // namespace
 
-PhysicalRect ComputeReferenceBox(const NGPhysicalBoxFragment& fragment) {
+PhysicalRect ComputeReferenceBox(const PhysicalBoxFragment& fragment) {
   return ComputeReferenceBoxInternal(fragment, fragment.LocalRect());
 }
 

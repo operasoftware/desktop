@@ -4,15 +4,17 @@
 
 #include "third_party/blink/renderer/core/events/pointer_event_factory.h"
 
-#include "third_party/blink/public/platform/platform.h"
+#include "base/trace_event/trace_event.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_device_properties_init.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_pointer_event_init.h"
+#include "third_party/blink/renderer/core/events/pointer_event_util.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/input/device_properties.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/pointer_type_names.h"
-#include "ui/display/screen_info.h"
 #include "ui/gfx/geometry/size_f.h"
 
 namespace blink {
@@ -63,10 +65,12 @@ const AtomicString& PointerEventNameForEventType(WebInputEvent::Type type) {
 }
 
 float GetPointerEventPressure(float force, uint16_t buttons) {
-  if (!buttons)
+  if (!buttons) {
     return 0;
-  if (std::isnan(force))
+  }
+  if (std::isnan(force)) {
     return 0.5;
+  }
   return force;
 }
 
@@ -112,8 +116,9 @@ void UpdateCommonPointerEventInit(const WebPointerEvent& web_pointer_event,
       web_pointer_event_in_root_frame.HasHeight() &&
       web_pointer_event.GetType() != WebInputEvent::Type::kPointerUp) {
     float scale_factor = 1.0f;
-    if (dom_window && dom_window->GetFrame())
+    if (dom_window && dom_window->GetFrame()) {
       scale_factor = 1.0f / dom_window->GetFrame()->PageZoomFactor();
+    }
 
     gfx::SizeF point_shape =
         gfx::ScaleSize(gfx::SizeF(web_pointer_event_in_root_frame.width,
@@ -124,8 +129,12 @@ void UpdateCommonPointerEventInit(const WebPointerEvent& web_pointer_event,
   }
   pointer_event_init->setPressure(GetPointerEventPressure(
       web_pointer_event.force, pointer_event_init->buttons()));
-  pointer_event_init->setTiltX(web_pointer_event.tilt_x);
-  pointer_event_init->setTiltY(web_pointer_event.tilt_y);
+  pointer_event_init->setTiltX(round(web_pointer_event.tilt_x));
+  pointer_event_init->setTiltY(round(web_pointer_event.tilt_y));
+  pointer_event_init->setAltitudeAngle(PointerEventUtil::AltitudeFromTilt(
+      web_pointer_event.tilt_x, web_pointer_event.tilt_y));
+  pointer_event_init->setAzimuthAngle(PointerEventUtil::AzimuthFromTilt(
+      web_pointer_event.tilt_x, web_pointer_event.tilt_y));
   pointer_event_init->setTangentialPressure(
       web_pointer_event.tangential_pressure);
   pointer_event_init->setTwist(web_pointer_event.twist);
@@ -148,7 +157,7 @@ const AtomicString& PointerEventFactory::PointerTypeNameForWebPointPointerType(
     case WebPointerProperties::PointerType::kMouse:
       return pointer_type_names::kMouse;
     default:
-      NOTREACHED();
+      DUMP_WILL_BE_NOTREACHED_NORETURN();
       return g_empty_atom;
   }
 }
@@ -174,18 +183,24 @@ HeapVector<Member<PointerEvent>> PointerEventFactory::CreateEventSequence(
       DCHECK_EQ(web_pointer_event.pointer_type, event.pointer_type);
 
       PointerEventInit* new_event_init = PointerEventInit::Create();
-      if (pointer_event_init->hasButton())
+      if (pointer_event_init->hasButton()) {
         new_event_init->setButton(pointer_event_init->button());
-      if (pointer_event_init->hasButtons())
+      }
+      if (pointer_event_init->hasButtons()) {
         new_event_init->setButtons(pointer_event_init->buttons());
-      if (pointer_event_init->hasIsPrimary())
+      }
+      if (pointer_event_init->hasIsPrimary()) {
         new_event_init->setIsPrimary(pointer_event_init->isPrimary());
-      if (pointer_event_init->hasPointerId())
+      }
+      if (pointer_event_init->hasPointerId()) {
         new_event_init->setPointerId(pointer_event_init->pointerId());
-      if (pointer_event_init->hasPointerType())
+      }
+      if (pointer_event_init->hasPointerType()) {
         new_event_init->setPointerType(pointer_event_init->pointerType());
-      if (pointer_event_init->hasView())
+      }
+      if (pointer_event_init->hasView()) {
         new_event_init->setView(pointer_event_init->view());
+      }
 
       new_event_init->setCancelable(false);
       new_event_init->setBubbles(false);
@@ -197,8 +212,9 @@ HeapVector<Member<PointerEvent>> PointerEventFactory::CreateEventSequence(
 
       last_global_position = event.PositionInScreen();
 
-      if (pointer_event_init->hasDeviceId()) {
-        new_event_init->setDeviceId(pointer_event_init->deviceId());
+      if (pointer_event_init->hasDeviceProperties()) {
+        new_event_init->setDeviceProperties(
+            pointer_event_init->deviceProperties());
       }
 
       PointerEvent* pointer_event =
@@ -256,7 +272,7 @@ PointerEventInit* PointerEventFactory::ConvertIdTypeButtonsEvent(
   const IncomingId incoming_id(pointer_type, web_pointer_event.id);
   PointerId pointer_id = AddOrUpdateIdAndActiveButtons(
       incoming_id, buttons != 0, web_pointer_event.hovering,
-      web_pointer_event.GetType());
+      web_pointer_event.GetType(), web_pointer_event.unique_touch_event_id);
   if (pointer_id == kInvalidId) {
     return nullptr;
   }
@@ -305,8 +321,9 @@ PointerEvent* PointerEventFactory::Create(
 
   PointerEventInit* pointer_event_init =
       ConvertIdTypeButtonsEvent(web_pointer_event);
-  if (!pointer_event_init)
+  if (!pointer_event_init) {
     return nullptr;
+  }
 
   AtomicString type = PointerEventNameForEventType(event_type);
   if (event_type == WebInputEvent::Type::kPointerDown ||
@@ -363,7 +380,10 @@ PointerEvent* PointerEventFactory::Create(
   SetLastPosition(pointer_event_init->pointerId(),
                   web_pointer_event.PositionInScreen(), event_type);
 
-  pointer_event_init->setDeviceId(GetBlinkDeviceId(web_pointer_event));
+  DevicePropertiesInit* device_properties_init = DevicePropertiesInit::Create();
+  device_properties_init->setUniqueId(GetBlinkDeviceId(web_pointer_event));
+  pointer_event_init->setDeviceProperties(
+      DeviceProperties::Create(device_properties_init));
 
   return PointerEvent::Create(type, pointer_event_init,
                               web_pointer_event.TimeStamp());
@@ -433,7 +453,10 @@ PointerEvent* PointerEventFactory::CreatePointerCancelEvent(
 
   SetEventSpecificFields(pointer_event_init, event_type_names::kPointercancel);
 
-  pointer_event_init->setDeviceId(device_id);
+  DevicePropertiesInit* device_properties_init = DevicePropertiesInit::Create();
+  device_properties_init->setUniqueId(device_id);
+  pointer_event_init->setDeviceProperties(
+      DeviceProperties::Create(device_properties_init));
 
   return PointerEvent::Create(event_type_names::kPointercancel,
                               pointer_event_init, platfrom_time_stamp);
@@ -463,7 +486,9 @@ PointerEvent* PointerEventFactory::CreatePointerEventFrom(
       pointer_event->tangentialPressure());
   pointer_event_init->setTwist(pointer_event->twist());
   pointer_event_init->setView(pointer_event->view());
-  pointer_event_init->setDeviceId(pointer_event->deviceId());
+  if (pointer_event->deviceProperties()) {
+    pointer_event_init->setDeviceProperties(pointer_event->deviceProperties());
+  }
 
   SetEventSpecificFields(pointer_event_init, type);
 
@@ -473,8 +498,9 @@ PointerEvent* PointerEventFactory::CreatePointerEventFrom(
         pointer_event_init, key_state_event->GetModifiers());
   }
 
-  if (related_target)
+  if (related_target) {
     pointer_event_init->setRelatedTarget(related_target);
+  }
 
   return PointerEvent::Create(type, pointer_event_init,
                               pointer_event->PlatformTimeStamp());
@@ -534,6 +560,7 @@ void PointerEventFactory::Clear() {
   }
   pointer_incoming_id_mapping_.clear();
   pointer_id_to_attributes_.clear();
+  recently_removed_pointers_.clear();
 
   device_id_browser_to_blink_mapping_.clear();
 
@@ -554,7 +581,8 @@ PointerId PointerEventFactory::AddOrUpdateIdAndActiveButtons(
     const IncomingId p,
     bool is_active_buttons,
     bool hovering,
-    WebInputEvent::Type event_type) {
+    WebInputEvent::Type event_type,
+    uint32_t unique_touch_event_id) {
   // Do not add extra mouse pointer as it was added in initialization.
   if (p.GetPointerType() == WebPointerProperties::PointerType::kMouse) {
     PointerAttributes attributes = pointer_id_to_attributes_.at(kMouseId);
@@ -575,21 +603,22 @@ PointerId PointerEventFactory::AddOrUpdateIdAndActiveButtons(
 
   // TODO(crbug.com/1141595): We should filter out bad pointercancel events
   // further upstream.
-  if (event_type == WebInputEvent::Type::kPointerCancel)
+  if (event_type == WebInputEvent::Type::kPointerCancel) {
     return kInvalidId;
+  }
 
   int type_int = p.PointerTypeInt();
-  // We do not handle the overflow of |current_id_| as it should be very rare.
-  PointerId mapped_id = current_id_++;
-  if (!id_count_[type_int])
+  PointerId mapped_id = GetNextAvailablePointerid();
+  if (!id_count_[type_int]) {
     primary_id_[type_int] = mapped_id;
+  }
   id_count_[type_int]++;
   pointer_incoming_id_mapping_.insert(p, mapped_id);
   pointer_id_to_attributes_.insert(
       mapped_id,
-      PointerAttributes(p, is_active_buttons, hovering,
-                        /* last_position */ absl::nullopt,
-                        /* last_rawupdate_position */ absl::nullopt));
+      PointerAttributes(p, is_active_buttons, hovering, unique_touch_event_id,
+                        /* last_position */ std::nullopt,
+                        /* last_rawupdate_position */ std::nullopt));
   return mapped_id;
 }
 
@@ -601,11 +630,14 @@ bool PointerEventFactory::Remove(const PointerId mapped_id) {
 
   IncomingId p = pointer_id_to_attributes_.at(mapped_id).incoming_id;
   int type_int = p.PointerTypeInt();
-  pointer_id_to_attributes_.erase(mapped_id);
+  PointerAttributes attributes = pointer_id_to_attributes_.Take(mapped_id);
   pointer_incoming_id_mapping_.erase(p);
-  if (primary_id_[type_int] == mapped_id)
+  if (primary_id_[type_int] == mapped_id) {
     primary_id_[type_int] = kInvalidId;
+  }
   id_count_[type_int]--;
+
+  SaveRecentlyRemovedPointer(mapped_id, attributes);
   return true;
 }
 
@@ -640,13 +672,15 @@ bool PointerEventFactory::IsActive(const PointerId pointer_id) const {
 bool PointerEventFactory::IsPrimary(
     const WebPointerProperties& properties) const {
   // Mouse event is always primary.
-  if (properties.pointer_type == WebPointerProperties::PointerType::kMouse)
+  if (properties.pointer_type == WebPointerProperties::PointerType::kMouse) {
     return true;
+  }
 
   // If !id_count, no pointer active, current WebPointerEvent will
   // be primary pointer when added to map.
-  if (!id_count_[static_cast<int>(properties.pointer_type)])
+  if (!id_count_[static_cast<int>(properties.pointer_type)]) {
     return true;
+  }
 
   PointerId pointer_id = GetPointerEventId(properties);
   return (pointer_id != kInvalidId && IsPrimary(pointer_id));
@@ -660,19 +694,68 @@ bool PointerEventFactory::IsActiveButtonsState(
 
 WebPointerProperties::PointerType PointerEventFactory::GetPointerType(
     PointerId pointer_id) const {
-  if (!IsActive(pointer_id))
+  if (!IsActive(pointer_id)) {
     return WebPointerProperties::PointerType::kUnknown;
+  }
   return pointer_id_to_attributes_.at(pointer_id).incoming_id.GetPointerType();
 }
 
 PointerId PointerEventFactory::GetPointerEventId(
     const WebPointerProperties& properties) const {
-  if (properties.pointer_type == WebPointerProperties::PointerType::kMouse)
+  if (properties.pointer_type == WebPointerProperties::PointerType::kMouse) {
     return PointerEventFactory::kMouseId;
-  IncomingId id(properties.pointer_type, properties.id);
-  if (pointer_incoming_id_mapping_.Contains(id))
-    return pointer_incoming_id_mapping_.at(id);
+  }
+  IncomingId incoming_id(properties.pointer_type, properties.id);
+  if (pointer_incoming_id_mapping_.Contains(incoming_id)) {
+    return pointer_incoming_id_mapping_.at(incoming_id);
+  }
   return kInvalidId;
+}
+
+PointerId PointerEventFactory::GetPointerIdForTouchGesture(
+    const uint32_t unique_touch_event_id) {
+  const auto& unique_touch_id_matcher =
+      [](const uint32_t unique_touch_event_id,
+         const blink::PointerEventFactory::PointerAttributes attributes) {
+        return attributes.incoming_id.GetPointerType() ==
+                   WebPointerProperties::PointerType::kTouch &&
+               attributes.unique_touch_event_id == unique_touch_event_id;
+      };
+
+  // First try currently active pointers.
+  for (const auto& id : pointer_id_to_attributes_.Keys()) {
+    if (unique_touch_id_matcher(unique_touch_event_id,
+                                pointer_id_to_attributes_.at(id))) {
+      return static_cast<PointerId>(id);
+    }
+  }
+
+  // Then try recently removed pointers.
+  for (const auto& id_attributes_pair : recently_removed_pointers_) {
+    if (unique_touch_id_matcher(unique_touch_event_id,
+                                id_attributes_pair.second)) {
+      return static_cast<PointerId>(id_attributes_pair.first);
+    }
+  }
+
+  // If the unique id is unseen, reserve a new pointer-id and save it as
+  // recently removed.
+  PointerId pointer_id = GetNextAvailablePointerid();
+  PointerAttributes pointer_attributes;
+  pointer_attributes.incoming_id =
+      IncomingId(WebPointerProperties::PointerType::kTouch, kInvalidId);
+  SaveRecentlyRemovedPointer(pointer_id, pointer_attributes);
+
+  return pointer_id;
+}
+
+void PointerEventFactory::SaveRecentlyRemovedPointer(
+    PointerId pointer_id,
+    PointerAttributes pointer_attributes) {
+  if (recently_removed_pointers_.size() == kRemovedPointersCapacity) {
+    recently_removed_pointers_.pop_front();
+  }
+  recently_removed_pointers_.emplace_back(pointer_id, pointer_attributes);
 }
 
 int32_t PointerEventFactory::GetBlinkDeviceId(
@@ -691,7 +774,15 @@ int32_t PointerEventFactory::GetBlinkDeviceId(
   if (result.is_new_entry) {
     result.stored_value->value = current_device_id_++;
   }
+  TRACE_EVENT_INSTANT1("event", "PointerEventFactory::GetBlinkDeviceId",
+                       TRACE_EVENT_SCOPE_THREAD, "id",
+                       result.stored_value->value);
   return result.stored_value->value;
+}
+
+PointerId PointerEventFactory::GetNextAvailablePointerid() {
+  // We do not handle the overflow of |current_id_| as it should be very rare.
+  return current_id_++;
 }
 
 }  // namespace blink

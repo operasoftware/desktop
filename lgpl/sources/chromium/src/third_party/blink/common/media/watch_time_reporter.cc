@@ -5,8 +5,8 @@
 #include "third_party/blink/public/common/media/watch_time_reporter.h"
 
 #include <numeric>
+#include <vector>
 
-#include "base/containers/cxx20_erase.h"
 #include "base/functional/bind.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/task/sequenced_task_runner.h"
@@ -494,7 +494,7 @@ void WatchTimeReporter::RecordWatchTime() {
       }
     }
 
-    base::EraseIf(pending_underflow_events_, [](const UnderflowEvent& ufe) {
+    std::erase_if(pending_underflow_events_, [](const UnderflowEvent& ufe) {
       return ufe.reported && ufe.duration != media::kNoTimestamp;
     });
 
@@ -531,9 +531,6 @@ void WatchTimeReporter::RecordWatchTime() {
     display_type_component_->RecordWatchTime(current_timestamp);
   if (controls_component_)
     controls_component_->RecordWatchTime(current_timestamp);
-
-  // Update the last timestamp with the current timestamp.
-  recorder_->OnCurrentTimestampChanged(current_timestamp);
 }
 
 void WatchTimeReporter::UpdateWatchTime() {

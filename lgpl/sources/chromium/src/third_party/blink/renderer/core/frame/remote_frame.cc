@@ -7,6 +7,7 @@
 #include "base/types/optional_util.h"
 #include "cc/layers/surface_layer.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
+#include "third_party/blink/public/common/fenced_frame/fenced_frame_utils.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/navigation/navigation_policy.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
@@ -38,6 +39,7 @@
 #include "third_party/blink/renderer/core/frame/remote_frame_view.h"
 #include "third_party/blink/renderer/core/frame/user_activation.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
+#include "third_party/blink/renderer/core/html/fenced_frame/html_fenced_frame_element.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
@@ -112,7 +114,9 @@ RemoteFrame::RemoteFrame(
             insert_type,
             frame_token,
             devtools_frame_token,
-            MakeGarbageCollected<RemoteWindowProxyManager>(*this),
+            MakeGarbageCollected<RemoteWindowProxyManager>(
+                page.GetAgentGroupScheduler().Isolate(),
+                *this),
             inheriting_agent_factory),
       // TODO(samans): Investigate if it is safe to delay creation of this
       // object until a FrameSinkId is provided.
@@ -218,16 +222,16 @@ void RemoteFrame::Navigate(FrameLoadRequest& frame_request,
   bool initiator_frame_is_ad = false;
   bool is_ad_script_in_stack = false;
 
-  absl::optional<LocalFrameToken> initiator_frame_token =
+  std::optional<LocalFrameToken> initiator_frame_token =
       base::OptionalFromPtr(frame_request.GetInitiatorFrameToken());
-  mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
-      initiator_policy_container_keep_alive_handle =
-          frame_request.TakeInitiatorPolicyContainerKeepAliveHandle();
+  mojo::PendingRemote<mojom::blink::NavigationStateKeepAliveHandle>
+      initiator_navigation_state_keep_alive_handle =
+          frame_request.TakeInitiatorNavigationStateKeepAliveHandle();
 
-  // |initiator_frame_token| and |initiator_policy_container_keep_alive_handle|
+  // |initiator_frame_token| and |initiator_navigation_state_keep_alive_handle|
   // should either be both specified or both null.
   DCHECK(!initiator_frame_token ==
-         !initiator_policy_container_keep_alive_handle);
+         !initiator_navigation_state_keep_alive_handle);
 
   initiator_frame_has_download_sandbox_flag =
       window->IsSandboxed(network::mojom::blink::WebSandboxFlags::kDownloads);
@@ -244,22 +248,21 @@ void RemoteFrame::Navigate(FrameLoadRequest& frame_request,
 
     if (!initiator_frame_token) {
       initiator_frame_token = window->GetFrame()->GetLocalFrameToken();
-      initiator_policy_container_keep_alive_handle =
-          window->GetPolicyContainer()->IssueKeepAliveHandle();
+      initiator_navigation_state_keep_alive_handle =
+          window->GetFrame()->IssueKeepAliveHandle();
     }
   }
 
   // TODO(https://crbug.com/1173409 and https://crbug.com/1059959): Check that
   // we always have valid |initiator_frame_token| and
-  // |initiator_policy_container_keep_alive_handle|.
+  // |initiator_navigation_state_keep_alive_handle|.
   ResourceRequest& request = frame_request.GetResourceRequest();
   DCHECK(request.RequestorOrigin().get());
 
   auto params = mojom::blink::OpenURLParams::New();
   params->url = url;
   params->initiator_origin = request.RequestorOrigin();
-  if (features::IsNewBaseUrlInheritanceBehaviorEnabled() &&
-      (url.IsAboutBlankURL() || url.IsAboutSrcdocURL()) &&
+  if ((url.IsAboutBlankURL() || url.IsAboutSrcdocURL()) &&
       !frame_request.GetRequestorBaseURL().IsEmpty()) {
     params->initiator_base_url = frame_request.GetRequestorBaseURL();
   }
@@ -279,8 +282,8 @@ void RemoteFrame::Navigate(FrameLoadRequest& frame_request,
   params->blob_url_token = frame_request.GetBlobURLToken();
   params->href_translate =
       String(frame_request.HrefTranslate().Latin1().c_str());
-  params->initiator_policy_container_keep_alive_handle =
-      std::move(initiator_policy_container_keep_alive_handle);
+  params->initiator_navigation_state_keep_alive_handle =
+      std::move(initiator_navigation_state_keep_alive_handle);
   params->initiator_frame_token =
       base::OptionalFromPtr(base::OptionalToPtr(initiator_frame_token));
   params->source_location = network::mojom::blink::SourceLocation::New();
@@ -318,12 +321,10 @@ void RemoteFrame::Navigate(FrameLoadRequest& frame_request,
 
 bool RemoteFrame::NavigationShouldReplaceCurrentHistoryEntry(
     WebFrameLoadType frame_load_type) const {
-  // Portal and Fenced Frame contexts do not create back/forward entries.
+  // Fenced Frame contexts do not create back/forward entries.
   // TODO(https:/crbug.com/1197384, https://crbug.com/1190644): We may want to
   // support a prerender in RemoteFrame.
-  return (frame_load_type == WebFrameLoadType::kStandard &&
-          GetPage()->InsidePortal()) ||
-         IsInFencedFrameTree();
+  return IsInFencedFrameTree();
 }
 
 bool RemoteFrame::DetachImpl(FrameDetachType type) {
@@ -473,7 +474,7 @@ void RemoteFrame::ForwardPostMessage(
     LocalFrame* source_frame,
     scoped_refptr<const SecurityOrigin> source_security_origin,
     scoped_refptr<const SecurityOrigin> target_security_origin) {
-  absl::optional<blink::LocalFrameToken> source_token;
+  std::optional<blink::LocalFrameToken> source_token;
   if (source_frame)
     source_token = source_frame->GetLocalFrameToken();
 
@@ -665,6 +666,9 @@ void RemoteFrame::UpdateUserActivationState(
     case mojom::blink::UserActivationUpdateType::kNotifyActivation:
       NotifyUserActivationInFrameTree(notification_type);
       break;
+    case mojom::blink::UserActivationUpdateType::kNotifyActivationStickyOnly:
+      NotifyUserActivationInFrameTreeStickyOnly();
+      break;
     case mojom::blink::UserActivationUpdateType::kConsumeTransientActivation:
       ConsumeTransientUserActivationInFrameTree();
       break;
@@ -785,7 +789,7 @@ void RemoteFrame::DidUpdateFramePolicy(const FramePolicy& frame_policy) {
 }
 
 void RemoteFrame::UpdateOpener(
-    const absl::optional<blink::FrameToken>& opener_frame_token) {
+    const std::optional<blink::FrameToken>& opener_frame_token) {
   Frame* opener_frame = nullptr;
   if (opener_frame_token)
     opener_frame = Frame::ResolveFrame(opener_frame_token.value());
@@ -819,9 +823,9 @@ void RemoteFrame::SetOpener(Frame* opener_frame) {
     DCHECK(opener_frame->IsLocalFrame());
     GetRemoteFrameHostRemote().DidChangeOpener(
         opener_frame
-            ? absl::optional<blink::LocalFrameToken>(
+            ? std::optional<blink::LocalFrameToken>(
                   opener_frame->GetFrameToken().GetAs<LocalFrameToken>())
-            : absl::nullopt);
+            : std::nullopt);
   }
   SetOpenerDoNotNotify(opener_frame);
 }
@@ -884,8 +888,7 @@ bool RemoteFrame::IsIgnoredForHitTest() const {
   if (!owner || !owner->GetLayoutObject())
     return false;
 
-  return owner->OwnerType() == FrameOwnerElementType::kPortal ||
-         !visible_to_hit_testing_;
+  return !visible_to_hit_testing_;
 }
 
 void RemoteFrame::AdvanceFocus(mojom::blink::FocusType type,
@@ -955,14 +958,16 @@ bool RemoteFrame::SynchronizeVisualProperties(bool propagate) {
           pending_visual_properties_.page_scale_factor ||
       sent_visual_properties_->compositing_scale_factor !=
           pending_visual_properties_.compositing_scale_factor ||
+      sent_visual_properties_->cursor_accessibility_scale_factor !=
+          pending_visual_properties_.cursor_accessibility_scale_factor ||
       sent_visual_properties_->is_pinch_gesture_active !=
           pending_visual_properties_.is_pinch_gesture_active ||
       sent_visual_properties_->visible_viewport_size !=
           pending_visual_properties_.visible_viewport_size ||
       sent_visual_properties_->compositor_viewport !=
           pending_visual_properties_.compositor_viewport ||
-      sent_visual_properties_->root_widget_window_segments !=
-          pending_visual_properties_.root_widget_window_segments ||
+      sent_visual_properties_->root_widget_viewport_segments !=
+          pending_visual_properties_.root_widget_viewport_segments ||
       sent_visual_properties_->capture_sequence_number !=
           pending_visual_properties_.capture_sequence_number;
 
@@ -1006,7 +1011,7 @@ void RemoteFrame::RecordSentVisualProperties() {
 }
 
 void RemoteFrame::ResendVisualProperties() {
-  sent_visual_properties_ = absl::nullopt;
+  sent_visual_properties_ = std::nullopt;
   SynchronizeVisualProperties();
 }
 
@@ -1024,7 +1029,7 @@ void RemoteFrame::DidUpdateVisualProperties(
 
 void RemoteFrame::SetViewportIntersection(
     const mojom::blink::ViewportIntersectionState& intersection_state) {
-  absl::optional<FrameVisualProperties> visual_properties;
+  std::optional<FrameVisualProperties> visual_properties;
   if (SynchronizeVisualProperties(/*propagate=*/false)) {
     visual_properties.emplace(pending_visual_properties_);
     RecordSentVisualProperties();
@@ -1049,10 +1054,10 @@ void RemoteFrame::ZoomLevelChanged(double zoom_level) {
   SynchronizeVisualProperties();
 }
 
-void RemoteFrame::DidChangeRootWindowSegments(
-    const std::vector<gfx::Rect>& root_widget_window_segments) {
-  pending_visual_properties_.root_widget_window_segments =
-      std::move(root_widget_window_segments);
+void RemoteFrame::DidChangeRootViewportSegments(
+    const std::vector<gfx::Rect>& root_widget_viewport_segments) {
+  pending_visual_properties_.root_widget_viewport_segments =
+      std::move(root_widget_viewport_segments);
   SynchronizeVisualProperties();
 }
 
@@ -1075,6 +1080,11 @@ void RemoteFrame::UpdateCaptureSequenceNumber(
   SynchronizeVisualProperties();
 }
 
+void RemoteFrame::CursorAccessibilityScaleFactorChanged(float scale_factor) {
+  pending_visual_properties_.cursor_accessibility_scale_factor = scale_factor;
+  SynchronizeVisualProperties();
+}
+
 void RemoteFrame::EnableAutoResize(const gfx::Size& min_size,
                                    const gfx::Size& max_size) {
   pending_visual_properties_.auto_resize_enabled = true;
@@ -1090,7 +1100,7 @@ void RemoteFrame::DisableAutoResize() {
 
 void RemoteFrame::CreateRemoteChild(
     const RemoteFrameToken& token,
-    const absl::optional<FrameToken>& opener_frame_token,
+    const std::optional<FrameToken>& opener_frame_token,
     mojom::blink::TreeScopeType tree_scope_type,
     mojom::blink::FrameReplicationStatePtr replication_state,
     mojom::blink::FrameOwnerPropertiesPtr owner_properties,
@@ -1106,6 +1116,14 @@ void RemoteFrame::CreateRemoteChild(
 void RemoteFrame::CreateRemoteChildren(
     Vector<mojom::blink::CreateRemoteChildParamsPtr> params) {
   Client()->CreateRemoteChildren(params);
+}
+
+void RemoteFrame::ForwardFencedFrameEventToEmbedder(
+    const WTF::String& event_type) {
+  // This will also CHECK if the conversion to HTMLFrameOwnerElement fails.
+  CHECK(To<HTMLFrameOwnerElement>(Owner())->IsHTMLFencedFrameElement());
+  static_cast<HTMLFencedFrameElement*>(Owner())->DispatchFencedEvent(
+      event_type);
 }
 
 }  // namespace blink

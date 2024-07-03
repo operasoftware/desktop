@@ -6,9 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SCHEDULER_DOM_TASK_H_
 
 #include <atomic>
+#include <optional>
 
 #include "base/time/time.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/scheduler/task_attribution_id.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
@@ -22,14 +22,19 @@ namespace blink {
 class ScriptState;
 class V8SchedulerPostTaskCallback;
 
+namespace scheduler {
+class TaskAttributionInfo;
+}
+
 // DOMTask represents a task scheduled via the web scheduling API. It will
 // keep itself alive until DOMTask::Invoke is called, which may be after the
 // callback's v8 context is invalid, in which case, the task will not be run.
 class DOMTask final : public GarbageCollected<DOMTask> {
  public:
-  DOMTask(ScriptPromiseResolver*,
+  DOMTask(ScriptPromiseResolver<IDLAny>*,
           V8SchedulerPostTaskCallback*,
-          DOMTaskSignal*,
+          AbortSignal* abort_source,
+          DOMTaskSignal* priority_source,
           DOMScheduler::DOMTaskQueue*,
           base::TimeDelta delay);
 
@@ -51,9 +56,10 @@ class DOMTask final : public GarbageCollected<DOMTask> {
 
   TaskHandle task_handle_;
   Member<V8SchedulerPostTaskCallback> callback_;
-  Member<ScriptPromiseResolver> resolver_;
+  Member<ScriptPromiseResolver<IDLAny>> resolver_;
   probe::AsyncTaskContext async_task_context_;
-  Member<DOMTaskSignal> signal_;
+  Member<AbortSignal> abort_source_;
+  Member<DOMTaskSignal> priority_source_;
   Member<AbortSignal::AlgorithmHandle> abort_handle_;
   // Do not remove. For dynamic priority task queues, |task_queue_| ensures that
   // the associated WebSchedulingTaskQueue stays alive until after this task
@@ -61,7 +67,7 @@ class DOMTask final : public GarbageCollected<DOMTask> {
   Member<DOMScheduler::DOMTaskQueue> task_queue_;
   const base::TimeDelta delay_;
   const uint64_t task_id_for_tracing_;
-  absl::optional<scheduler::TaskAttributionId> parent_task_id_;
+  Member<scheduler::TaskAttributionInfo> parent_task_;
 };
 
 }  // namespace blink

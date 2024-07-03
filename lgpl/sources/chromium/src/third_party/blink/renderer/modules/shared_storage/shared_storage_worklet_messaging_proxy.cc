@@ -1,4 +1,4 @@
-// Copyright 2023 The Chromium Authors. All rights reserved.
+// Copyright 2023 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/shared_storage/shared_storage_worklet_service.mojom-blink.h"
+#include "third_party/blink/public/mojom/worker/worklet_global_scope_creation_params.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/core/workers/threaded_worklet_object_proxy.h"
 #include "third_party/blink/renderer/modules/shared_storage/shared_storage_worklet_thread.h"
@@ -23,6 +24,8 @@ namespace blink {
 SharedStorageWorkletMessagingProxy::SharedStorageWorkletMessagingProxy(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
     mojo::PendingReceiver<mojom::blink::SharedStorageWorkletService> receiver,
+    mojom::blink::WorkletGlobalScopeCreationParamsPtr
+        global_scope_creation_params,
     base::OnceClosure worklet_terminated_callback)
     : ThreadedWorkletMessagingProxy(
           /*execution_context=*/nullptr,
@@ -30,7 +33,9 @@ SharedStorageWorkletMessagingProxy::SharedStorageWorkletMessagingProxy(
       worklet_terminated_callback_(std::move(worklet_terminated_callback)) {
   DCHECK(IsMainThread());
 
-  Initialize(/*worker_clients=*/nullptr, /*module_responses_map=*/nullptr);
+  Initialize(/*worker_clients=*/nullptr, /*module_responses_map=*/nullptr,
+             SharedStorageWorkletThread::CreateThreadStartupData(),
+             std::move(global_scope_creation_params));
 
   PostCrossThreadTask(
       *GetWorkerThread()->GetTaskRunner(TaskType::kMiscPlatformAPI), FROM_HERE,
@@ -92,7 +97,7 @@ std::unique_ptr<WorkerThread>
 SharedStorageWorkletMessagingProxy::CreateWorkerThread() {
   DCHECK(IsMainThread());
 
-  return std::make_unique<SharedStorageWorkletThread>(WorkletObjectProxy());
+  return SharedStorageWorkletThread::Create(WorkletObjectProxy());
 }
 
 }  // namespace blink

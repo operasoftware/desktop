@@ -212,12 +212,17 @@ RTCDataChannel::Observer::Observer(
 }
 
 RTCDataChannel::Observer::~Observer() {
-  DCHECK(!blink_channel_) << "Reference to blink channel hasn't been released.";
+  CHECK(!is_registered()) << "Reference to blink channel hasn't been released.";
 }
 
 const rtc::scoped_refptr<webrtc::DataChannelInterface>&
 RTCDataChannel::Observer::channel() const {
   return webrtc_channel_;
+}
+
+bool RTCDataChannel::Observer::is_registered() const {
+  DCHECK(main_thread_->BelongsToCurrentThread());
+  return blink_channel_ != nullptr;
 }
 
 void RTCDataChannel::Observer::Unregister() {
@@ -279,9 +284,6 @@ RTCDataChannel::RTCDataChannel(
     RTCPeerConnectionHandler* peer_connection_handler)
     : ActiveScriptWrappable<RTCDataChannel>({}),
       ExecutionContextLifecycleObserver(context),
-      scheduled_event_timer_(context->GetTaskRunner(TaskType::kNetworking),
-                             this,
-                             &RTCDataChannel::ScheduledEventTimerFired),
       observer_(base::MakeRefCounted<Observer>(
           context->GetTaskRunner(TaskType::kNetworking),
           this,
@@ -303,7 +305,10 @@ RTCDataChannel::RTCDataChannel(
   IncrementCounters(*channel().get());
 }
 
-RTCDataChannel::~RTCDataChannel() = default;
+RTCDataChannel::~RTCDataChannel() {
+  // `Dispose()` must have been called to clear up webrtc references.
+  CHECK(!observer_->is_registered());
+}
 
 String RTCDataChannel::label() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -320,18 +325,18 @@ bool RTCDataChannel::ordered() const {
   return channel()->ordered();
 }
 
-absl::optional<uint16_t> RTCDataChannel::maxPacketLifeTime() const {
+std::optional<uint16_t> RTCDataChannel::maxPacketLifeTime() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (channel()->maxPacketLifeTime())
     return *channel()->maxPacketLifeTime();
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-absl::optional<uint16_t> RTCDataChannel::maxRetransmits() const {
+std::optional<uint16_t> RTCDataChannel::maxRetransmits() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (channel()->maxRetransmitsOpt())
     return *channel()->maxRetransmitsOpt();
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 String RTCDataChannel::protocol() const {
@@ -344,7 +349,7 @@ bool RTCDataChannel::negotiated() const {
   return channel()->negotiated();
 }
 
-absl::optional<uint16_t> RTCDataChannel::id() const {
+std::optional<uint16_t> RTCDataChannel::id() const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (id_.has_value()) {
     return id_;
@@ -352,7 +357,7 @@ absl::optional<uint16_t> RTCDataChannel::id() const {
 
   int id = channel()->id();
   if (id == -1) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   DCHECK(id >= 0 && id <= std::numeric_limits<uint16_t>::max());
@@ -402,13 +407,16 @@ String RTCDataChannel::binaryType() const {
 
 void RTCDataChannel::setBinaryType(const String& binary_type,
                                    ExceptionState& exception_state) {
-  if (binary_type == "blob")
-    ThrowNoBlobSupportException(&exception_state);
-  else if (binary_type == "arraybuffer")
+  if (binary_type == "arraybuffer") {
     binary_type_ = kBinaryTypeArrayBuffer;
-  else
-    exception_state.ThrowDOMException(DOMExceptionCode::kTypeMismatchError,
-                                      "Unknown binary type : " + binary_type);
+    return;
+  }
+  if (binary_type == "blob") {
+    // TODO(crbug.com/webrtc/2276): the default is specified as "blob".
+    ThrowNoBlobSupportException(&exception_state);
+    return;
+  }
+  NOTREACHED();
 }
 
 bool RTCDataChannel::ValidateSendLength(size_t length,
@@ -549,8 +557,6 @@ bool RTCDataChannel::HasPendingActivity() const {
 }
 
 void RTCDataChannel::Trace(Visitor* visitor) const {
-  visitor->Trace(scheduled_events_);
-  visitor->Trace(scheduled_event_timer_);
   EventTarget::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
@@ -622,7 +628,7 @@ void RTCDataChannel::OnBufferedAmountChange(unsigned sent_data_size) {
 
   if (previous_amount > buffered_amount_low_threshold_ &&
       buffered_amount_ <= buffered_amount_low_threshold_) {
-    ScheduleDispatchEvent(Event::Create(event_type_names::kBufferedamountlow));
+    DispatchEvent(*Event::Create(event_type_names::kBufferedamountlow));
   }
 }
 
@@ -638,7 +644,7 @@ void RTCDataChannel::OnMessage(webrtc::DataBuffer buffer) {
       DOMArrayBuffer* dom_buffer = DOMArrayBuffer::Create(
           buffer.data.cdata(),
           base::checked_cast<unsigned>(buffer.data.size()));
-      ScheduleDispatchEvent(MessageEvent::Create(dom_buffer));
+      DispatchEvent(*MessageEvent::Create(dom_buffer));
       return;
     }
     NOTREACHED();
@@ -651,7 +657,7 @@ void RTCDataChannel::OnMessage(webrtc::DataBuffer buffer) {
       LOG(ERROR) << "Failed convert received data to UTF16";
       return;
     }
-    ScheduleDispatchEvent(MessageEvent::Create(text));
+    DispatchEvent(*MessageEvent::Create(text));
   }
 }
 
@@ -661,24 +667,6 @@ void RTCDataChannel::Dispose() {
 
   // Clear the weak persistent reference to this on-heap object.
   observer_->Unregister();
-}
-
-void RTCDataChannel::ScheduleDispatchEvent(Event* event) {
-  scheduled_events_.push_back(event);
-
-  if (!scheduled_event_timer_.IsActive())
-    scheduled_event_timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
-}
-
-void RTCDataChannel::ScheduledEventTimerFired(TimerBase*) {
-  HeapVector<Member<Event>> events;
-  events.swap(scheduled_events_);
-
-  HeapVector<Member<Event>>::iterator it = events.begin();
-  for (; it != events.end(); ++it)
-    DispatchEvent(*it->Release());
-
-  events.clear();
 }
 
 const rtc::scoped_refptr<webrtc::DataChannelInterface>&
@@ -731,7 +719,8 @@ void RTCDataChannel::CreateFeatureHandleForScheduler() {
   feature_handle_for_scheduler_ =
       window->GetFrame()->GetFrameScheduler()->RegisterFeature(
           SchedulingPolicy::Feature::kWebRTC,
-          {SchedulingPolicy::DisableAggressiveThrottling()});
+          {SchedulingPolicy::DisableAggressiveThrottling(),
+           SchedulingPolicy::DisableAlignWakeUps()});
 }
 
 }  // namespace blink

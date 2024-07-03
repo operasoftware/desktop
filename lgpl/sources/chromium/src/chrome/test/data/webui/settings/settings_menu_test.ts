@@ -6,40 +6,33 @@
 
 // clang-format off
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {pageVisibility, Router, SettingsMenuElement, SettingsRoutes} from 'chrome://settings/settings.js';
-// <if expr="_google_chrome">
-import {buildRouter, loadTimeData} from 'chrome://settings/settings.js';
-// </if>
-import {assertEquals, assertFalse} from 'chrome://webui-test/chai_assert.js';
-// <if expr="_google_chrome">
-import {assertTrue} from 'chrome://webui-test/chai_assert.js';
-// </if>
+import type {SettingsMenuElement, SettingsRoutes} from 'chrome://settings/settings.js';
+import {buildRouter, loadTimeData, pageVisibility, Router} from 'chrome://settings/settings.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {isVisible} from 'chrome://webui-test/test_util.js';
+import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 
 // clang-format on
 
 suite('SettingsMenu', function() {
   let settingsMenu: SettingsMenuElement;
+  let routes: SettingsRoutes;
 
-  setup(function() {
+  function createSettingsMenu() {
+    routes = Router.getInstance().getRoutes();
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
     settingsMenu = document.createElement('settings-menu');
-    settingsMenu.pageVisibility = pageVisibility;
     document.body.appendChild(settingsMenu);
     flush();
-  });
+  }
 
-  teardown(function() {
-    settingsMenu.remove();
+  setup(function() {
+    createSettingsMenu();
   });
 
   // Test that navigating via the paper menu always clears the current
   // search URL parameter.
-  test('clearsUrlSearchParam', function() {
-    // As of iron-selector 2.x, need to force iron-selector to update before
-    // clicking items on it, or wait for 'iron-items-changed'
-    const ironSelector = settingsMenu.$.menu;
-    ironSelector.forceSynchronousItemUpdate();
-
+  test('clearsUrlSearchParam', async () => {
     const urlParams = new URLSearchParams('search=foo');
     Router.getInstance().navigateTo(
         Router.getInstance().getRoutes().BASIC, urlParams);
@@ -47,55 +40,41 @@ suite('SettingsMenu', function() {
         urlParams.toString(),
         Router.getInstance().getQueryParameters().toString());
     settingsMenu.$.people.click();
+    await settingsMenu.$.menu.updateComplete;
     assertEquals('', Router.getInstance().getQueryParameters().toString());
-  });
-});
-
-suite('SettingsMenuReset', function() {
-  let settingsMenu: SettingsMenuElement;
-  let routes: SettingsRoutes;
-
-  setup(function() {
-    // <if expr="_google_chrome">
-    loadTimeData.overrideValues({showGetTheMostOutOfChromeSection: true});
-    Router.resetInstanceForTesting(buildRouter());
-    // </if>
-    routes = Router.getInstance().getRoutes();
-    document.body.innerHTML = window.trustedTypes!.emptyHTML;
-    Router.getInstance().navigateTo(routes.RESET, undefined);
-    settingsMenu = document.createElement('settings-menu');
-    document.body.appendChild(settingsMenu);
-    flush();
-  });
-
-  teardown(function() {
-    settingsMenu.remove();
   });
 
   test('openResetSection', function() {
+    Router.getInstance().navigateTo(routes.RESET);
     const selector = settingsMenu.$.menu;
+    assertTrue(!!selector.selected);
     const path = new window.URL(selector.selected.toString()).pathname;
     assertEquals('/reset', path);
   });
 
   test('navigateToAnotherSection', function() {
+    Router.getInstance().navigateTo(routes.RESET);
     const selector = settingsMenu.$.menu;
+    assertTrue(!!selector.selected);
     let path = new window.URL(selector.selected.toString()).pathname;
     assertEquals('/reset', path);
 
-    Router.getInstance().navigateTo(routes.PEOPLE, undefined);
+    Router.getInstance().navigateTo(routes.PEOPLE);
     flush();
 
+    assertTrue(!!selector.selected);
     path = new window.URL(selector.selected.toString()).pathname;
     assertEquals('/people', path);
   });
 
   test('navigateToBasic', function() {
+    Router.getInstance().navigateTo(routes.RESET);
     const selector = settingsMenu.$.menu;
+    assertTrue(!!selector.selected);
     const path = new window.URL(selector.selected.toString()).pathname;
     assertEquals('/reset', path);
 
-    Router.getInstance().navigateTo(routes.BASIC, undefined);
+    Router.getInstance().navigateTo(routes.BASIC);
     flush();
 
     // BASIC has no sub page selected.
@@ -104,7 +83,10 @@ suite('SettingsMenuReset', function() {
 
   // <if expr="_google_chrome">
   test('navigateToGetMostChrome', function() {
-    Router.getInstance().navigateTo(routes.GET_MOST_CHROME, undefined);
+    loadTimeData.overrideValues({showGetTheMostOutOfChromeSection: true});
+    Router.resetInstanceForTesting(buildRouter());
+    createSettingsMenu();
+    Router.getInstance().navigateTo(routes.GET_MOST_CHROME);
     flush();
 
     // GET_MOST_CHROME should select the 'About Chrome' entry.
@@ -114,6 +96,34 @@ suite('SettingsMenuReset', function() {
     assertEquals('/help', path);
   });
   // </if>
+
+  test('noExperimental', async function() {
+    loadTimeData.overrideValues({showAdvancedFeaturesMainControl: false});
+    Router.resetInstanceForTesting(buildRouter());
+    createSettingsMenu();
+    await flushTasks();
+
+    const entry = settingsMenu.shadowRoot!.querySelector('a[href=\'/ai\']');
+    assertTrue(!!entry);
+    assertFalse(isVisible(entry));
+  });
+
+  test('navigateToExperimental', async function() {
+    loadTimeData.overrideValues({showAdvancedFeaturesMainControl: true});
+    Router.resetInstanceForTesting(buildRouter());
+    createSettingsMenu();
+    Router.getInstance().navigateTo(routes.AI);
+    await flushTasks();
+
+    const entry = settingsMenu.shadowRoot!.querySelector('a[href=\'/ai\']');
+    assertTrue(!!entry);
+    assertTrue(isVisible(entry));
+
+    const selector = settingsMenu.$.menu;
+    assertTrue(!!selector.selected);
+    const path = new window.URL(selector.selected.toString()).pathname;
+    assertEquals('/ai', path);
+  });
 
   test('pageVisibility', function() {
     function assertPagesHidden(expectedHidden: boolean) {

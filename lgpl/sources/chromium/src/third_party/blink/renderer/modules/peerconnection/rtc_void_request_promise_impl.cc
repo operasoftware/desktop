@@ -13,7 +13,7 @@ namespace blink {
 
 RTCVoidRequestPromiseImpl::RTCVoidRequestPromiseImpl(
     RTCPeerConnection* requester,
-    ScriptPromiseResolver* resolver,
+    ScriptPromiseResolver<IDLUndefined>* resolver,
     const char* interface_name,
     const char* property_name)
     : requester_(requester),
@@ -42,7 +42,7 @@ void RTCVoidRequestPromiseImpl::RequestFailed(const webrtc::RTCError& error) {
   if (requester_ && requester_->ShouldFireDefaultCallbacks()) {
     ScriptState::Scope scope(resolver_->GetScriptState());
     ExceptionState exception_state(resolver_->GetScriptState()->GetIsolate(),
-                                   ExceptionState::kExecutionContext,
+                                   ExceptionContextType::kOperationInvoke,
                                    interface_name_, property_name_);
     ThrowExceptionFromRTCError(error, exception_state);
     resolver_->Reject(exception_state);

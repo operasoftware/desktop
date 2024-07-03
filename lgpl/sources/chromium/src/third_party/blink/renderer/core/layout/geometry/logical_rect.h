@@ -9,10 +9,13 @@
 #include "third_party/blink/renderer/core/layout/geometry/logical_offset.h"
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
+#include "ui/gfx/geometry/rect_f.h"
+
+namespace WTF {
+class String;
+}  // namespace WTF
 
 namespace blink {
-
-class LayoutRect;
 
 // LogicalRect is the position and size of a rect (typically a fragment)
 // relative to the parent in the logical coordinate system.
@@ -39,12 +42,11 @@ struct CORE_EXPORT LogicalRect {
                         int block_offset,
                         int inline_size,
                         int block_size);
-
-  constexpr explicit LogicalRect(const LayoutRect& source)
+  constexpr explicit LogicalRect(const DeprecatedLayoutRect& source)
       : LogicalRect({source.X(), source.Y()},
                     {source.Width(), source.Height()}) {}
 
-  constexpr LayoutRect ToLayoutRect() const {
+  constexpr DeprecatedLayoutRect ToLayoutRect() const {
     return {offset.inline_offset, offset.block_offset, size.inline_size,
             size.block_size};
   }
@@ -95,6 +97,13 @@ struct CORE_EXPORT LogicalRect {
     size.block_size += block_start + block_end;
   }
 
+  void ContractEdges(LayoutUnit block_start,
+                     LayoutUnit inline_end,
+                     LayoutUnit block_end,
+                     LayoutUnit inline_start) {
+    ExpandEdges(-block_start, -inline_end, -block_end, -inline_start);
+  }
+
   // Update inline-start offset without changing the inline-end offset.
   void ShiftInlineStartEdgeTo(LayoutUnit edge) {
     LayoutUnit new_size = (InlineEndOffset() - edge).ClampNegativeToZero();
@@ -130,7 +139,7 @@ struct CORE_EXPORT LogicalRect {
       : offset(LayoutUnit(r.x()), LayoutUnit(r.y())),
         size(LayoutUnit(r.width()), LayoutUnit(r.height())) {}
 
-  String ToString() const;
+  WTF::String ToString() const;
 };
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const LogicalRect&);

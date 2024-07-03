@@ -1,7 +1,12 @@
 // Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// NOTICE: This file contains modifications made by Opera.
+// Copyright (C) 2024 Opera Norway AS. All rights reserved.
 
+#include "base/features/scoped_test_feature_override.h"
+#include "base/features/submodule_features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/layout/geometry/transform_state.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
@@ -1979,19 +1984,20 @@ TEST_F(MapCoordinatesTest, FixedPositionUnderTransformWithScrollOffset) {
                                kIgnoreScrollOffset));
 }
 
-#if BUILDFLAG(IS_FUCHSIA)
-// TODO(crbug.com/1313287): Fix this test on Fuchsia and re-enable.
-#define MAYBE_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar \
-  DISABLED_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar
-#else
-#define MAYBE_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar \
-  IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar
-#endif
+class MapCoordinatesTestWithParam : public MapCoordinatesTest,
+                                    public testing::WithParamInterface<bool> {
+ private:
+  base::ScopedTestFeatureOverride enable_component_based_scrollbar_{
+      base::kFeatureComponentBasedScrollbar, /*enabled=*/GetParam()};
+};
+
+INSTANTIATE_TEST_SUITE_P(, MapCoordinatesTestWithParam, testing::Bool());
+
 // This test verifies that ignoring scroll offset works with writing modes and
 // non-overlay scrollbar.
-TEST_F(MapCoordinatesTest,
-       MAYBE_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar) {
-  USE_NON_OVERLAY_SCROLLBARS();
+TEST_P(MapCoordinatesTestWithParam,
+       IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar) {
+  USE_NON_OVERLAY_SCROLLBARS_OR_QUIT();
 
   SetBodyInnerHTML(R"HTML(
     <style>

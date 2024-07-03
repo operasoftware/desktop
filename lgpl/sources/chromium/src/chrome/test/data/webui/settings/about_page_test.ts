@@ -4,7 +4,8 @@
 
 // clang-format off
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
-import {AboutPageBrowserProxyImpl, LifetimeBrowserProxyImpl, Route, Router, SettingsAboutPageElement, SettingsRoutes} from 'chrome://settings/settings.js';
+import type {SettingsAboutPageElement, SettingsRoutes} from 'chrome://settings/settings.js';
+import {AboutPageBrowserProxyImpl, LifetimeBrowserProxyImpl, Route, Router} from 'chrome://settings/settings.js';
 import {assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 import {TestAboutPageBrowserProxy} from './test_about_page_browser_proxy.js';
@@ -12,12 +13,13 @@ import {TestLifetimeBrowserProxy} from './test_lifetime_browser_proxy.js';
 
 // <if expr="_google_chrome">
 import {ABOUT_PAGE_PRIVACY_POLICY_URL, OpenWindowProxyImpl} from 'chrome://settings/settings.js';
+import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 import {TestOpenWindowProxy} from 'chrome://webui-test/test_open_window_proxy.js';
 // </if>
 
 // <if expr="_google_chrome and is_macosx">
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {PromoteUpdaterStatus} from 'chrome://settings/settings.js';
+import type {PromoteUpdaterStatus} from 'chrome://settings/settings.js';
 // </if>
 
 // <if expr="not chromeos_ash">
@@ -332,16 +334,19 @@ suite('OfficialBuild', function() {
   let page: SettingsAboutPageElement;
   let browserProxy: TestAboutPageBrowserProxy;
   let openWindowProxy: TestOpenWindowProxy;
+  let testRoutes: SettingsRoutes;
 
   setup(function() {
-    setupRouter();
+    testRoutes = setupRouter();
     browserProxy = new TestAboutPageBrowserProxy();
     AboutPageBrowserProxyImpl.setInstance(browserProxy);
     openWindowProxy = new TestOpenWindowProxy();
     OpenWindowProxyImpl.setInstance(openWindowProxy);
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
     page = document.createElement('settings-about-page');
+    Router.getInstance().navigateTo(testRoutes.ABOUT);
     document.body.appendChild(page);
+    return flushTasks();
   });
 
   test('ReportAnIssue', async function() {

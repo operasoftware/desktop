@@ -6,13 +6,11 @@ import 'chrome://os-settings/os_settings.js';
 import 'chrome://os-settings/lazy_load.js';
 
 import {SettingsHotspotSubpageElement} from 'chrome://os-settings/lazy_load.js';
-import {Router, routes, settingMojom, SettingsToggleButtonElement} from 'chrome://os-settings/os_settings.js';
+import {CrButtonElement, CrToggleElement, Router, routes, settingMojom, SettingsToggleButtonElement} from 'chrome://os-settings/os_settings.js';
 import {setHotspotConfigForTesting} from 'chrome://resources/ash/common/hotspot/cros_hotspot_config.js';
 import {CrosHotspotConfigObserverInterface, CrosHotspotConfigObserverRemote, HotspotAllowStatus, HotspotConfig, HotspotControlResult, HotspotInfo, HotspotState, SetHotspotConfigResult} from 'chrome://resources/ash/common/hotspot/cros_hotspot_config.mojom-webui.js';
 import {FakeHotspotConfig} from 'chrome://resources/ash/common/hotspot/fake_hotspot_config.js';
-import {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_button.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
-import {getDeepActiveElement} from 'chrome://resources/js/util_ts.js';
+import {getDeepActiveElement} from 'chrome://resources/js/util.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
@@ -27,11 +25,6 @@ suite('<settings-hotspot-subpage>', () => {
     hotspotConfig = new FakeHotspotConfig();
     setHotspotConfigForTesting(hotspotConfig);
   });
-
-  function flushAsync() {
-    flush();
-    return new Promise(resolve => setTimeout(resolve));
-  }
 
   function init(urlParams?: URLSearchParams) {
     hotspotSubpage = document.createElement('settings-hotspot-subpage');
@@ -59,7 +52,7 @@ suite('<settings-hotspot-subpage>', () => {
     } as HotspotInfo;
     hotspotConfig.setFakeHotspotInfo(hotspotInfo);
     Router.getInstance().navigateTo(routes.HOTSPOT_DETAIL, urlParams);
-    return flushAsync();
+    return flushTasks();
   }
 
   function queryEnableHotspotToggle(): CrToggleElement|null {
@@ -95,7 +88,7 @@ suite('<settings-hotspot-subpage>', () => {
     hotspotConfig.setFakeEnableHotspotResult(
         HotspotControlResult.kNetworkSetupFailure);
     enableHotspotToggle.click();
-    await flushAsync();
+    await flushTasks();
     // Toggle should be off.
     assertFalse(enableHotspotToggle.checked);
     assertFalse(enableHotspotToggle.disabled);
@@ -105,7 +98,7 @@ suite('<settings-hotspot-subpage>', () => {
         eventToPromise('cr-a11y-announcer-messages-sent', document.body);
     hotspotConfig.setFakeEnableHotspotResult(HotspotControlResult.kSuccess);
     enableHotspotToggle.click();
-    await flushAsync();
+    await flushTasks();
     // Toggle should be on this time.
     assertTrue(enableHotspotToggle.checked);
     assertFalse(enableHotspotToggle.disabled);
@@ -118,7 +111,7 @@ suite('<settings-hotspot-subpage>', () => {
         eventToPromise('cr-a11y-announcer-messages-sent', document.body);
     hotspotConfig.setFakeDisableHotspotResult(HotspotControlResult.kSuccess);
     enableHotspotToggle.click();
-    await flushAsync();
+    await flushTasks();
     // Toggle should be off
     assertFalse(enableHotspotToggle.checked);
     assertFalse(enableHotspotToggle.disabled);
@@ -128,15 +121,15 @@ suite('<settings-hotspot-subpage>', () => {
 
     // Simulate state becoming kEnabling.
     hotspotConfig.setFakeHotspotState(HotspotState.kEnabling);
-    await flushAsync();
-    // Toggle should be disabled.
-    assertTrue(enableHotspotToggle.disabled);
+    await flushTasks();
+    // Toggle should not be disabled.
+    assertFalse(enableHotspotToggle.disabled);
     hotspotConfig.setFakeHotspotState(HotspotState.kDisabled);
 
     // Simulate AllowStatus becoming kDisallowedByPolicy.
     hotspotConfig.setFakeHotspotAllowStatus(
         HotspotAllowStatus.kDisallowedByPolicy);
-    await flushAsync();
+    await flushTasks();
     // Toggle should be disabled.
     assertTrue(enableHotspotToggle.disabled);
   });
@@ -149,88 +142,125 @@ suite('<settings-hotspot-subpage>', () => {
     const enableToggle = queryEnableHotspotToggle();
     const hotspotNameElement =
         hotspotSubpage.shadowRoot!.querySelector('#hotspotSSID');
+    const connectedClientCountRow =
+        hotspotSubpage.shadowRoot!.querySelector<HTMLElement>(
+            '#connectedDeviceCountRow');
     const connectedClientCount =
         hotspotSubpage.shadowRoot!.querySelector('#connectedDeviceCount');
 
     assertTrue(!!hotspotOnOffLabel);
     assertTrue(!!enableToggle);
     assertTrue(!!hotspotNameElement);
+    assertTrue(!!connectedClientCountRow);
     assertTrue(!!connectedClientCount);
 
     assertEquals(
         hotspotSubpage.i18n('hotspotSummaryStateOff'),
         hotspotOnOffLabel.textContent!.trim());
     assertEquals('test_ssid', hotspotNameElement.textContent!.trim());
-    assertEquals('0', connectedClientCount.textContent!.trim());
-    assertFalse(enableToggle.checked);
+    assertFalse(
+        enableToggle.checked, 'Enable hotspot toggle should not be checked');
+    assertTrue(
+        connectedClientCountRow.hidden,
+        'Connected device count row should be hidden');
 
     // Simulate turning on hotspot.
     hotspotConfig.setFakeEnableHotspotResult(HotspotControlResult.kSuccess);
     hotspotConfig.enableHotspot();
-    await flushAsync();
+    await flushTasks();
     assertEquals(
         hotspotSubpage.i18n('hotspotSummaryStateOn'),
         hotspotOnOffLabel.textContent!.trim());
-    assertTrue(enableToggle.checked);
+    assertTrue(enableToggle.checked, 'Enable hotspot toggle should be checked');
+    assertFalse(
+        connectedClientCountRow.hidden,
+        'Connected device count row should not be hidden');
 
     // Simulate turning off hotspot.
     hotspotConfig.setFakeDisableHotspotResult(HotspotControlResult.kSuccess);
     hotspotConfig.disableHotspot();
-    await flushAsync();
+    await flushTasks();
     assertEquals(
         hotspotSubpage.i18n('hotspotSummaryStateOff'),
         hotspotOnOffLabel.textContent!.trim());
-    assertFalse(enableToggle.checked);
+    assertFalse(
+        enableToggle.checked, 'Enable hotspot toggle should not be checked');
+    assertTrue(
+        connectedClientCountRow.hidden,
+        'Connected device count row should be hidden');
 
     // Verify toggle is able to turn on/off by CrosHotspotConfig even when it is
     // disabled by policy.
     hotspotConfig.setFakeHotspotAllowStatus(
         HotspotAllowStatus.kDisallowedByPolicy);
-    await flushAsync();
+    await flushTasks();
     // Toggle should be disabled.
-    assertTrue(enableToggle.disabled);
+    assertTrue(
+        enableToggle.disabled, 'Enable hotspot toggle should be disabled');
 
     hotspotConfig.setFakeHotspotState(HotspotState.kEnabling);
-    await flushAsync();
+    await flushTasks();
     assertEquals(
         hotspotSubpage.i18n('hotspotSummaryStateTurningOn'),
         hotspotOnOffLabel.textContent!.trim());
-    assertTrue(enableToggle.checked);
+    assertTrue(
+        enableToggle.checked,
+        'Enable hotspot toggle should not checked when hotspot enabling');
+    assertTrue(
+        connectedClientCountRow.hidden,
+        'Connected device count row should be hidden when hotspot enabling');
 
     hotspotConfig.setFakeHotspotState(HotspotState.kEnabled);
-    await flushAsync();
+    await flushTasks();
     assertEquals(
         hotspotSubpage.i18n('hotspotSummaryStateOn'),
         hotspotOnOffLabel.textContent!.trim());
-    assertTrue(enableToggle.checked);
+    assertTrue(
+        enableToggle.checked,
+        'Enable hotspot toggle should be checked when hotspot enabled');
+    assertFalse(
+        connectedClientCountRow.hidden,
+        'Connected device count row should be not hidden when hotspot enabled');
+    assertEquals('0', connectedClientCount.textContent!.trim());
 
     hotspotConfig.setFakeHotspotState(HotspotState.kDisabling);
-    await flushAsync();
+    await flushTasks();
     assertEquals(
         hotspotSubpage.i18n('hotspotSummaryStateTurningOff'),
         hotspotOnOffLabel.textContent!.trim());
-    assertFalse(enableToggle.checked);
+    assertFalse(
+        enableToggle.checked,
+        'Enable hotspot toggle should not be checked when hotspot disabling');
+    assertFalse(
+        connectedClientCountRow.hidden,
+        'Connected device count row should be shown when hotspot disabling');
+    assertEquals('0', connectedClientCount.textContent!.trim());
 
     hotspotConfig.setFakeHotspotState(HotspotState.kDisabled);
-    await flushAsync();
+    await flushTasks();
     assertEquals(
         hotspotSubpage.i18n('hotspotSummaryStateOff'),
         hotspotOnOffLabel.textContent!.trim());
-    assertFalse(enableToggle.checked);
+    assertFalse(
+        enableToggle.checked,
+        'Enable hotspot toggle should not be checked when hotspot disabled');
+    assertTrue(
+        connectedClientCountRow.hidden,
+        'Connected device count row should be hidden when hotspot disabled');
 
     hotspotConfig.setFakeHotspotActiveClientCount(6);
-    await flushAsync();
+    await flushTasks();
     assertEquals('6', connectedClientCount.textContent!.trim());
 
     const config = {ssid: 'new_ssid'} as HotspotConfig;
 
     hotspotConfig.setFakeHotspotConfig(config);
-    await flushAsync();
+    await flushTasks();
     assertEquals('new_ssid', hotspotNameElement.textContent!.trim());
 
     // Verifies UI with undefined hotspot config
     hotspotConfig.setFakeHotspotConfig(undefined);
-    await flushAsync();
+    await flushTasks();
     assertEquals('', hotspotNameElement.textContent?.trim());
   });
 
@@ -243,19 +273,19 @@ suite('<settings-hotspot-subpage>', () => {
     hotspotConfig.setFakeSetHotspotConfigResult(
         SetHotspotConfigResult.kSuccess);
     autoDisableToggle.click();
-    await flushAsync();
+    await flushTasks();
     assertFalse(autoDisableToggle.checked);
 
     hotspotConfig.setFakeSetHotspotConfigResult(
         SetHotspotConfigResult.kFailedInvalidConfiguration);
     autoDisableToggle.click();
-    await flushAsync();
+    await flushTasks();
     assertFalse(autoDisableToggle.checked);
 
     // Verifies that the toggle should be hidden if the hotspot config is
     // undefined.
     hotspotConfig.setFakeHotspotConfig(undefined);
-    await flushAsync();
+    await flushTasks();
     autoDisableToggle = queryHotspotAutoDisableToggle();
     assertEquals(null, autoDisableToggle);
   });
@@ -267,7 +297,7 @@ suite('<settings-hotspot-subpage>', () => {
     assertFalse(configureButton.hidden);
 
     hotspotConfig.setFakeHotspotConfig(undefined);
-    await flushAsync();
+    await flushTasks();
     assertTrue(configureButton.hidden);
   });
 

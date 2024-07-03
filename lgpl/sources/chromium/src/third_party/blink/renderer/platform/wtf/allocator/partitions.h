@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_ALLOCATOR_PARTITIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_ALLOCATOR_PARTITIONS_H_
 
-#include "base/allocator/partition_allocator/partition_alloc_forward.h"
+#include "base/allocator/partition_allocator/src/partition_alloc/partition_alloc_forward.h"
 #include "base/check.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/numerics/checked_math.h"
@@ -86,21 +86,20 @@ class WTF_EXPORT Partitions {
   static void DumpMemoryStats(bool is_light_dump,
                               partition_alloc::PartitionStatsDumper*);
 
-  static void* PA_MALLOC_FN BufferMalloc(size_t n, const char* type_name)
-      PA_MALLOC_ALIGNED;
-  static void* BufferTryRealloc(void* p,
-                                size_t n,
-                                const char* type_name) PA_MALLOC_ALIGNED;
+  static void* PA_MALLOC_FN BufferMalloc(size_t n, const char* type_name);
+  static void* BufferTryRealloc(void* p, size_t n, const char* type_name);
   static void BufferFree(void* p);
   static size_t BufferPotentialCapacity(size_t n);
 
-  static void* PA_MALLOC_FN FastMalloc(size_t n,
-                                       const char* type_name) PA_MALLOC_ALIGNED;
-  static void* PA_MALLOC_FN FastZeroedMalloc(size_t n, const char* type_name)
-      PA_MALLOC_ALIGNED;
+  static void* PA_MALLOC_FN FastMalloc(size_t n, const char* type_name);
+  static void* PA_MALLOC_FN FastZeroedMalloc(size_t n, const char* type_name);
   static void FastFree(void* p);
 
   static void HandleOutOfMemory(size_t size);
+
+  // Adjusts the size of the partitions based on process state.
+  static void AdjustPartitionsForForeground();
+  static void AdjustPartitionsForBackground();
 
  private:
   ALWAYS_INLINE static partition_alloc::PartitionRoot* FastMallocPartition() {

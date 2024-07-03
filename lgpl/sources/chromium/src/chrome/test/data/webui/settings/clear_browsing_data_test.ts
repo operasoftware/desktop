@@ -6,17 +6,19 @@
 import {webUIListenerCallback} from 'chrome://resources/js/cr.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {ClearBrowsingDataBrowserProxyImpl, ClearBrowsingDataResult, SettingsCheckboxElement, SettingsClearBrowsingDataDialogElement, SettingsHistoryDeletionDialogElement, SettingsPasswordsDeletionDialogElement} from 'chrome://settings/lazy_load.js';
-import {CrButtonElement, loadTimeData, StatusAction, SyncBrowserProxyImpl} from 'chrome://settings/settings.js';
+import type {ClearBrowsingDataResult, SettingsCheckboxElement, SettingsClearBrowsingDataDialogElement, SettingsHistoryDeletionDialogElement, SettingsPasswordsDeletionDialogElement} from 'chrome://settings/lazy_load.js';
+import {ClearBrowsingDataBrowserProxyImpl, TimePeriodExperiment, TimePeriod} from 'chrome://settings/lazy_load.js';
+import type {CrButtonElement, SettingsDropdownMenuElement} from 'chrome://settings/settings.js';
+import {loadTimeData, StatusAction, SyncBrowserProxyImpl} from 'chrome://settings/settings.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {eventToPromise, isVisible} from 'chrome://webui-test/test_util.js';
+import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
+import {isChildVisible, isVisible, eventToPromise} from 'chrome://webui-test/test_util.js';
 
 import {TestClearBrowsingDataBrowserProxy} from './test_clear_browsing_data_browser_proxy.js';
 import {TestSyncBrowserProxy} from './test_sync_browser_proxy.js';
 
 // <if expr="not is_chromeos">
 import {Router, routes} from 'chrome://settings/settings.js';
-import {isChildVisible} from 'chrome://webui-test/test_util.js';
 // </if>
 
 // clang-format on
@@ -90,6 +92,16 @@ function getClearBrowsingDataPrefs() {
           type: chrome.settingsPrivate.PrefType.NUMBER,
           value: 0,
         },
+        time_period_v2: {
+          key: 'browser.clear_data.time_period_v2',
+          type: chrome.settingsPrivate.PrefType.NUMBER,
+          value: TimePeriodExperiment.NOT_SELECTED,
+        },
+        time_period_v2_basic: {
+          key: 'browser.clear_data.time_period_v2_basic',
+          type: chrome.settingsPrivate.PrefType.NUMBER,
+          value: TimePeriodExperiment.NOT_SELECTED,
+        },
       },
       last_clear_browsing_data_tab: {
         key: 'browser.last_clear_browsing_data_tab',
@@ -111,6 +123,9 @@ suite('ClearBrowsingDataDesktop', function() {
     testSyncBrowserProxy = new TestSyncBrowserProxy();
     SyncBrowserProxyImpl.setInstance(testSyncBrowserProxy);
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
+    // TODO(b/314968275): Add tests for when UNO Desktop is enabled.
+    loadTimeData.overrideValues(
+        {enableCbdTimeframeRequired: false, unoDesktopEnabled: false});
     element = document.createElement('settings-clear-browsing-data-dialog');
     element.set('prefs', getClearBrowsingDataPrefs());
     document.body.appendChild(element);
@@ -196,11 +211,12 @@ suite('ClearBrowsingDataDesktop', function() {
     assertTrue(!!element.shadowRoot!.querySelector(
         '#clearBrowsingDataDialog [slot=footer]'));
     const syncInfo = element.shadowRoot!.querySelector('#sync-info');
+    assertTrue(!!syncInfo);
     assertTrue(isVisible(syncInfo));
-    const signoutLink = syncInfo!.querySelector<HTMLElement>('a[href]');
+    const signoutLink = syncInfo.querySelector<HTMLElement>('a[href]');
     assertTrue(!!signoutLink);
     assertEquals(0, testSyncBrowserProxy.getCallCount('pauseSync'));
-    signoutLink!.click();
+    signoutLink.click();
     assertEquals(1, testSyncBrowserProxy.getCallCount('pauseSync'));
   });
 
@@ -214,11 +230,12 @@ suite('ClearBrowsingDataDesktop', function() {
     assertTrue(!!element.shadowRoot!.querySelector(
         '#clearBrowsingDataDialog [slot=footer]'));
     const syncInfo = element.shadowRoot!.querySelector('#sync-paused-info');
+    assertTrue(!!syncInfo);
     assertTrue(isVisible(syncInfo));
-    const signinLink = syncInfo!.querySelector<HTMLElement>('a[href]');
+    const signinLink = syncInfo.querySelector<HTMLElement>('a[href]');
     assertTrue(!!signinLink);
     assertEquals(0, testSyncBrowserProxy.getCallCount('startSignIn'));
-    signinLink!.click();
+    signinLink.click();
     assertEquals(1, testSyncBrowserProxy.getCallCount('startSignIn'));
   });
 
@@ -233,10 +250,11 @@ suite('ClearBrowsingDataDesktop', function() {
         '#clearBrowsingDataDialog [slot=footer]'));
     const syncInfo =
         element.shadowRoot!.querySelector('#sync-passphrase-error-info');
+    assertTrue(!!syncInfo);
     assertTrue(isVisible(syncInfo));
-    const passphraseLink = syncInfo!.querySelector<HTMLElement>('a[href]');
+    const passphraseLink = syncInfo.querySelector<HTMLElement>('a[href]');
     assertTrue(!!passphraseLink);
-    passphraseLink!.click();
+    passphraseLink.click();
     assertEquals(routes.SYNC, Router.getInstance().getCurrentRoute());
   });
   // </if>
@@ -285,6 +303,136 @@ suite('ClearBrowsingDataDesktop', function() {
       }
     }
   });
+
+  test('ClearBrowsingData_MenuOptions', async function() {
+    // The user selects the tab of interest.
+    element.$.tabs.selected = 0;
+    await element.$.tabs.updateComplete;
+
+    const page = element.$.pages.selectedItem as HTMLElement;
+    const dropdownMenu =
+        page.querySelector<SettingsDropdownMenuElement>('.time-range-select');
+    assertTrue(!!dropdownMenu);
+    assertTrue(!!dropdownMenu.menuOptions);
+    assertTrue(dropdownMenu.menuOptions.length === 5);
+
+    // TODO(crbug.com/1487530): Remove once CbdTimeframeRequired finished.
+    assertFalse(dropdownMenu.menuOptions.some(
+        option =>
+            option.name === loadTimeData.getString('clearPeriod15Minutes')));
+  });
+
+  async function testCbdExperimentDropdown(
+      testBrowserProxy: TestClearBrowsingDataBrowserProxy, tabIndex: number) {
+    // This test requires recreation of the page (ClearBrowsingDataDialog) after
+    // defining loadTimeData to apply experiment changes after enabling the
+    // feature/flag.
+    testBrowserProxy.reset();
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
+    loadTimeData.overrideValues({enableCbdTimeframeRequired: true});
+    element = document.createElement('settings-clear-browsing-data-dialog');
+    element.set('prefs', getClearBrowsingDataPrefs());
+    document.body.appendChild(element);
+    await testBrowserProxy.whenCalled('initialize');
+    assertEquals(1, testBrowserProxy.getCallCount('initialize'));
+    await flushTasks();
+
+    // The user selects the tab of interest.
+    element.$.tabs.selected = tabIndex;
+    await element.$.tabs.updateComplete;
+
+    // The dropdown menu contains the "not selected" and "15 min" options on
+    // top.
+    const page = element.$.pages.selectedItem as HTMLElement;
+    const dropdownMenu =
+        page.querySelector<SettingsDropdownMenuElement>('.time-range-select');
+    assertTrue(!!dropdownMenu);
+    assertTrue(!!dropdownMenu.menuOptions);
+    assertEquals(7, dropdownMenu.menuOptions.length);
+    assertEquals(
+        loadTimeData.getString('clearPeriodNotSelected'),
+        dropdownMenu.menuOptions[0]!.name);
+    assertEquals(
+        loadTimeData.getString('clearPeriod15Minutes'),
+        dropdownMenu.menuOptions[1]!.name);
+    assertEquals(
+        loadTimeData.getString('clearPeriodNotSelected'),
+        dropdownMenu.$.dropdownMenu
+            .options[dropdownMenu.$.dropdownMenu.selectedIndex]!.text);
+    for (const option of dropdownMenu.$.dropdownMenu.options) {
+      assertEquals(
+          option.text === loadTimeData.getString('clearPeriodNotSelected'),
+          option.hidden);
+    }
+
+    // Select a datatype for deletion to enable the clear button.
+    const cookiesCheckbox =
+        page.querySelector<SettingsCheckboxElement>('.cookies-checkbox');
+    assertTrue(!!cookiesCheckbox);
+    cookiesCheckbox.$.checkbox.click();
+    await cookiesCheckbox.$.checkbox.updateComplete;
+    const actionButton =
+        element.shadowRoot!.querySelector<CrButtonElement>('.action-button');
+    assertTrue(!!actionButton);
+    assertFalse(actionButton.disabled);
+
+    // Before trying data clearing without a time range selection, the dropdown
+    // is not in the dropdown-error state.
+    assertFalse(dropdownMenu.classList.contains('dropdown-error'));
+
+    // Once the user tries to clear data without having made a time range
+    // selection the dropdown goes into the dropdown-error state.
+    actionButton.click();
+    assertTrue(dropdownMenu.classList.contains('dropdown-error'));
+
+    // Once a time range is selected, the dropdown is no longer in the
+    // dropdown-error state.
+    dropdownMenu.$.dropdownMenu.value = TimePeriod.LAST_DAY.toString();
+    dropdownMenu.$.dropdownMenu.dispatchEvent(new CustomEvent('change'));
+    await waitAfterNextRender(dropdownMenu);
+    assertFalse(dropdownMenu.classList.contains('dropdown-error'));
+  }
+
+  // TODO(crbug.com/1487530): Remove once CbdTimeframeRequired finished.
+  test('ClearBrowsingData_CbdTimeframeRequired_Basic', function() {
+    return testCbdExperimentDropdown(testBrowserProxy, /*tabIndex*/ 0);
+  });
+
+  // TODO(crbug.com/1487530): Remove once CbdTimeframeRequired finished.
+  test('ClearBrowsingData_CbdTimeframeRequired_Advanced', function() {
+    return testCbdExperimentDropdown(testBrowserProxy, /*tabIndex*/ 1);
+  });
+
+  async function testUnsupportedTimePeriod(tabIndex: number, prefName: string) {
+    // The user selects the tab of interest.
+    element.$.tabs.selected = tabIndex;
+    await element.$.tabs.updateComplete;
+
+    const page = element.$.pages.selectedItem as HTMLElement;
+    const dropdownMenu =
+        page.querySelector<SettingsDropdownMenuElement>('.time-range-select');
+    assertTrue(!!dropdownMenu);
+
+    const unsupported_pref_value = 100;
+
+    element.setPrefValue(prefName, unsupported_pref_value);
+
+    await waitAfterNextRender(dropdownMenu);
+
+    // Assert unsupported value in Advanced tab is replaced by the Default value
+    // (Last hour).
+    assertEquals(TimePeriod.LAST_HOUR, element.getPref(prefName).value);
+    assertEquals(
+        TimePeriod.LAST_HOUR.toString(), dropdownMenu.getSelectedValue());
+  }
+
+  test('ClearBrowsingData_UnsupportedTimePeriod_Basic', function() {
+    return testUnsupportedTimePeriod(0, 'browser.clear_data.time_period_basic');
+  });
+
+  test('ClearBrowsingData_UnsupportedTimePeriod_Advanced', function() {
+    return testUnsupportedTimePeriod(1, 'browser.clear_data.time_period');
+  });
 });
 
 suite('ClearBrowsingDataAllPlatforms', function() {
@@ -305,6 +453,88 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     element.remove();
   });
 
+  async function assertDropdownSelectionPersisted(
+      tabIndex: number, prefName: string) {
+    assertTrue(element.$.clearBrowsingDataDialog.open);
+    // The user selects the tab of interest.
+    element.$.tabs.selected = tabIndex;
+    await element.$.tabs.updateComplete;
+
+    const page = element.$.pages.selectedItem as HTMLElement;
+    const dropdownMenu =
+        page.querySelector<SettingsDropdownMenuElement>('.time-range-select');
+    assertTrue(!!dropdownMenu);
+
+    // Ensure the test starts with a known pref and dropdown value.
+    element.setPrefValue(prefName, TimePeriod.LAST_DAY);
+    await waitAfterNextRender(dropdownMenu);
+    assertEquals(
+        TimePeriod.LAST_DAY.toString(), dropdownMenu.getSelectedValue());
+
+    // Changing the dropdown selection does persist its value to the pref.
+    dropdownMenu.$.dropdownMenu.value = TimePeriod.LAST_WEEK.toString();
+    dropdownMenu.$.dropdownMenu.dispatchEvent(new CustomEvent('change'));
+    await waitAfterNextRender(dropdownMenu);
+    assertEquals(TimePeriod.LAST_WEEK, element.getPref(prefName).value);
+
+    // Select a datatype for deletion to enable the clear button.
+    assertTrue(!!element.$.cookiesCheckbox);
+    element.$.cookiesCheckbox.$.checkbox.click();
+    await element.$.cookiesCheckbox.$.checkbox.updateComplete;
+    assertTrue(!!element.$.cookiesCheckboxBasic);
+    element.$.cookiesCheckboxBasic.$.checkbox.click();
+    await element.$.cookiesCheckboxBasic.$.checkbox.updateComplete;
+    // Confirming the deletion sends the time range for clearing.
+    const actionButton =
+        element.shadowRoot!.querySelector<CrButtonElement>('.action-button');
+    assertTrue(!!actionButton);
+    actionButton.click();
+    const args = await testBrowserProxy.whenCalled('clearBrowsingData');
+    const timeRange = args[1];
+    assertEquals(TimePeriod.LAST_WEEK, timeRange);
+  }
+
+  test('dropdownSelectionPersisted_Basic', function() {
+    return assertDropdownSelectionPersisted(
+        /*tabIndex*/ 0, 'browser.clear_data.time_period_basic');
+  });
+
+  test('dropdownSelectionPersisted_Advanced', function() {
+    return assertDropdownSelectionPersisted(
+        /*tabIndex*/ 1, 'browser.clear_data.time_period');
+  });
+
+  test('tabSelection', async function() {
+    assertTrue(element.$.clearBrowsingDataDialog.open);
+
+    // Ensure the test starts with a known pref state and tab selection.
+    element.setPrefValue('browser.last_clear_browsing_data_tab', 0);
+    await waitAfterNextRender(element);
+    assertEquals(
+        0, element.getPref('browser.last_clear_browsing_data_tab').value);
+    assertTrue(isChildVisible(element, '#basic-tab'));
+
+    // Changing the tab selection changes the visible tab, but does not persist
+    // the tab selection to the pref.
+    element.$.tabs.selected = 1;
+    await element.$.tabs.updateComplete;
+    assertEquals(
+        0, element.getPref('browser.last_clear_browsing_data_tab').value);
+    assertTrue(isChildVisible(element, '#advanced-tab'));
+
+    // Select a datatype for deletion to enable the clear button.
+    assertTrue(!!element.$.cookiesCheckbox);
+    element.$.cookiesCheckbox.$.checkbox.click();
+    await element.$.cookiesCheckbox.$.checkbox.updateComplete;
+    // Confirming the deletion persists the tab selection to the pref.
+    const actionButton =
+        element.shadowRoot!.querySelector<CrButtonElement>('.action-button');
+    assertTrue(!!actionButton);
+    actionButton.click();
+    assertEquals(
+        1, element.getPref('browser.last_clear_browsing_data_tab').value);
+  });
+
   test('ClearBrowsingDataTap', async function() {
     assertTrue(element.$.clearBrowsingDataDialog.open);
 
@@ -320,23 +550,24 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     // Select a datatype for deletion to enable the clear button.
     assertTrue(!!element.$.cookiesCheckboxBasic);
     element.$.cookiesCheckboxBasic.$.checkbox.click();
+    await element.$.cookiesCheckboxBasic.$.checkbox.updateComplete;
 
-    assertFalse(cancelButton!.disabled);
-    assertFalse(actionButton!.disabled);
-    assertFalse(spinner!.active);
+    assertFalse(cancelButton.disabled);
+    assertFalse(actionButton.disabled);
+    assertFalse(spinner.active);
 
     const promiseResolver = new PromiseResolver<ClearBrowsingDataResult>();
     testBrowserProxy.setClearBrowsingDataPromise(promiseResolver.promise);
-    actionButton!.click();
+    actionButton.click();
 
     const args = await testBrowserProxy.whenCalled('clearBrowsingData');
     const dataTypes = args[0];
     assertEquals(1, dataTypes.length);
     assertEquals('browser.clear_data.cookies_basic', dataTypes[0]);
     assertTrue(element.$.clearBrowsingDataDialog.open);
-    assertTrue(cancelButton!.disabled);
-    assertTrue(actionButton!.disabled);
-    assertTrue(spinner!.active);
+    assertTrue(cancelButton.disabled);
+    assertTrue(actionButton.disabled);
+    assertTrue(spinner.active);
 
     // Simulate signal from browser indicating that clearing has
     // completed.
@@ -349,14 +580,14 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     await promiseResolver.promise;
 
     assertFalse(element.$.clearBrowsingDataDialog.open);
-    assertFalse(cancelButton!.disabled);
-    assertFalse(actionButton!.disabled);
-    assertFalse(spinner!.active);
+    assertFalse(cancelButton.disabled);
+    assertFalse(actionButton.disabled);
+    assertFalse(spinner.active);
     assertFalse(!!element.shadowRoot!.querySelector('#historyNotice'));
     assertFalse(!!element.shadowRoot!.querySelector('#passwordsNotice'));
   });
 
-  test('ClearBrowsingDataClearButton', function() {
+  test('ClearBrowsingDataClearButton', async function() {
     assertTrue(element.$.clearBrowsingDataDialog.open);
 
     const actionButton =
@@ -364,17 +595,20 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     assertTrue(!!actionButton);
     assertTrue(!!element.$.cookiesCheckboxBasic);
     // Initially the button is disabled because all checkboxes are off.
-    assertTrue(actionButton!.disabled);
+    assertTrue(actionButton.disabled);
     // The button gets enabled if any checkbox is selected.
     element.$.cookiesCheckboxBasic.$.checkbox.click();
+    await element.$.cookiesCheckboxBasic.$.checkbox.updateComplete;
     assertTrue(element.$.cookiesCheckboxBasic.checked);
-    assertFalse(actionButton!.disabled);
+    assertFalse(actionButton.disabled);
     // Switching to advanced disables the button.
-    element.shadowRoot!.querySelector('cr-tabs')!.selected = 1;
-    assertTrue(actionButton!.disabled);
+    element.$.tabs.selected = 1;
+    await element.$.tabs.updateComplete;
+    assertTrue(actionButton.disabled);
     // Switching back enables it again.
-    element.shadowRoot!.querySelector('cr-tabs')!.selected = 0;
-    assertFalse(actionButton!.disabled);
+    element.$.tabs.selected = 0;
+    await element.$.tabs.updateComplete;
+    assertFalse(actionButton.disabled);
   });
 
   test('showHistoryDeletionDialog', async function() {
@@ -386,11 +620,12 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     // Select a datatype for deletion to enable the clear button.
     assertTrue(!!element.$.cookiesCheckboxBasic);
     element.$.cookiesCheckboxBasic.$.checkbox.click();
-    assertFalse(actionButton!.disabled);
+    await element.$.cookiesCheckboxBasic.$.checkbox.updateComplete;
+    assertFalse(actionButton.disabled);
 
     const promiseResolver = new PromiseResolver<ClearBrowsingDataResult>();
     testBrowserProxy.setClearBrowsingDataPromise(promiseResolver.promise);
-    actionButton!.click();
+    actionButton.click();
 
     await testBrowserProxy.whenCalled('clearBrowsingData');
     // Passing showHistoryNotice = true should trigger the notice about
@@ -411,17 +646,17 @@ suite('ClearBrowsingDataAllPlatforms', function() {
             '#historyNotice');
     assertTrue(!!notice1);
     const noticeActionButton =
-        notice1!.shadowRoot!.querySelector<CrButtonElement>('.action-button');
+        notice1.shadowRoot!.querySelector<CrButtonElement>('.action-button');
     assertTrue(!!noticeActionButton);
 
     // The notice should have replaced the main dialog.
     assertFalse(element.$.clearBrowsingDataDialog.open);
-    assertTrue(notice1!.$.dialog.open);
+    assertTrue(notice1.$.dialog.open);
 
     const whenNoticeClosed = eventToPromise('close', notice1!);
 
     // Tapping the action button will close the notice.
-    noticeActionButton!.click();
+    noticeActionButton.click();
 
     await whenNoticeClosed;
     const notice2 = element.shadowRoot!.querySelector('#historyNotice');
@@ -439,11 +674,12 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     const cookieCheckbox = element.$.cookiesCheckboxBasic;
     assertTrue(!!cookieCheckbox);
     cookieCheckbox.$.checkbox.click();
-    assertFalse(actionButton!.disabled);
+    await cookieCheckbox.$.checkbox.updateComplete;
+    assertFalse(actionButton.disabled);
 
     const promiseResolver = new PromiseResolver<ClearBrowsingDataResult>();
     testBrowserProxy.setClearBrowsingDataPromise(promiseResolver.promise);
-    actionButton!.click();
+    actionButton.click();
 
     await testBrowserProxy.whenCalled('clearBrowsingData');
     // Passing showPasswordsNotice = true should trigger the notice about
@@ -461,17 +697,17 @@ suite('ClearBrowsingDataAllPlatforms', function() {
                             '#passwordsNotice');
     assertTrue(!!notice1);
     const noticeActionButton =
-        notice1!.shadowRoot!.querySelector<CrButtonElement>('.action-button');
+        notice1.shadowRoot!.querySelector<CrButtonElement>('.action-button');
     assertTrue(!!noticeActionButton);
 
     // The notice should have replaced the main dialog.
     assertFalse(element.$.clearBrowsingDataDialog.open);
-    assertTrue(notice1!.$.dialog.open);
+    assertTrue(notice1.$.dialog.open);
 
     const whenNoticeClosed = eventToPromise('close', notice1!);
 
     // Tapping the action button will close the notice.
-    noticeActionButton!.click();
+    noticeActionButton.click();
 
     await whenNoticeClosed;
     const notice2 = element.shadowRoot!.querySelector('#passwordsNotice');
@@ -489,11 +725,12 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     const cookieCheckbox = element.$.cookiesCheckboxBasic;
     assertTrue(!!cookieCheckbox);
     cookieCheckbox.$.checkbox.click();
-    assertFalse(actionButton!.disabled);
+    await cookieCheckbox.$.checkbox.updateComplete;
+    assertFalse(actionButton.disabled);
 
     const promiseResolver = new PromiseResolver<ClearBrowsingDataResult>();
     testBrowserProxy.setClearBrowsingDataPromise(promiseResolver.promise);
-    actionButton!.click();
+    actionButton.click();
 
     await testBrowserProxy.whenCalled('clearBrowsingData');
     // Passing showHistoryNotice = true and showPasswordsNotice = true
@@ -514,18 +751,18 @@ suite('ClearBrowsingDataAllPlatforms', function() {
             '#historyNotice');
     assertTrue(!!notice1);
     const noticeActionButton1 =
-        notice1!.shadowRoot!.querySelector<CrButtonElement>('.action-button');
+        notice1.shadowRoot!.querySelector<CrButtonElement>('.action-button');
     assertTrue(!!noticeActionButton1);
 
     // The notice should have replaced the main dialog.
     assertFalse(element.$.clearBrowsingDataDialog.open);
-    assertTrue(notice1!.$.dialog.open);
+    assertTrue(notice1.$.dialog.open);
 
     const whenNoticeClosed1 = eventToPromise('close', notice1!);
 
     // Tapping the action button will close the history notice, and
     // display the passwords notice instead.
-    noticeActionButton1!.click();
+    noticeActionButton1.click();
 
     await whenNoticeClosed1;
     // The passwords notice should have replaced the history notice.
@@ -541,16 +778,16 @@ suite('ClearBrowsingDataAllPlatforms', function() {
                             '#passwordsNotice');
     assertTrue(!!notice2);
     const noticeActionButton2 =
-        notice2!.shadowRoot!.querySelector<CrButtonElement>('.action-button');
+        notice2.shadowRoot!.querySelector<CrButtonElement>('.action-button');
     assertTrue(!!noticeActionButton2);
 
     assertFalse(element.$.clearBrowsingDataDialog.open);
-    assertTrue(notice2!.$.dialog.open);
+    assertTrue(notice2.$.dialog.open);
 
     const whenNoticeClosed2 = eventToPromise('close', notice2!);
 
     // Tapping the action button will close the notice.
-    noticeActionButton2!.click();
+    noticeActionButton2.click();
 
     await whenNoticeClosed2;
     const notice3 = element.shadowRoot!.querySelector('#passwordsNotice');
@@ -562,7 +799,8 @@ suite('ClearBrowsingDataAllPlatforms', function() {
     assertTrue(element.$.clearBrowsingDataDialog.open);
 
     const checkbox = element.shadowRoot!.querySelector<SettingsCheckboxElement>(
-        '#cacheCheckboxBasic')!;
+        '#cacheCheckboxBasic');
+    assertTrue(!!checkbox);
     assertEquals('browser.clear_data.cache_basic', checkbox.pref!.key);
 
     // Simulate a browsing data counter result for history. This checkbox's
@@ -657,17 +895,13 @@ suite('ClearBrowsingDataForSupervisedUsers', function() {
   test(
       'Additional information shown for supervised users when clearing cookies',
       async function() {
-        loadTimeData.overrideValues({
-          clearingCookiesKeepsSupervisedUsersSignedIn: true,
-        });
         document.body.appendChild(element);
         await testBrowserProxy.whenCalled('initialize');
 
         assertTrue(element.$.clearBrowsingDataDialog.open);
 
         // Supervised users will see additional text informing them they will
-        // not be signed out when cookies are cleared and
-        // `kClearingCookiesKeepsSupervisedUsersSignedIn` flag enabled.
+        // not be signed out when cookies are cleared
         const checkbox =
             element.shadowRoot!.querySelector<SettingsCheckboxElement>(
                 '#cookiesCheckboxBasic')!;

@@ -7,7 +7,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2022, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -32,7 +32,9 @@
 #define CURL_DISABLE_LDAP 1
 
 #define NEED_REENTRANT 1
+#ifndef OS
 #define OS "plan9"
+#endif
 #define PACKAGE "curl"
 #define PACKAGE_NAME "curl"
 #define PACKAGE_BUGREPORT "a suitable mailing list: https://curl.se/mail/"
@@ -63,10 +65,6 @@
 #define RECV_TYPE_RETV int
 
 #define HAVE_SELECT 1
-#define SELECT_TYPE_ARG1 int
-#define SELECT_TYPE_ARG234 fd_set *
-#define SELECT_TYPE_ARG5 struct timeval *
-#define SELECT_TYPE_RETV int
 
 #define HAVE_SEND 1
 #define SEND_TYPE_ARG1 int
@@ -78,10 +76,8 @@
 
 #define HAVE_ALARM 1
 #define HAVE_ARPA_INET_H 1
-#define HAVE_ASSERT_H 1
 #define HAVE_BASENAME 1
 #define HAVE_BOOL_T 1
-#define HAVE_ERRNO_H 1
 #define HAVE_FCNTL 1
 #define HAVE_FCNTL_H 1
 #define HAVE_FREEADDRINFO 1
@@ -144,8 +140,6 @@
 #define HAVE_UNISTD_H 1
 #define HAVE_UTIME 1
 #define HAVE_UTIME_H 1
-
-#define HAVE_ZLIB_H 1
 
 #define HAVE_POSIX_STRERROR_R 1
 #define HAVE_STRERROR_R 1

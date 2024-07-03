@@ -66,10 +66,13 @@ using CompositingReasons = uint64_t;
      See third_party/blink/renderer/core/view_transition/README.md. */         \
   V(ViewTransitionElement)                                                     \
   V(ViewTransitionPseudoElement)                                               \
+  V(ViewTransitionElementDescendantWithClipPath)                               \
                                                                                \
-  /* For composited scrolling. In CompositeScrollAfterPaint, this is           \
-     determined after paint. */                                                \
+  /* For composited scrolling, determined after paint. */                      \
   V(OverflowScrolling)                                                         \
+                                                                               \
+  /* Element is participating in element capture. */                           \
+  V(ElementCapture)                                                            \
                                                                                \
   /* The following reasons are not used in paint properties, but are           \
      determined after paint, for debugging. See PaintArtifactCompositor. */    \
@@ -129,7 +132,8 @@ class PLATFORM_EXPORT CompositingReason {
     kDirectReasonsForTransformProperty =
         k3DTransform | kTrivial3DTransform | kWillChangeTransform |
         kWillChangeOther | kPerspectiveWith3DDescendants |
-        kPreserve3DWith3DDescendants | kActiveTransformAnimation,
+        kPreserve3DWith3DDescendants | kActiveTransformAnimation |
+        kViewTransitionElementDescendantWithClipPath,
     kDirectReasonsForScaleProperty =
         k3DScale | kWillChangeScale | kActiveScaleAnimation,
     kDirectReasonsForRotateProperty =
@@ -141,7 +145,7 @@ class PLATFORM_EXPORT CompositingReason {
     kDirectReasonsForEffectProperty =
         kActiveOpacityAnimation | kWillChangeOpacity | kBackdropFilter |
         kWillChangeBackdropFilter | kActiveBackdropFilterAnimation |
-        kViewTransitionPseudoElement | kTransform3DSceneLeaf,
+        kViewTransitionPseudoElement | kTransform3DSceneLeaf | kElementCapture,
     kDirectReasonsForFilterProperty =
         kActiveFilterAnimation | kWillChangeFilter,
     kDirectReasonsForBackdropFilter = kBackdropFilter |

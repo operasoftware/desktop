@@ -264,7 +264,7 @@ static inline bool IsMatchingHTMLElement(const HTMLCollection& html_collection,
     case kPopoverInvokers:
       if (auto* invoker = DynamicTo<HTMLFormControlElement>(
               const_cast<HTMLElement&>(element))) {
-        return invoker->popoverTargetElement().popover;
+        return invoker->popoverTargetElement().popover != nullptr;
       }
       return false;
     case kClassCollectionType:
@@ -457,11 +457,11 @@ Element* HTMLCollection::namedItem(const AtomicString& name) const {
   const NamedItemCache& cache = GetNamedItemCache();
   const auto* id_results = cache.GetElementsById(name);
   if (id_results && !id_results->empty())
-    return id_results->front();
+    return id_results->front().Get();
 
   const auto* name_results = cache.GetElementsByName(name);
   if (name_results && !name_results->empty())
-    return name_results->front();
+    return name_results->front().Get();
 
   return nullptr;
 }
@@ -553,6 +553,17 @@ void HTMLCollection::NamedItems(const AtomicString& name,
     result.AppendVector(*id_results);
   if (const auto* name_results = cache.GetElementsByName(name))
     result.AppendVector(*name_results);
+}
+
+bool HTMLCollection::HasNamedItems(const AtomicString& name) const {
+  if (name.empty()) {
+    return false;
+  }
+
+  UpdateIdNameCache();
+
+  const NamedItemCache& cache = GetNamedItemCache();
+  return cache.GetElementsById(name) || cache.GetElementsByName(name);
 }
 
 HTMLCollection::NamedItemCache::NamedItemCache() = default;

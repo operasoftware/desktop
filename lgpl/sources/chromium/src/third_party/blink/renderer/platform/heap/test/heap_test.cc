@@ -53,7 +53,6 @@
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 #include "v8/include/cppgc/internal/api-constants.h"
 
 namespace blink {
@@ -1942,8 +1941,8 @@ TEST_F(HeapTest, HeapWeakCollectionTypes) {
         PreciselyCollectGarbage();
         unsigned count = 0;
         for (int i = 0; i < 128; i += 2) {
-          bool first_alive = keep_numbers_alive->at(i);
-          bool second_alive = keep_numbers_alive->at(i + 1);
+          bool first_alive = keep_numbers_alive->at(i) != nullptr;
+          bool second_alive = keep_numbers_alive->at(i + 1) != nullptr;
           if (first_alive && (collection_number == kWeakStrongIndex ||
                               collection_number == kStrongWeakIndex))
             second_alive = true;
@@ -2764,7 +2763,7 @@ class Link1 : public GarbageCollected<Link1> {
 
   void Trace(Visitor* visitor) const { visitor->Trace(link_); }
 
-  IntWrapper* Link() { return link_; }
+  IntWrapper* Link() { return link_.Get(); }
 
  private:
   Member<IntWrapper> link_;
@@ -3192,8 +3191,8 @@ TEST_F(HeapTest, CollectNodeAndCssStatistics) {
         node_bytes_before = node_bytes;
         css_bytes_before = css_bytes;
       }));
-  auto* node = MakeGarbageCollected<FakeNode>();
-  auto* css = MakeGarbageCollected<FakeCSSValue>();
+  Persistent<FakeNode> node = MakeGarbageCollected<FakeNode>();
+  Persistent<FakeCSSValue> css = MakeGarbageCollected<FakeCSSValue>();
   ConservativelyCollectGarbage();
   size_t node_bytes_after, css_bytes_after;
   ThreadState::Current()->CollectNodeAndCssStatistics(

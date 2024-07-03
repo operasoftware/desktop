@@ -11,7 +11,6 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
@@ -89,6 +88,11 @@ class PLATFORM_EXPORT PushPullFIFO {
   unsigned NumberOfChannels() const {
     lock_.AssertAcquired();
     return fifo_bus_->NumberOfChannels();
+  }
+
+  uint32_t GetFramesAvailable() {
+    base::AutoLock locker(lock_);
+    return frames_available_;
   }
 
   AudioBus* GetFIFOBusForTest() {

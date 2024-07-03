@@ -30,12 +30,15 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_AUDIO_AUDIO_DESTINATION_H_
 
 #include <memory>
+#include <optional>
 
+#include "base/memory/raw_ref.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "media/base/audio_renderer_sink.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/web_audio_device.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
@@ -45,7 +48,6 @@
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
@@ -82,7 +84,7 @@ class PLATFORM_EXPORT AudioDestination final
       const WebAudioSinkDescriptor& sink_descriptor,
       unsigned number_of_output_channels,
       const WebAudioLatencyHint&,
-      absl::optional<float> context_sample_rate,
+      std::optional<float> context_sample_rate,
       unsigned render_quantum_frames);
 
   AudioDestination(const AudioDestination&) = delete;
@@ -96,6 +98,8 @@ class PLATFORM_EXPORT AudioDestination final
              const media::AudioGlitchInfo& glitch_info,
              media::AudioBus* dest) override;
 
+  // This callback method may be called from either the main thread or non-main
+  // threads.
   void OnRenderError() override;
 
   void Start();
@@ -122,6 +126,9 @@ class PLATFORM_EXPORT AudioDestination final
   // hardware.
   int FramesPerBuffer() const;
 
+  // Returns the audio buffer duration used by the underlying sink.
+  base::TimeDelta GetPlatformBufferDuration() const;
+
   // The maximum channel count of the current audio sink device.
   uint32_t MaxChannelCount();
 
@@ -141,7 +148,7 @@ class PLATFORM_EXPORT AudioDestination final
                             const WebAudioSinkDescriptor& sink_descriptor,
                             unsigned number_of_output_channels,
                             const WebAudioLatencyHint&,
-                            absl::optional<float> context_sample_rate,
+                            std::optional<float> context_sample_rate,
                             unsigned render_quantum_frames);
 
   void SetDeviceState(DeviceState);
@@ -149,6 +156,10 @@ class PLATFORM_EXPORT AudioDestination final
   // The actual render request to the WebAudio destination node. This method
   // can be invoked on both AudioDeviceThread (single-thread rendering) and
   // AudioWorkletThread (dual-thread rendering).
+  void RequestRenderWait(size_t frames_requested,
+                         size_t frames_to_render,
+                         double delay,
+                         double delay_timestamp);
   void RequestRender(size_t frames_requested,
                      size_t frames_to_render,
                      double delay,
@@ -184,7 +195,7 @@ class PLATFORM_EXPORT AudioDestination final
 
   // Accessed by rendering thread: the render callback function of WebAudio
   // engine. (i.e. DestinationNode)
-  AudioIOCallback& callback_;
+  const raw_ref<AudioIOCallback> callback_;
 
   // Accessed by rendering thread.
   size_t frames_elapsed_ = 0;
@@ -212,6 +223,12 @@ class PLATFORM_EXPORT AudioDestination final
 
   // Collect the device latency matric only from the initial callback.
   bool is_latency_metric_collected_ = false;
+
+  // This WaitableEvent is only for use with the kWebAudioBypassOutputBuffering
+  // flag enabled. No other WaitableEvents may be used in this class.
+  base::WaitableEvent output_buffer_bypass_wait_event_;
+
+  const bool is_output_buffer_bypassed_ = false;
 };
 
 }  // namespace blink

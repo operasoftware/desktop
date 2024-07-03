@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/svg/svg_animated_angle.h"
 #include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_animated_rect.h"
+#include "third_party/blink/renderer/core/svg/svg_length_context.h"
 
 namespace blink {
 
@@ -35,7 +36,7 @@ LayoutSVGResourceMarker::LayoutSVGResourceMarker(SVGMarkerElement* node)
 
 LayoutSVGResourceMarker::~LayoutSVGResourceMarker() = default;
 
-void LayoutSVGResourceMarker::UpdateLayout() {
+void LayoutSVGResourceMarker::UpdateSVGLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
   if (is_in_layout_)
@@ -43,10 +44,10 @@ void LayoutSVGResourceMarker::UpdateLayout() {
 
   base::AutoReset<bool> in_layout_change(&is_in_layout_, true);
 
-  // LayoutSVGHiddenContainer overrides UpdateLayout(). We need the
+  // LayoutSVGHiddenContainer overrides UpdateSVGLayout(). We need the
   // LayoutSVGContainer behavior for calculating local transformations and paint
   // invalidation.
-  LayoutSVGContainer::UpdateLayout();
+  LayoutSVGContainer::UpdateSVGLayout();
 
   ClearInvalidationMask();
 }

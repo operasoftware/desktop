@@ -81,24 +81,17 @@ class LinuxPortTest(port_testcase.PortTestCase, LoggingTestCase):
     def test_baseline_paths(self):
         self.assert_baseline_paths('linux', None, 'linux', '/win')
 
-    def test_check_illegal_port_names(self):
-        # FIXME: Check that, for now, these are illegal port names.
-        # Eventually we should be able to do the right thing here.
-        with self.assertRaises(AssertionError):
-            linux.LinuxPort(MockSystemHost(), port_name='linux-x86')
-
     def test_operating_system(self):
         self.assertEqual('linux', self.make_port().operating_system())
 
     def test_driver_name_option(self):
-        # pylint: disable=protected-access
         self.assertTrue(
-            self.make_port()._path_to_driver().endswith('content_shell'))
+            self.make_port().path_to_driver().endswith('content_shell'))
         port = self.make_port(
             options=optparse.Values({
                 'driver_name': 'OtherDriver'
             }))
-        self.assertTrue(port._path_to_driver().endswith('OtherDriver'))
+        self.assertTrue(port.path_to_driver().endswith('OtherDriver'))
 
     def test_path_to_image_diff(self):
         # pylint: disable=protected-access

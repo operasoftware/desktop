@@ -8,11 +8,11 @@ import {CommandHandlerRemote} from 'chrome://resources/js/browser_command.mojom-
 import {BrowserCommandProxy} from 'chrome://resources/js/browser_command/browser_command_proxy.js';
 import {isChromeOS} from 'chrome://resources/js/platform.js';
 import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 import {TestMock} from 'chrome://webui-test/test_mock.js';
-import {eventToPromise} from 'chrome://webui-test/test_util.js';
-import {WhatsNewProxy, WhatsNewProxyImpl} from 'chrome://whats-new/whats_new_proxy.js';
+import {eventToPromise, microtasksFinished} from 'chrome://webui-test/test_util.js';
+import type {WhatsNewProxy} from 'chrome://whats-new/whats_new_proxy.js';
+import {WhatsNewProxyImpl} from 'chrome://whats-new/whats_new_proxy.js';
 
 const whatsNewURL = 'chrome://webui-test/whats_new/test.html';
 
@@ -51,7 +51,7 @@ suite('WhatsNewAppTest', function() {
     const whatsNewApp = document.createElement('whats-new-app');
     document.body.appendChild(whatsNewApp);
     await proxy.whenCalled('initialize');
-    await flushTasks();
+    await microtasksFinished();
 
     const iframe =
         whatsNewApp.shadowRoot!.querySelector<HTMLIFrameElement>('#content');
@@ -69,7 +69,7 @@ suite('WhatsNewAppTest', function() {
     const whatsNewApp = document.createElement('whats-new-app');
     document.body.appendChild(whatsNewApp);
     await proxy.whenCalled('initialize');
-    await flushTasks();
+    await microtasksFinished();
 
     const iframe =
         whatsNewApp.shadowRoot!.querySelector<HTMLIFrameElement>('#content');
@@ -88,7 +88,7 @@ suite('WhatsNewAppTest', function() {
     const whatsNewApp = document.createElement('whats-new-app');
     document.body.appendChild(whatsNewApp);
     await proxy.whenCalled('initialize');
-    await flushTasks();
+    await microtasksFinished();
 
     const iframe =
         whatsNewApp.shadowRoot!.querySelector<HTMLIFrameElement>('#content');

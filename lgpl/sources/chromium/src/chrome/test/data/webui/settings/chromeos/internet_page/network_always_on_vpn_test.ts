@@ -5,29 +5,24 @@
 import 'chrome://os-settings/lazy_load.js';
 
 import {NetworkAlwaysOnVpnElement} from 'chrome://os-settings/lazy_load.js';
+import {CrToggleElement} from 'chrome://os-settings/os_settings.js';
 import {OncMojo} from 'chrome://resources/ash/common/network/onc_mojo.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {AlwaysOnVpnMode} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/cros_network_config.mojom-webui.js';
 import {NetworkType} from 'chrome://resources/mojo/chromeos/services/network_config/public/mojom/network_types.mojom-webui.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 
 suite('<network-always-on-vpn>', () => {
   let alwaysOnVpnOptions: NetworkAlwaysOnVpnElement;
-
-  function flushAsync(): Promise<void> {
-    flush();
-    // Use setTimeout to wait for the next macrotask.
-    return new Promise(resolve => setTimeout(resolve));
-  }
 
   /**
    * Sends a mouse click on the given HTML element.
    */
   function click(element: HTMLElement): Promise<void> {
     element.click();
-    return flushAsync();
+    return flushTasks();
   }
 
   /**
@@ -36,7 +31,7 @@ suite('<network-always-on-vpn>', () => {
   function select(element: HTMLSelectElement, value: string): Promise<void> {
     element.value = value;
     element.dispatchEvent(new CustomEvent('change'));
-    return flushAsync();
+    return flushTasks();
   }
 
   function getEnableToggle(): CrToggleElement {
@@ -67,7 +62,7 @@ suite('<network-always-on-vpn>', () => {
     assert(alwaysOnVpnOptions);
     alwaysOnVpnOptions.mode = mode;
     alwaysOnVpnOptions.service = service;
-    return flushAsync();
+    return flushTasks();
   }
 
   function addVpnNetworks(): Promise<void> {
@@ -76,7 +71,7 @@ suite('<network-always-on-vpn>', () => {
       OncMojo.getDefaultNetworkState(NetworkType.kVPN, 'vpn1'),
       OncMojo.getDefaultNetworkState(NetworkType.kVPN, 'vpn2'),
     ];
-    return flushAsync();
+    return flushTasks();
   }
 
   setup(() => {

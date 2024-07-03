@@ -4,7 +4,8 @@
 
 // clang-format off
 import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {BaseMixin, getSearchManager, SearchManager, getTrustedHTML as getTrustedStaticHtml} from 'chrome://settings/settings.js';
+import type {SearchManager} from 'chrome://settings/settings.js';
+import {BaseMixin, getSearchManager, getTrustedHTML as getTrustedStaticHtml} from 'chrome://settings/settings.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {getTrustedHtml} from 'chrome://webui-test/trusted_html.js';
 
@@ -112,6 +113,7 @@ suite('SearchSettingsTest', function() {
            <iron-icon>${text}</iron-icon>
            <iron-list>${text}</iron-list>
            <paper-ripple>${text}</paper-ripple>
+           <cr-ripple>${text}</cr-ripple>
            <paper-spinner-lite>${text}</paper-spinner-lite>
            <slot>${text}</slot>
            <content>${text}</content>

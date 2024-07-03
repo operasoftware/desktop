@@ -11,6 +11,7 @@
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
 #include "third_party/blink/renderer/platform/graphics/video_frame_image_util.h"
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
@@ -74,6 +75,50 @@ gfx::ColorSpace YUVColorSpaceToGfxColorSpace(
     case kBT2020_12bit_Limited_SkYUVColorSpace:
       return gfx::ColorSpace(primary_id, transfer_id,
                              gfx::ColorSpace::MatrixID::BT2020_NCL,
+                             gfx::ColorSpace::RangeID::LIMITED);
+    case kFCC_Full_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::FCC,
+                             gfx::ColorSpace::RangeID::FULL);
+    case kFCC_Limited_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::FCC,
+                             gfx::ColorSpace::RangeID::LIMITED);
+    case kSMPTE240_Full_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::SMPTE240M,
+                             gfx::ColorSpace::RangeID::FULL);
+    case kSMPTE240_Limited_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::SMPTE240M,
+                             gfx::ColorSpace::RangeID::LIMITED);
+    case kYDZDX_Full_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::YDZDX,
+                             gfx::ColorSpace::RangeID::FULL);
+    case kYDZDX_Limited_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::YDZDX,
+                             gfx::ColorSpace::RangeID::LIMITED);
+    case kGBR_Full_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::GBR,
+                             gfx::ColorSpace::RangeID::FULL);
+    case kGBR_Limited_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::GBR,
+                             gfx::ColorSpace::RangeID::LIMITED);
+    case kYCgCo_8bit_Full_SkYUVColorSpace:
+    case kYCgCo_10bit_Full_SkYUVColorSpace:
+    case kYCgCo_12bit_Full_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::YCOCG,
+                             gfx::ColorSpace::RangeID::FULL);
+    case kYCgCo_8bit_Limited_SkYUVColorSpace:
+    case kYCgCo_10bit_Limited_SkYUVColorSpace:
+    case kYCgCo_12bit_Limited_SkYUVColorSpace:
+      return gfx::ColorSpace(primary_id, transfer_id,
+                             gfx::ColorSpace::MatrixID::YCOCG,
                              gfx::ColorSpace::RangeID::LIMITED);
     case kIdentity_SkYUVColorSpace:
       NOTREACHED();
@@ -250,6 +295,13 @@ std::unique_ptr<ImageDecoderCore::ImageDecodeResult> ImageDecoderCore::Decode(
     return result;
   }
 
+  if (auto sk_cs = decoder_->ColorSpaceForSkImages()) {
+    auto gfx_cs = gfx::ColorSpace(*sk_cs);
+    if (gfx_cs.IsValid()) {
+      frame->set_color_space(gfx_cs);
+    }
+  }
+
   frame->metadata().transformation =
       ImageOrientationToVideoTransformation(decoder_->Orientation());
 
@@ -317,7 +369,8 @@ void ImageDecoderCore::Reinitialize(
       mime_type_, segment_reader_, data_complete_,
       ImageDecoder::kAlphaNotPremultiplied,
       ImageDecoder::HighBitDepthDecodingOption::kDefaultBitDepth,
-      color_behavior_, desired_size_, animation_option_);
+      color_behavior_, Platform::GetMaxDecodedImageBytes(), desired_size_,
+      animation_option_);
   DCHECK(decoder_);
 }
 

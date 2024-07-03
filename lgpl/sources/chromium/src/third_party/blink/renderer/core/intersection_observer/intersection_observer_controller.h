@@ -11,24 +11,16 @@
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
+#if CHECK_SKIPPED_UPDATE_ON_SCROLL()
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#endif
+
 // Design doc for IntersectionObserver implementation:
 //   https://docs.google.com/a/google.com/document/d/1hLK0eyT5_BzyNS4OkjsnoqqFQDYCbKfyBinj94OnLiQ
 
 namespace blink {
 
 class ExecutionContext;
-
-struct IntersectionUpdateResult {
-  // True if trackVisibility() is true for any tracked observer.
-  bool needs_occlusion_tracking = false;
-  // If this is true, the parent frame will use zero min_scroll_delta_to_update,
-  // i.e. will update intersection on every scroll.
-  bool has_implicit_root_observer_with_margin = false;
-  // We only need to update intersection if the accumulated scroll delta in the
-  // frame exceeds this value in either direction.
-  gfx::Vector2dF min_scroll_delta_to_update =
-      IntersectionGeometry::kInfiniteScrollDelta;
-};
 
 class IntersectionObserverController
     : public GarbageCollected<IntersectionObserverController>,
@@ -46,11 +38,14 @@ class IntersectionObserverController
 
   // The flags argument is composed of values from
   // IntersectionObservation::ComputeFlags. They are dirty bits that control
-  // whether an IntersectionObserver needs to do any work.
-  IntersectionUpdateResult ComputeIntersections(
+  // whether an IntersectionObserver needs to do any work. The return value
+  // communicates whether observer->trackVisibility() is true for any tracked
+  // observer.
+  bool ComputeIntersections(
       unsigned flags,
       LocalFrameUkmAggregator* metrics_aggregator,
-      absl::optional<base::TimeTicks>& monotonic_time);
+      std::optional<base::TimeTicks>& monotonic_time,
+      gfx::Vector2dF accumulated_scroll_delta_since_last_update);
 
   // The second argument indicates whether the Element is a target of any
   // observers for which observer->trackVisibility() is true.
@@ -73,6 +68,10 @@ class IntersectionObserverController
     return tracked_implicit_root_observations_.size();
   }
 
+#if CHECK_SKIPPED_UPDATE_ON_SCROLL()
+  const String& DebugInfo() const { return debug_info_; }
+#endif
+
  private:
   void PostTaskToDeliverNotifications();
 
@@ -90,6 +89,10 @@ class IntersectionObserverController
   // This is 'true' if any tracked node is the target of an observer for
   // which observer->trackVisibility() is true.
   bool needs_occlusion_tracking_;
+
+#if CHECK_SKIPPED_UPDATE_ON_SCROLL()
+  String debug_info_;
+#endif
 };
 
 }  // namespace blink

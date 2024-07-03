@@ -44,12 +44,12 @@
       probes: [
         "DidFinishSyncXHR",
         "DidRunJavaScriptDialog",
+        "EvaluateScriptBlock",
         "ExecuteScript",
         "InvokeCallback",
         "InvokeEventHandler",
         "RecalculateStyle",
         "UpdateLayout",
-        "CompileAndRunScript",
         "WillHandlePromise",
       ]
     },
@@ -61,7 +61,7 @@
     },
     InspectorAnimationAgent: {
       probes: [
-        "AnimationPlayStateChanged",
+        "AnimationUpdated",
         "DidClearDocumentOfWindowObject",
         "DidCreateAnimation",
       ]
@@ -84,6 +84,7 @@
         "LocalFontsEnabled",
         "DidUpdateComputedStyle",
         "RecalculateStyle",
+        "DidReplaceStyleSheetText",
       ]
     },
     InspectorDOMAgent: {
@@ -107,31 +108,36 @@
         "WillModifyDOMAttr",
         "WillPopShadowRoot",
         "WillRemoveDOMNode",
-        "PortalRemoteFrameCreated"
       ]
     },
     InspectorDOMDebuggerAgent: {
       probes: [
-        "BreakableLocation",
         "CharacterDataModified",
+        "DidInsertDOMNode",
+        "DidInvalidateStyleAttr",
+        "UserCallback",
+        "WillInsertDOMNode",
+        "WillModifyDOMAttr",
+        "WillSendXMLHttpOrFetchNetworkRequest",
+        "OnContentSecurityPolicyViolation",
+      ]
+    },
+    InspectorEventBreakpointsAgent: {
+      probes: [
+        "BreakableLocation",
+        "DidCreateOffscreenCanvasContext",
         "DidCreateCanvasContext",
         "DidCreateOffscreenCanvasContext",
         "DidFireWebGLError",
         "DidFireWebGLErrorOrWarning",
         "DidFireWebGLWarning",
-        "DidInsertDOMNode",
-        "DidInvalidateStyleAttr",
-        "ExecuteScript",
-        "ScriptExecutionBlockedByCSP",
-        "UserCallback",
-        "WillInsertDOMNode",
-        "WillModifyDOMAttr",
-        "WillSendXMLHttpOrFetchNetworkRequest",
         "DidCreateAudioContext",
         "DidCloseAudioContext",
         "DidResumeAudioContext",
         "DidSuspendAudioContext",
-        "OnContentSecurityPolicyViolation",
+        "ExecuteScript",
+        "ScriptExecutionBlockedByCSP",
+        "UserCallback",
       ]
     },
     InspectorDOMSnapshotAgent: {
@@ -151,6 +157,11 @@
         "WillCommitLoad",
         "WillCreateDocumentParser",
         "ApplyAutomationOverride",
+      ]
+    },
+    InspectorOverlayAgent: {
+      probes: [
+        "DidInitializeFrameWidget",
       ]
     },
     InspectorLayerTreeAgent: {
@@ -203,6 +214,7 @@
         "WebTransportCreated",
         "WebTransportConnectionEstablished",
         "WebTransportClosed",
+        "WillCreateP2PSocketUdp",
         "WillCreateWebSocket",
         "WillDispatchEventSourceEvent",
         "WillLoadXHR",
@@ -232,7 +244,6 @@
         "FrameDetachedFromParent",
         "FrameRequestedNavigation",
         "FrameScheduledNavigation",
-        "FrameStartedLoading",
         "FrameStoppedLoading",
         "LifecycleEvent",
         "LoadEventFired",

@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
@@ -49,7 +50,7 @@ constexpr base::TimeDelta kDefaultMaxBudget = base::Seconds(1);
 constexpr double kDefaultRecoveryRate = 0.01;
 constexpr base::TimeDelta kDefaultMaxThrottlingDelay = base::Seconds(60);
 
-absl::optional<base::TimeDelta> GetMaxBudgetLevel() {
+std::optional<base::TimeDelta> GetMaxBudgetLevel() {
   int max_budget_level_ms;
   if (!base::StringToInt(
           base::GetFieldTrialParamValue(kWorkerThrottlingTrial,
@@ -58,7 +59,7 @@ absl::optional<base::TimeDelta> GetMaxBudgetLevel() {
     return kDefaultMaxBudget;
   }
   if (max_budget_level_ms < 0)
-    return absl::nullopt;
+    return std::nullopt;
   return base::Milliseconds(max_budget_level_ms);
 }
 
@@ -73,7 +74,7 @@ double GetBudgetRecoveryRate() {
   return recovery_rate;
 }
 
-absl::optional<base::TimeDelta> GetMaxThrottlingDelay() {
+std::optional<base::TimeDelta> GetMaxThrottlingDelay() {
   int max_throttling_delay_ms;
   if (!base::StringToInt(
           base::GetFieldTrialParamValue(kWorkerThrottlingTrial,
@@ -82,7 +83,7 @@ absl::optional<base::TimeDelta> GetMaxThrottlingDelay() {
     return kDefaultMaxThrottlingDelay;
   }
   if (max_throttling_delay_ms < 0)
-    return absl::nullopt;
+    return std::nullopt;
   return base::Milliseconds(max_throttling_delay_ms);
 }
 
@@ -243,7 +244,7 @@ void WorkerThreadScheduler::RegisterWorkerScheduler(
 
 void WorkerThreadScheduler::UnregisterWorkerScheduler(
     WorkerSchedulerImpl* worker_scheduler) {
-  DCHECK(worker_schedulers_.find(worker_scheduler) != worker_schedulers_.end());
+  DCHECK(base::Contains(worker_schedulers_, worker_scheduler));
   worker_schedulers_.erase(worker_scheduler);
 }
 

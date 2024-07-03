@@ -7,21 +7,22 @@
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "media/base/video_codecs.h"
+#include "media/media_buildflags.h"
 #include "third_party/webrtc/api/video_codecs/h264_profile_level_id.h"
 #include "third_party/webrtc/media/base/media_constants.h"
 
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 #include "media/base/platform_mime_util.h"
 #if BUILDFLAG(IS_MAC)
 #include "media/video/vt_video_encoder.h"
 #endif  // BUILDFLAG(IS_MAC)
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 
 namespace blink {
 
 namespace {
 
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 struct VideoCodecProfileAndWebRTCProfile {
   webrtc::H264Profile webrtc_profile;
   media::VideoCodecProfile media_profile;
@@ -78,7 +79,7 @@ webrtc::SdpVideoFormat H264ProfileToWebRtcFormat(
        scalability_modes);
   return format;
 }
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 
 }  // namespace
 
@@ -86,12 +87,12 @@ std::vector<webrtc::SdpVideoFormat> GetPlatformSWCodecSupportedFormats(
     bool encoder) {
   DVLOG(3) << __func__ << " encoder=" << encoder;
   std::vector<webrtc::SdpVideoFormat> supported_formats;
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
   const bool has_platform_support =
       encoder ? media::platform_mime_util::IsPlatformVideoEncoderAvailable()
               : media::platform_mime_util::IsPlatformVideoDecoderAvailable();
   if (has_platform_support) {
-    for (const char* packetization_mode : {"0", "1"}) {
+    for (const char* packetization_mode : {"1", "0"}) {
       for (const auto profile : kSupportedProfiles) {
 #if BUILDFLAG(IS_MAC)
         if (encoder && !media::VTVideoEncoder::IsNoDelayEncodingSupported(
@@ -107,7 +108,7 @@ std::vector<webrtc::SdpVideoFormat> GetPlatformSWCodecSupportedFormats(
       }
     }
   }
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
   return supported_formats;
 }
 

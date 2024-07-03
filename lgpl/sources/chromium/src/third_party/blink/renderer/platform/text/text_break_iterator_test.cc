@@ -41,10 +41,10 @@ class TextBreakIteratorTest : public testing::Test {
   void TestIsBreakable(const Vector<int> expected_break_positions,
                        const LazyLineBreakIterator& break_iterator) {
     Vector<int> break_positions;
-    int next_breakable = -1;
     for (unsigned i = 0; i <= test_string_.length(); i++) {
-      if (break_iterator.IsBreakable(i, next_breakable))
+      if (break_iterator.IsBreakable(i)) {
         break_positions.push_back(i);
+      }
     }
     EXPECT_THAT(break_positions,
                 testing::ElementsAreArray(expected_break_positions))
@@ -83,6 +83,24 @@ class TextBreakIteratorTest : public testing::Test {
   String test_string_;
   scoped_refptr<LayoutLocale> locale_;
 };
+
+TEST_F(TextBreakIteratorTest, PooledBreakIterator) {
+  const AtomicString locale{"en"};
+  const String str{"a"};
+  PooledBreakIterator it1 = AcquireLineBreakIterator(str, locale);
+
+  // Get another and release. It should be a different instance than `it1`.
+  TextBreakIterator* ptr2;
+  {
+    PooledBreakIterator it2 = AcquireLineBreakIterator(str, locale);
+    EXPECT_NE(it2.get(), it1.get());
+    ptr2 = it2.get();
+  }
+
+  // Because `it2` is released, `it3` should be the same instance as `it2`.
+  PooledBreakIterator it3 = AcquireLineBreakIterator(str, locale);
+  EXPECT_EQ(it3.get(), ptr2);
+}
 
 static const LineBreakType all_break_types[] = {
     LineBreakType::kNormal, LineBreakType::kBreakAll,

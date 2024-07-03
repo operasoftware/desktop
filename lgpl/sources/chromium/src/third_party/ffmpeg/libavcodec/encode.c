@@ -21,6 +21,7 @@
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
 #include "libavutil/channel_layout.h"
+#include "libavutil/emms.h"
 #include "libavutil/frame.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
@@ -29,6 +30,7 @@
 
 #include "avcodec.h"
 #include "avcodec_internal.h"
+#include "codec_desc.h"
 #include "codec_internal.h"
 #include "encode.h"
 #include "frame_thread_encoder.h"
@@ -196,11 +198,6 @@ int avcodec_encode_subtitle(AVCodecContext *avctx, uint8_t *buf, int buf_size,
 
     ret = ffcodec(avctx->codec)->cb.encode_sub(avctx, buf, buf_size, sub);
     avctx->frame_num++;
-#if FF_API_AVCTX_FRAME_NUMBER
-FF_DISABLE_DEPRECATION_WARNINGS
-    avctx->frame_number = avctx->frame_num;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     return ret;
 }
 
@@ -237,12 +234,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
 int ff_encode_reordered_opaque(AVCodecContext *avctx,
                                AVPacket *pkt, const AVFrame *frame)
 {
-#if FF_API_REORDERED_OPAQUE
-FF_DISABLE_DEPRECATION_WARNINGS
-    avctx->reordered_opaque = frame->reordered_opaque;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-
     if (avctx->flags & AV_CODEC_FLAG_COPY_OPAQUE) {
         int ret = av_buffer_replace(&pkt->opaque_ref, frame->opaque_ref);
         if (ret < 0)
@@ -542,11 +533,6 @@ int attribute_align_arg avcodec_send_frame(AVCodecContext *avctx, const AVFrame 
     }
 
     avctx->frame_num++;
-#if FF_API_AVCTX_FRAME_NUMBER
-FF_DISABLE_DEPRECATION_WARNINGS
-    avctx->frame_number = avctx->frame_num;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
 
     return 0;
 }
@@ -735,6 +721,8 @@ static int encode_preinit_audio(AVCodecContext *avctx)
     }
 
     if (!avctx->bits_per_raw_sample)
+        avctx->bits_per_raw_sample = av_get_exact_bits_per_sample(avctx->codec_id);
+    if (!avctx->bits_per_raw_sample)
         avctx->bits_per_raw_sample = 8 * av_get_bytes_per_sample(avctx->sample_fmt);
 
     return 0;
@@ -863,4 +851,35 @@ void ff_encode_flush_buffers(AVCodecContext *avctx)
 AVCodecInternal *ff_encode_internal_alloc(void)
 {
     return av_mallocz(sizeof(EncodeContext));
+}
+
+AVCPBProperties *ff_encode_add_cpb_side_data(AVCodecContext *avctx)
+{
+    AVPacketSideData *tmp;
+    AVCPBProperties  *props;
+    size_t size;
+    int i;
+
+    for (i = 0; i < avctx->nb_coded_side_data; i++)
+        if (avctx->coded_side_data[i].type == AV_PKT_DATA_CPB_PROPERTIES)
+            return (AVCPBProperties *)avctx->coded_side_data[i].data;
+
+    props = av_cpb_properties_alloc(&size);
+    if (!props)
+        return NULL;
+
+    tmp = av_realloc_array(avctx->coded_side_data, avctx->nb_coded_side_data + 1, sizeof(*tmp));
+    if (!tmp) {
+        av_freep(&props);
+        return NULL;
+    }
+
+    avctx->coded_side_data = tmp;
+    avctx->nb_coded_side_data++;
+
+    avctx->coded_side_data[avctx->nb_coded_side_data - 1].type = AV_PKT_DATA_CPB_PROPERTIES;
+    avctx->coded_side_data[avctx->nb_coded_side_data - 1].data = (uint8_t*)props;
+    avctx->coded_side_data[avctx->nb_coded_side_data - 1].size = size;
+
+    return props;
 }

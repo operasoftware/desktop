@@ -204,9 +204,9 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.hide_scrollbars;
   }
 
-  static bool enable_webkit_scrollbar_styling(
+  static bool prefers_default_scrollbar_styles(
       const blink::web_pref::WebPreferences& r) {
-    return r.enable_webkit_scrollbar_styling;
+    return r.prefers_default_scrollbar_styles;
   }
 
   static bool accelerated_2d_canvas_enabled(
@@ -290,11 +290,6 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
 
   static bool enable_scroll_animator(const blink::web_pref::WebPreferences& r) {
     return r.enable_scroll_animator;
-  }
-
-  static bool threaded_scrolling_enabled(
-      const blink::web_pref::WebPreferences& r) {
-    return r.threaded_scrolling_enabled;
   }
 
   static bool prefers_reduced_motion(const blink::web_pref::WebPreferences& r) {
@@ -433,10 +428,6 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.spatial_navigation_enabled;
   }
 
-  static bool navigate_on_drag_drop(const blink::web_pref::WebPreferences& r) {
-    return r.navigate_on_drag_drop;
-  }
-
   static bool fake_no_alloc_direct_call_for_testing_enabled(
       const blink::web_pref::WebPreferences& r) {
     return r.fake_no_alloc_direct_call_for_testing_enabled;
@@ -556,6 +547,15 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.font_scale_factor;
   }
 
+  static int font_weight_adjustment(const blink::web_pref::WebPreferences& r) {
+    return r.font_weight_adjustment;
+  }
+
+  static int text_size_contrast_factor(
+      const blink::web_pref::WebPreferences& r) {
+    return r.text_size_contrast_factor;
+  }
+
   static float device_scale_adjustment(
       const blink::web_pref::WebPreferences& r) {
     return r.device_scale_adjustment;
@@ -573,11 +573,6 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
   static bool support_deprecated_target_density_dpi(
       const blink::web_pref::WebPreferences& r) {
     return r.support_deprecated_target_density_dpi;
-  }
-
-  static bool use_legacy_background_size_shorthand_behavior(
-      const blink::web_pref::WebPreferences& r) {
-    return r.use_legacy_background_size_shorthand_behavior;
   }
 
   static bool wide_viewport_quirk(const blink::web_pref::WebPreferences& r) {
@@ -717,6 +712,20 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.require_transient_activation_for_show_file_or_directory_picker;
   }
 
+  static bool require_transient_activation_for_html_fullscreen(
+      const blink::web_pref::WebPreferences& r) {
+    return r.require_transient_activation_for_html_fullscreen;
+  }
+
+  static bool in_forced_colors(const blink::web_pref::WebPreferences& r) {
+    return r.in_forced_colors;
+  }
+
+  static blink::mojom::PreferredColorScheme browser_preferred_color_scheme(
+      const blink::web_pref::WebPreferences& r) {
+    return r.browser_preferred_color_scheme;
+  }
+
   static blink::mojom::PreferredColorScheme preferred_color_scheme(
       const blink::web_pref::WebPreferences& r) {
     return r.preferred_color_scheme;
@@ -783,6 +792,12 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
 
   static bool modal_context_menu(const blink::web_pref::WebPreferences& r) {
     return r.modal_context_menu;
+  }
+
+  static bool
+  require_transient_activation_and_user_confirmation_for_subapps_api(
+      const blink::web_pref::WebPreferences& r) {
+    return r.subapps_apis_require_user_gesture_and_authorization;
   }
 
   static bool Read(blink::mojom::WebPreferencesDataView r,

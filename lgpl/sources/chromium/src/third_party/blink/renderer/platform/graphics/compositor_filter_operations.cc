@@ -12,6 +12,8 @@
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 #include <utility>
 
+#include "base/process/process.h"
+
 #include "cc/paint/gpu_shader.h"
 #include "cc/paint/gpu_shader_params.h"
 #include "cc/paint/gpu_shader_source.h"
@@ -114,6 +116,9 @@ void CompositorFilterOperations::AppendGpuShaderFilter(
     const GpuShader& shader,
     std::vector<float> args,
     const SkSize& content_size,
+    const SkRect& bounding_box,
+    const SkRect& visible_rect,
+    SkScalar scale,
     SkScalar frame_id,
     const SkPoint& mouse_position,
     const SkColor4f& root_view_color,
@@ -121,9 +126,10 @@ void CompositorFilterOperations::AppendGpuShaderFilter(
   filter_operations_.Append(cc::FilterOperation::CreateGpuShaderFilter(
       sk_make_sp<cc::GpuShader>(
           shader.source().Clone(),
-          cc::GpuShaderParams(std::move(args), content_size, frame_id,
-                              mouse_position, root_view_color,
-                              base::TimeTicks::Now())),
+          cc::GpuShaderParams(std::move(args), content_size, bounding_box,
+                              visible_rect, scale, frame_id, mouse_position,
+                              root_view_color,
+                              base::Process::Current().CreationTime())),
       shader.NeedsMouseInput()));
 }
 #endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)

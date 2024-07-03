@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller_test.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 
 using testing::ElementsAre;
@@ -79,6 +80,7 @@ class FrameOverlayTest : public testing::Test, public PaintTestConfigurations {
   void RunFrameOverlayTestWithAcceleratedCompositing();
 
  private:
+  test::TaskEnvironment task_environment_;
   frame_test_helpers::WebViewHelper helper_;
 };
 
@@ -103,9 +105,9 @@ TEST_P(FrameOverlayTest, AcceleratedCompositing) {
               onDrawRect(SkRect::MakeWH(kViewportWidth, kViewportHeight),
                          Property(&SkPaint::getColor, SK_ColorYELLOW)));
 
-  auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
-  frame_overlay->Paint(builder->Context());
-  builder->EndRecording().Playback(&canvas);
+  PaintRecordBuilder builder;
+  frame_overlay->Paint(builder.Context());
+  builder.EndRecording().Playback(&canvas);
   frame_overlay->Destroy();
 }
 
@@ -139,7 +141,7 @@ TEST_P(FrameOverlayTest, DeviceEmulationScale) {
     EXPECT_EQ(gfx::Rect(0, 0, 800, 600),
               paint_controller.GetDisplayItemList()[0].VisualRect());
     EXPECT_THAT(
-        paint_controller.PaintChunks(),
+        paint_controller.GetPaintChunks(),
         ElementsAre(IsPaintChunk(
             0, 1,
             PaintChunk::Id(frame_overlay->Id(), DisplayItem::kFrameOverlay),

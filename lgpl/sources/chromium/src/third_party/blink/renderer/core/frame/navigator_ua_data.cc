@@ -28,16 +28,40 @@ namespace {
 // getHighEntropyValues() call if the user is in the study.
 void MaybeRecordMetric(bool record_identifiability,
                        const String& hint,
-                       const String& value,
+                       const IdentifiableToken token,
                        ExecutionContext* execution_context) {
-  if (LIKELY(!record_identifiability))
+  if (LIKELY(!record_identifiability)) {
     return;
+  }
   auto identifiable_surface = IdentifiableSurface::FromTypeAndToken(
       IdentifiableSurface::Type::kNavigatorUAData_GetHighEntropyValues,
       IdentifiableToken(hint.Utf8()));
   IdentifiabilityMetricBuilder(execution_context->UkmSourceID())
-      .Add(identifiable_surface, IdentifiableToken(value.Utf8()))
+      .Add(identifiable_surface, token)
       .Record(execution_context->UkmRecorder());
+}
+
+void MaybeRecordMetric(bool record_identifiability,
+                       const String& hint,
+                       const String& value,
+                       ExecutionContext* execution_context) {
+  MaybeRecordMetric(record_identifiability, hint,
+                    IdentifiableToken(value.Utf8()), execution_context);
+}
+
+void MaybeRecordMetric(bool record_identifiability,
+                       const String& hint,
+                       const Vector<String>& strings,
+                       ExecutionContext* execution_context) {
+  if (LIKELY(!record_identifiability)) {
+    return;
+  }
+  IdentifiableTokenBuilder token_builder;
+  for (const auto& s : strings) {
+    token_builder.AddAtomic(s.Utf8());
+  }
+  MaybeRecordMetric(record_identifiability, hint, token_builder.GetToken(),
+                    execution_context);
 }
 
 }  // namespace
@@ -111,8 +135,8 @@ void NavigatorUAData::SetWoW64(bool wow64) {
   is_wow64_ = wow64;
 }
 
-void NavigatorUAData::SetFormFactor(const String& form_factor) {
-  form_factor_ = form_factor;
+void NavigatorUAData::SetFormFactors(Vector<String> form_factors) {
+  form_factors_ = std::move(form_factors);
 }
 
 bool NavigatorUAData::mobile() const {
@@ -160,11 +184,12 @@ const String& NavigatorUAData::platform() const {
   return WTF::g_empty_string;
 }
 
-ScriptPromise NavigatorUAData::getHighEntropyValues(
+ScriptPromise<UADataValues> NavigatorUAData::getHighEntropyValues(
     ScriptState* script_state,
     Vector<String>& hints) const {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
+  auto* resolver =
+      MakeGarbageCollected<ScriptPromiseResolver<UADataValues>>(script_state);
+  auto promise = resolver->Promise();
   auto* execution_context =
       ExecutionContext::From(script_state);  // GetExecutionContext();
   DCHECK(execution_context);
@@ -221,11 +246,11 @@ ScriptPromise NavigatorUAData::getHighEntropyValues(
       values->setWow64(is_wow64_);
       MaybeRecordMetric(record_identifiability, hint, is_wow64_ ? "?1" : "?0",
                         execution_context);
-    } else if (hint == "formFactor") {
+    } else if (hint == "formFactors") {
       if (base::FeatureList::IsEnabled(
-              blink::features::kClientHintsFormFactor)) {
-        values->setFormFactor(form_factor_);
-        MaybeRecordMetric(record_identifiability, hint, form_factor_,
+              blink::features::kClientHintsFormFactors)) {
+        values->setFormFactors(form_factors_);
+        MaybeRecordMetric(record_identifiability, hint, form_factors_,
                           execution_context);
       }
     }
@@ -234,7 +259,7 @@ ScriptPromise NavigatorUAData::getHighEntropyValues(
   execution_context->GetTaskRunner(TaskType::kPermission)
       ->PostTask(
           FROM_HERE,
-          WTF::BindOnce([](ScriptPromiseResolver* resolver,
+          WTF::BindOnce([](ScriptPromiseResolver<UADataValues>* resolver,
                            UADataValues* values) { resolver->Resolve(values); },
                         WrapPersistent(resolver), WrapPersistent(values)));
 
@@ -243,9 +268,9 @@ ScriptPromise NavigatorUAData::getHighEntropyValues(
 
 ScriptValue NavigatorUAData::toJSON(ScriptState* script_state) const {
   V8ObjectBuilder builder(script_state);
-  builder.Add("brands", brands());
-  builder.Add("mobile", mobile());
-  builder.Add("platform", platform());
+  builder.AddVector<NavigatorUABrandVersion>("brands", brands());
+  builder.AddBoolean("mobile", mobile());
+  builder.AddString("platform", platform());
 
   // Record IdentifiabilityStudy metrics for `mobile()` and `platform()`
   // (the `brands()` part is already recorded inside that function).

@@ -5,6 +5,7 @@
 #include "third_party/blink/public/platform/media/key_system_config_selector.h"
 
 #include <stddef.h>
+
 #include <utility>
 
 #include "base/functional/bind.h"
@@ -22,12 +23,13 @@
 #include "media/base/media_permission.h"
 #include "media/base/media_switches.h"
 #include "media/base/mime_util.h"
+#include "media/base/video_codec_string_parsers.h"
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/public/platform/web_media_key_system_configuration.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_vector.h"
-#include "third_party/blink/public/web/modules/media/webmediaplayer_util.h"
+#include "third_party/blink/public/web/modules/media/web_media_player_util.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 
 namespace blink {
@@ -164,10 +166,9 @@ bool IsSupportedMediaType(const std::string& container_mime_type,
       !codec_vector.empty()) {
     std::vector<std::string> filtered_codec_vector;
     for (const auto& codec : codec_vector) {
-      media::VideoCodecProfile profile;
-      uint8_t level_idc;
-      if (!ParseDolbyVisionCodecId(codec, &profile, &level_idc))
+      if (!media::ParseDolbyVisionCodecId(codec)) {
         filtered_codec_vector.push_back(codec);
+      }
     }
     codec_vector = std::move(filtered_codec_vector);
 
@@ -1108,14 +1109,15 @@ void KeySystemConfigSelector::SelectConfigInternal(
         }
         DVLOG(3) << "Request permission.";
         media_permission_->RequestPermission(
-            media::MediaPermission::PROTECTED_MEDIA_IDENTIFIER,
+            media::MediaPermission::Type::kProtectedMediaIdentifier,
             base::BindOnce(&KeySystemConfigSelector::OnPermissionResult,
                            weak_factory_.GetWeakPtr(), std::move(request)));
         return;
       case CONFIGURATION_SUPPORTED:
         std::string key_system = request->key_system;
-        if (key_systems_->ShouldUseBaseKeySystemName(key_system))
+        if (key_systems_->ShouldUseBaseKeySystemName(key_system)) {
           key_system = key_systems_->GetBaseKeySystemName(key_system);
+        }
         cdm_config.key_system = key_system;
 
         cdm_config.allow_distinctive_identifier =

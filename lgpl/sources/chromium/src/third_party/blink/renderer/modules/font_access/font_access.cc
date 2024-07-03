@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/features.h"
@@ -45,10 +46,11 @@ void FontAccess::Trace(blink::Visitor* visitor) const {
 }
 
 // static
-ScriptPromise FontAccess::queryLocalFonts(ScriptState* script_state,
-                                          LocalDOMWindow& window,
-                                          const QueryOptions* options,
-                                          ExceptionState& exception_state) {
+ScriptPromise<IDLSequence<FontMetadata>> FontAccess::queryLocalFonts(
+    ScriptState* script_state,
+    LocalDOMWindow& window,
+    const QueryOptions* options,
+    ExceptionState& exception_state) {
   DCHECK(ExecutionContext::From(script_state)->IsContextThread());
   return From(&window)->QueryLocalFontsImpl(script_state, options,
                                             exception_state);
@@ -64,25 +66,26 @@ FontAccess* FontAccess::From(LocalDOMWindow* window) {
   return supplement;
 }
 
-ScriptPromise FontAccess::QueryLocalFontsImpl(ScriptState* script_state,
-                                              const QueryOptions* options,
-                                              ExceptionState& exception_state) {
+ScriptPromise<IDLSequence<FontMetadata>> FontAccess::QueryLocalFontsImpl(
+    ScriptState* script_state,
+    const QueryOptions* options,
+    ExceptionState& exception_state) {
   if (!base::FeatureList::IsEnabled(blink::features::kFontAccess)) {
     exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "Font Access feature is not supported.");
-    return ScriptPromise();
+    return ScriptPromise<IDLSequence<FontMetadata>>();
   }
   if (!script_state->ContextIsValid()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "The execution context is not valid.");
-    return ScriptPromise();
+    return ScriptPromise<IDLSequence<FontMetadata>>();
   }
   ExecutionContext* context = ExecutionContext::From(script_state);
   if (!context->IsFeatureEnabled(
           mojom::blink::PermissionsPolicyFeature::kLocalFonts,
           ReportOptions::kReportOnFailure)) {
     exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
-    return ScriptPromise();
+    return ScriptPromise<IDLSequence<FontMetadata>>();
   }
 
   // Connect to font access manager remote if not bound already.
@@ -95,9 +98,10 @@ ScriptPromise FontAccess::QueryLocalFontsImpl(ScriptState* script_state,
   }
   DCHECK(remote_.is_bound());
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
-      script_state, exception_state.GetContext());
-  ScriptPromise promise = resolver->Promise();
+  auto* resolver =
+      MakeGarbageCollected<ScriptPromiseResolver<IDLSequence<FontMetadata>>>(
+          script_state, exception_state.GetContext());
+  auto promise = resolver->Promise();
   remote_->EnumerateLocalFonts(resolver->WrapCallbackInScriptScope(
       WTF::BindOnce(&FontAccess::DidGetEnumerationResponse,
                     WrapWeakPersistent(this), WrapPersistent(options))));
@@ -107,7 +111,7 @@ ScriptPromise FontAccess::QueryLocalFontsImpl(ScriptState* script_state,
 
 void FontAccess::DidGetEnumerationResponse(
     const QueryOptions* options,
-    ScriptPromiseResolver* resolver,
+    ScriptPromiseResolver<IDLSequence<FontMetadata>>* resolver,
     FontEnumerationStatus status,
     base::ReadOnlySharedMemoryRegion region) {
   if (!resolver->GetScriptState()->ContextIsValid())
@@ -152,9 +156,9 @@ void FontAccess::DidGetEnumerationResponse(
     // If the optional postscript name filter is set in QueryOptions,
     // only allow items that match.
     if (hasPostscriptNameFilter &&
-        selection_utf8.find(element.postscript_name().c_str()) ==
-            selection_utf8.end())
+        !base::Contains(selection_utf8, element.postscript_name().c_str())) {
       continue;
+    }
 
     auto entry = FontEnumerationEntry{
         .postscript_name = String::FromUTF8(element.postscript_name().c_str()),
@@ -169,7 +173,7 @@ void FontAccess::DidGetEnumerationResponse(
 }
 
 bool FontAccess::RejectPromiseIfNecessary(const FontEnumerationStatus& status,
-                                          ScriptPromiseResolver* resolver) {
+                                          ScriptPromiseResolverBase* resolver) {
   switch (status) {
     case FontEnumerationStatus::kOk:
     case FontEnumerationStatus::kPermissionDenied:

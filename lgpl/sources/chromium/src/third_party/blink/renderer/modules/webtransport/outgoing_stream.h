@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "base/containers/span.h"
+#include "base/memory/raw_ptr.h"
 #include "base/types/strong_alias.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
@@ -73,10 +74,10 @@ class MODULES_EXPORT OutgoingStream final
   WritableStream* Writable() const {
     DVLOG(1) << "OutgoingStream::writable() called";
 
-    return writable_;
+    return writable_.Get();
   }
 
-  ScriptState* GetScriptState() { return script_state_; }
+  ScriptState* GetScriptState() { return script_state_.Get(); }
 
   // Called from WebTransport via a WebTransportStream.
   void OnOutgoingStreamClosed();
@@ -109,11 +110,14 @@ class MODULES_EXPORT OutgoingStream final
   void HandlePipeClosed();
 
   // Implements UnderlyingSink::write().
-  ScriptPromise SinkWrite(ScriptState*, ScriptValue chunk, ExceptionState&);
+  ScriptPromise<IDLUndefined> SinkWrite(ScriptState*,
+                                        ScriptValue chunk,
+                                        ExceptionState&);
 
   // Writes |data| to |data_pipe_|, possible saving unwritten data to
   // |cached_data_|.
-  ScriptPromise WriteOrCacheData(ScriptState*, base::span<const uint8_t> data);
+  ScriptPromise<IDLUndefined> WriteOrCacheData(ScriptState*,
+                                               base::span<const uint8_t> data);
 
   // Attempts to write some more of |cached_data_| to |data_pipe_|.
   void WriteCachedData();
@@ -153,9 +157,9 @@ class MODULES_EXPORT OutgoingStream final
    private:
     // We need the isolate to call |AdjustAmountOfExternalAllocatedMemory| for
     // the memory stored in |buffer_|.
-    v8::Isolate* isolate_;
+    raw_ptr<v8::Isolate> isolate_;
     size_t length_ = 0u;
-    uint8_t* buffer_ = nullptr;
+    raw_ptr<uint8_t> buffer_ = nullptr;
   };
 
   const Member<ScriptState> script_state_;
@@ -185,13 +189,13 @@ class MODULES_EXPORT OutgoingStream final
 
   // If an asynchronous write() on the underlying sink object is pending, this
   // will be non-null.
-  Member<ScriptPromiseResolver> write_promise_resolver_;
+  Member<ScriptPromiseResolver<IDLUndefined>> write_promise_resolver_;
 
   // If a close() on the underlying sink object is pending, this will be
   // non-null.
-  Member<ScriptPromiseResolver> close_promise_resolver_;
+  Member<ScriptPromiseResolver<IDLUndefined>> close_promise_resolver_;
 
-  Member<ScriptPromiseResolver> pending_operation_;
+  Member<ScriptPromiseResolver<IDLUndefined>> pending_operation_;
 
   State state_ = State::kOpen;
 };

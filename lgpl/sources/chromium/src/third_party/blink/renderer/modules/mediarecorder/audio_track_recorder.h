@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIARECORDER_AUDIO_TRACK_RECORDER_H_
 
 #include <memory>
+#include <optional>
 
 #include "base/memory/scoped_refptr.h"
 #include "base/task/sequenced_task_runner.h"
@@ -14,7 +15,6 @@
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_checker.h"
 #include "media/base/audio_encoder.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream_audio_sink.h"
 #include "third_party/blink/renderer/modules/mediarecorder/track_recorder.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
@@ -59,7 +59,7 @@ class MODULES_EXPORT AudioTrackRecorder
     virtual void OnEncodedAudio(
         const media::AudioParameters& params,
         std::string encoded_data,
-        absl::optional<media::AudioEncoder::CodecDescription> codec_description,
+        std::optional<media::AudioEncoder::CodecDescription> codec_description,
         base::TimeTicks capture_time) = 0;
 
     // Called when a track's ready state changes.
@@ -69,10 +69,10 @@ class MODULES_EXPORT AudioTrackRecorder
   using OnEncodedAudioCB = base::RepeatingCallback<void(
       const media::AudioParameters& params,
       std::string encoded_data,
-      absl::optional<media::AudioEncoder::CodecDescription> codec_description,
+      std::optional<media::AudioEncoder::CodecDescription> codec_description,
       base::TimeTicks capture_time)>;
 
-  static CodecId GetPreferredCodecId();
+  static CodecId GetPreferredCodecId(MediaTrackContainerType container_type);
 
   AudioTrackRecorder(
       scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
@@ -81,6 +81,7 @@ class MODULES_EXPORT AudioTrackRecorder
       CallbackInterface* callback_interface,
       uint32_t bits_per_second,
       BitrateMode bitrate_mode,
+      std::optional<media::AudioEncoder::AacOptions> aac_options = std::nullopt,
       scoped_refptr<base::SequencedTaskRunner> encoder_task_runner =
           base::ThreadPool::CreateSequencedTaskRunner(
               {base::TaskPriority::USER_VISIBLE}));
@@ -103,6 +104,7 @@ class MODULES_EXPORT AudioTrackRecorder
   // invalid.
   static std::unique_ptr<AudioTrackEncoder> CreateAudioEncoder(
       CodecId codec,
+      std::optional<media::AudioEncoder::AacOptions> aac_options,
       scoped_refptr<base::SequencedTaskRunner> encoder_task_runner,
       OnEncodedAudioCB on_encoded_audio_cb,
       uint32_t bits_per_second,

@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_queue_type.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace base {
@@ -72,16 +73,17 @@ class MODULES_EXPORT DOMScheduler : public ScriptWrappable,
   // queue associated with the given DOMTaskSignal if one is provided. If the
   // underlying context is destroyed, e.g. for detached windows, this will
   // return a rejected promise.
-  ScriptPromise postTask(ScriptState*,
-                         V8SchedulerPostTaskCallback*,
-                         SchedulerPostTaskOptions*,
-                         ExceptionState&);
+  ScriptPromise<IDLAny> postTask(ScriptState*,
+                                 V8SchedulerPostTaskCallback*,
+                                 SchedulerPostTaskOptions*,
+                                 ExceptionState&);
 
-  ScriptPromise yield(ScriptState*, SchedulerYieldOptions*, ExceptionState&);
+  ScriptPromise<IDLUndefined> yield(ScriptState*,
+                                    SchedulerYieldOptions*,
+                                    ExceptionState&);
 
   scheduler::TaskAttributionIdType taskId(ScriptState*);
-  AtomicString isAncestor(ScriptState*,
-                          scheduler::TaskAttributionIdType parent_id);
+  void setTaskId(ScriptState*, scheduler::TaskAttributionIdType);
 
   void ContextDestroyed() override;
 
@@ -150,14 +152,20 @@ class MODULES_EXPORT DOMScheduler : public ScriptWrappable,
   // Callback for when the signal signals priority change.
   void OnPriorityChange(DOMTaskSignal*, DOMTaskQueue*);
 
-  // Gets the task signal associated with a task or continuation, creating a
-  // composite task signal from the `signal_option` and `priority_option` if
-  // needed. The signal this returns is what gets used for scheduling the task
-  // or continuation, and it's what gets propagated for yield() inheritance.
+  // The state necessary for scheduling a task or continuation.
+  struct SchedulingState {
+    STACK_ALLOCATED();
+
+   public:
+    AbortSignal* abort_source = nullptr;
+    DOMTaskSignal* priority_source = nullptr;
+  };
+
+  // Gets the abort and priority sources (signals) from `signal_option` and
+  // `priority_option`.
   enum class InheritOption { kInherit };
-  DOMTaskSignal* GetTaskSignalFromOptions(
+  SchedulingState GetSchedulingStateFromOptions(
       ScriptState*,
-      ExceptionState&,
       absl::variant<AbortSignal*, InheritOption> signal_option,
       absl::variant<AtomicString, InheritOption> priority_option);
 

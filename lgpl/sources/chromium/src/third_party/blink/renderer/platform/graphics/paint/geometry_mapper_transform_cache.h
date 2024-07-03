@@ -5,9 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_GEOMETRY_MAPPER_TRANSFORM_CACHE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_GEOMETRY_MAPPER_TRANSFORM_CACHE_H_
 
+#include <optional>
+
 #include "base/check_op.h"
 #include "base/dcheck_is_on.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "ui/gfx/geometry/transform.h"
@@ -125,6 +127,10 @@ class PLATFORM_EXPORT GeometryMapperTransformCache {
     DCHECK(nearest_scroll_translation_);
     return *nearest_scroll_translation_;
   }
+  const TransformPaintPropertyNode& scroll_translation_state() const {
+    DCHECK(scroll_translation_state_);
+    return *scroll_translation_state_;
+  }
 
   const TransformPaintPropertyNode* nearest_directly_composited_ancestor()
       const {
@@ -144,7 +150,10 @@ class PLATFORM_EXPORT GeometryMapperTransformCache {
   // The parent of the root of consecutive identity or 2d translations from the
   // transform node, or the root of the tree if the whole path from the
   // transform node to the root contains identity or 2d translations only.
-  const TransformPaintPropertyNode* root_of_2d_translation_;
+  //
+  // Excluded from being a `raw_ptr` for visible regression in
+  // MotionMark (crbug.com/1495275#c116).
+  RAW_PTR_EXCLUSION const TransformPaintPropertyNode* root_of_2d_translation_;
 
   // The cached values here can be categorized in two logical groups:
   //
@@ -209,7 +218,7 @@ class PLATFORM_EXPORT GeometryMapperTransformCache {
     bool has_animation = false;
     USING_FAST_MALLOC(PlaneRootTransform);
   };
-  absl::optional<PlaneRootTransform> plane_root_transform_;
+  std::optional<PlaneRootTransform> plane_root_transform_;
 
   struct ScreenTransform {
     gfx::Transform to_screen;
@@ -218,9 +227,10 @@ class PLATFORM_EXPORT GeometryMapperTransformCache {
     bool has_animation = false;
     USING_FAST_MALLOC(ScreenTransform);
   };
-  absl::optional<ScreenTransform> screen_transform_;
+  std::optional<ScreenTransform> screen_transform_;
 
   const TransformPaintPropertyNode* nearest_scroll_translation_ = nullptr;
+  const TransformPaintPropertyNode* scroll_translation_state_ = nullptr;
   const TransformPaintPropertyNode* nearest_directly_composited_ancestor_ =
       nullptr;
 

@@ -39,7 +39,8 @@ class RTCPlatformSWVideoDecoderFactory final
       const RTCPlatformSWVideoDecoderFactory&) = delete;
 
   // webrtc::VideoDecoderFactory
-  std::unique_ptr<webrtc::VideoDecoder> CreateVideoDecoder(
+  std::unique_ptr<webrtc::VideoDecoder> Create(
+      const webrtc::Environment& env,
       const webrtc::SdpVideoFormat& format) override;
   std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override;
 

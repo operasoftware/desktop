@@ -21,7 +21,6 @@
 #ifndef AVCODEC_DECODE_H
 #define AVCODEC_DECODE_H
 
-#include "libavutil/buffer.h"
 #include "libavutil/frame.h"
 #include "libavutil/hwcontext.h"
 
@@ -140,14 +139,61 @@ int ff_side_data_update_matrix_encoding(AVFrame *frame,
                                         enum AVMatrixEncoding matrix_encoding);
 
 /**
- * Allocate a hwaccel frame private data and create an AVBufferRef
- * from it.
+ * Allocate a hwaccel frame private data if the provided avctx
+ * uses a hwaccel method that needs it. The returned data is
+ * a RefStruct reference (if allocated).
  *
- * @param     avctx   The codec context which to attach as an opaque value
- * @param     hwaccel The hwaccel for which to allocate
- * @return            The allocated buffer
+ * @param  avctx                   The codec context
+ * @param  hwaccel_picture_private Pointer to return hwaccel_picture_private
+ * @return 0 on success, < 0 on error
  */
-AVBufferRef *ff_hwaccel_frame_priv_alloc(AVCodecContext *avctx,
-                                         const AVHWAccel *hwaccel);
+int ff_hwaccel_frame_priv_alloc(AVCodecContext *avctx, void **hwaccel_picture_private);
+
+/**
+ * Get side data of the given type from a decoding context.
+ */
+const AVPacketSideData *ff_get_coded_side_data(const AVCodecContext *avctx,
+                                               enum AVPacketSideDataType type);
+
+/**
+ * Wrapper around av_frame_new_side_data, which rejects side data overridden by
+ * the demuxer. Returns 0 on success, and a negative error code otherwise.
+ * If successful and sd is not NULL, *sd may either contain a pointer to the new
+ * side data, or NULL in case the side data was already present.
+ */
+int ff_frame_new_side_data(const AVCodecContext *avctx, AVFrame *frame,
+                           enum AVFrameSideDataType type, size_t size,
+                           AVFrameSideData **sd);
+
+/**
+ * Similar to `ff_frame_new_side_data`, but using an existing buffer ref.
+ *
+ * *buf is ALWAYS consumed by this function and NULL written in its place, even
+ * on failure.
+ */
+int ff_frame_new_side_data_from_buf(const AVCodecContext *avctx,
+                                    AVFrame *frame, enum AVFrameSideDataType type,
+                                    AVBufferRef **buf, AVFrameSideData **sd);
+
+struct AVMasteringDisplayMetadata;
+struct AVContentLightMetadata;
+
+/**
+ * Wrapper around av_mastering_display_metadata_create_side_data(), which
+ * rejects side data overridden by the demuxer. Returns 0 on success, and a
+ * negative error code otherwise. If successful, *mdm may either be a pointer to
+ * the new side data, or NULL in case the side data was already present.
+ */
+int ff_decode_mastering_display_new(const AVCodecContext *avctx, AVFrame *frame,
+                                    struct AVMasteringDisplayMetadata **mdm);
+
+/**
+ * Wrapper around av_content_light_metadata_create_side_data(), which
+ * rejects side data overridden by the demuxer. Returns 0 on success, and a
+ * negative error code otherwise. If successful, *clm may either be a pointer to
+ * the new side data, or NULL in case the side data was already present.
+ */
+int ff_decode_content_light_new(const AVCodecContext *avctx, AVFrame *frame,
+                                struct AVContentLightMetadata **clm);
 
 #endif /* AVCODEC_DECODE_H */

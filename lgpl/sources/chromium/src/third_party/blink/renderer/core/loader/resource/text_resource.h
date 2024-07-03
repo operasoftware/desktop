@@ -10,18 +10,14 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
-class ResourceFetcher;
-
 class CORE_EXPORT TextResource : public Resource {
  public:
-  static TextResource* FetchSVGDocument(FetchParameters&,
-                                        ResourceFetcher*,
-                                        ResourceClient*);
 #if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   static TextResource* FetchGpuShaderDocument(FetchParameters&,
                                               ResourceFetcher*,

@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/functional/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/task/sequence_manager/test/sequence_manager_for_test.h"
 #include "base/task/single_thread_task_runner.h"
@@ -28,15 +29,6 @@
 #include "third_party/blink/renderer/platform/scheduler/test/web_scheduling_test_helper.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/worker_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-
-// TODO(crbug.com/960984): Fix memory leaks in tests and re-enable on LSAN.
-#ifdef LEAK_SANITIZER
-#define MAYBE_PausableTasks DISABLED_PausableTasks
-#define MAYBE_NestedPauseHandlesTasks DISABLED_NestedPauseHandlesTasks
-#else
-#define MAYBE_PausableTasks PausableTasks
-#define MAYBE_NestedPauseHandlesTasks NestedPauseHandlesTasks
-#endif
 
 using testing::ElementsAre;
 using testing::ElementsAreArray;
@@ -84,7 +76,7 @@ class TestObject {
   ~TestObject() { ++(*counter_); }
 
  private:
-  int* counter_;
+  raw_ptr<int> counter_;
 };
 
 }  // namespace
@@ -326,7 +318,7 @@ TEST_F(WorkerSchedulerImplTest,
                                  start_time_ + base::Seconds(40)));
 }
 
-TEST_F(WorkerSchedulerImplTest, MAYBE_PausableTasks) {
+TEST_F(WorkerSchedulerImplTest, PausableTasks) {
   Vector<String> run_order;
   auto pause_handle = worker_scheduler_->Pause();
   // Tests interlacing pausable, throttable and unpausable tasks and
@@ -345,7 +337,7 @@ TEST_F(WorkerSchedulerImplTest, MAYBE_PausableTasks) {
   EXPECT_THAT(run_order, testing::ElementsAre("T3", "T1", "T2"));
 }
 
-TEST_F(WorkerSchedulerImplTest, MAYBE_NestedPauseHandlesTasks) {
+TEST_F(WorkerSchedulerImplTest, NestedPauseHandlesTasks) {
   Vector<String> run_order;
   auto pause_handle = worker_scheduler_->Pause();
   {
@@ -367,13 +359,13 @@ class WorkerSchedulerDelegateForTesting : public WorkerScheduler::Delegate {
 
 MATCHER(BlockingDetailsHasCCNS, "Compares two blocking details.") {
   bool vector_empty =
-      arg.non_sticky_features_and_js_locations.details_list.empty();
+      arg.non_sticky_features_and_js_locations->details_list.empty();
   bool vector_has_ccns =
-      arg.sticky_features_and_js_locations.details_list.Contains(
+      arg.sticky_features_and_js_locations->details_list.Contains(
           FeatureAndJSLocationBlockingBFCache(
               SchedulingPolicy::Feature::kMainResourceHasCacheControlNoStore,
               nullptr)) &&
-      arg.sticky_features_and_js_locations.details_list.Contains(
+      arg.sticky_features_and_js_locations->details_list.Contains(
           FeatureAndJSLocationBlockingBFCache(
               SchedulingPolicy::Feature::kMainResourceHasCacheControlNoCache,
               nullptr));
@@ -622,24 +614,7 @@ TEST_F(NonMainThreadWebSchedulingTaskQueueTest,
 
 enum class DeleterTaskRunnerEnabled { kEnabled, kDisabled };
 
-class WorkerSchedulerImplTaskRunnerWithCustomDeleterTest
-    : public WorkerSchedulerImplTest,
-      public ::testing::WithParamInterface<DeleterTaskRunnerEnabled> {
- public:
-  WorkerSchedulerImplTaskRunnerWithCustomDeleterTest() {
-    feature_list_.Reset();
-    if (GetParam() == DeleterTaskRunnerEnabled::kEnabled) {
-      feature_list_.InitWithFeatures(
-          {blink::features::kUseBlinkSchedulerTaskRunnerWithCustomDeleter}, {});
-    } else {
-      feature_list_.InitWithFeatures(
-          {}, {blink::features::kUseBlinkSchedulerTaskRunnerWithCustomDeleter});
-    }
-  }
-};
-
-TEST_P(WorkerSchedulerImplTaskRunnerWithCustomDeleterTest,
-       DeleteSoonAfterDispose) {
+TEST_F(WorkerSchedulerImplTest, DeleteSoonAfterDispose) {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       worker_scheduler_->GetTaskRunner(TaskType::kInternalTest);
   int counter = 0;
@@ -664,33 +639,11 @@ TEST_P(WorkerSchedulerImplTaskRunnerWithCustomDeleterTest,
 
   std::unique_ptr<TestObject> test_object2 =
       std::make_unique<TestObject>(&counter);
-  TestObject* unowned_test_object2 = test_object2.get();
   task_runner->DeleteSoon(FROM_HERE, std::move(test_object2));
   EXPECT_EQ(counter, 1);
   RunUntilIdle();
-
-  // Without the custom task runner, this leaks.
-  if (GetParam() == DeleterTaskRunnerEnabled::kDisabled) {
-    EXPECT_EQ(counter, 1);
-    delete (unowned_test_object2);
-  } else {
-    EXPECT_EQ(counter, 2);
-  }
+  EXPECT_EQ(counter, 2);
 }
-
-INSTANTIATE_TEST_SUITE_P(
-    ,
-    WorkerSchedulerImplTaskRunnerWithCustomDeleterTest,
-    testing::Values(DeleterTaskRunnerEnabled::kEnabled,
-                    DeleterTaskRunnerEnabled::kDisabled),
-    [](const testing::TestParamInfo<DeleterTaskRunnerEnabled>& info) {
-      switch (info.param) {
-        case DeleterTaskRunnerEnabled::kEnabled:
-          return "Enabled";
-        case DeleterTaskRunnerEnabled::kDisabled:
-          return "Disabled";
-      }
-    });
 
 }  // namespace worker_scheduler_unittest
 }  // namespace scheduler

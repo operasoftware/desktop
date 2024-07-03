@@ -27,8 +27,6 @@
 
 #include <memory>
 
-#include "base/features/feature_utils.h"
-#include "base/features/submodule_features.h"
 #include "base/location.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
@@ -51,28 +49,24 @@
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
 #include "media/base/media_util.h"
 #include "media/mojo/clients/mojo_audio_decoder.h"
 #include "media/mojo/mojom/interface_factory.mojom.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#if BUILDFLAG(IS_MAC)
-#include "media/filters/at_audio_decoder.h"
-#elif BUILDFLAG(IS_WIN)
-#include "media/filters/wmf_audio_decoder.h"
-#endif
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
-        //
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
+
 namespace blink {
 
-void AsyncAudioDecoder::DecodeAsync(DOMArrayBuffer* audio_data,
-                                    float sample_rate,
-                                    V8DecodeSuccessCallback* success_callback,
-                                    V8DecodeErrorCallback* error_callback,
-                                    ScriptPromiseResolver* resolver,
-                                    BaseAudioContext* context,
-                                    ExceptionState& exception_state) {
+void AsyncAudioDecoder::DecodeAsync(
+    DOMArrayBuffer* audio_data,
+    float sample_rate,
+    V8DecodeSuccessCallback* success_callback,
+    V8DecodeErrorCallback* error_callback,
+    ScriptPromiseResolver<AudioBuffer>* resolver,
+    BaseAudioContext* context,
+    ExceptionState& exception_state) {
   DCHECK(IsMainThread());
   DCHECK(audio_data);
 
@@ -89,7 +83,7 @@ void AsyncAudioDecoder::DecodeAsync(DOMArrayBuffer* audio_data,
                           MakeCrossThreadHandle(success_callback),
                           MakeCrossThreadHandle(error_callback),
                           MakeCrossThreadHandle(resolver),
-                          WrapCrossThreadPersistent(context),
+                          MakeCrossThreadHandle(context),
                           external_decoder_task_runner, std::move(task_runner),
                           exception_state.GetContext()));
 }
@@ -99,8 +93,8 @@ void AsyncAudioDecoder::CreateAudioDecoder(
     float sample_rate,
     CrossThreadHandle<V8DecodeSuccessCallback> success_callback,
     CrossThreadHandle<V8DecodeErrorCallback> error_callback,
-    CrossThreadHandle<ScriptPromiseResolver> resolver,
-    BaseAudioContext* context,
+    CrossThreadHandle<ScriptPromiseResolver<AudioBuffer>> resolver,
+    CrossThreadHandle<BaseAudioContext> context,
     scoped_refptr<base::SequencedTaskRunner> external_decoder_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     const ExceptionContext& exception_context) {
@@ -108,51 +102,43 @@ void AsyncAudioDecoder::CreateAudioDecoder(
 
   std::unique_ptr<media::MediaLog> media_log;
   std::unique_ptr<media::AudioDecoder> external_decoder;
-#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
   media_log = std::make_unique<media::NullMediaLog>();
-  if (base::IsFeatureEnabled(base::kFeaturePlatformAacDecoderInGpu)) {
-    mojo::PendingRemote<media::mojom::InterfaceFactory>
-        pending_interface_factory;
-    mojo::Remote<media::mojom::InterfaceFactory> interface_factory;
-    Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
-        pending_interface_factory.InitWithNewPipeAndPassReceiver());
-    interface_factory.Bind(std::move(pending_interface_factory));
+  mojo::PendingRemote<media::mojom::InterfaceFactory> pending_interface_factory;
+  mojo::Remote<media::mojom::InterfaceFactory> interface_factory;
+  Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+      pending_interface_factory.InitWithNewPipeAndPassReceiver());
+  interface_factory.Bind(std::move(pending_interface_factory));
 
-    mojo::PendingRemote<media::mojom::AudioDecoder> decoder_remote;
-    interface_factory->CreateAudioDecoder(
-        decoder_remote.InitWithNewPipeAndPassReceiver());
-    external_decoder = std::make_unique<media::MojoAudioDecoder>(
-        external_decoder_task_runner, media_log.get(),
-        std::move(decoder_remote));
-  } else {
-#if BUILDFLAG(IS_MAC)
-    external_decoder = std::make_unique<media::ATAudioDecoder>(
-        external_decoder_task_runner, std::move(media_log));
-#elif BUILDFLAG(IS_WIN)
-    external_decoder = std::make_unique<media::WMFAudioDecoder>(
-        external_decoder_task_runner, std::move(media_log));
-#endif
-  }
-#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+  mojo::PendingRemote<media::mojom::AudioDecoder> decoder_remote;
+  interface_factory->CreateAudioDecoder(
+      decoder_remote.InitWithNewPipeAndPassReceiver());
+  external_decoder = std::make_unique<media::MojoAudioDecoder>(
+      external_decoder_task_runner, media_log.get(), std::move(decoder_remote));
+#endif  // BUILDFLAG(USE_SYSTEM_PROPRIETARY_CODECS)
+
+  // ArrayBufferContents is a thread-safe smart pointer around the backing
+  // store.
+  ArrayBufferContents audio_data_contents = *audio_data->Content();
 
   worker_pool::PostTask(
-      FROM_HERE, CrossThreadBindOnce(
-                     &AsyncAudioDecoder::DecodeOnBackgroundThread,
-                     WrapCrossThreadPersistent(audio_data), sample_rate,
-                     std::move(success_callback), std::move(error_callback),
-                     std::move(resolver), WrapCrossThreadPersistent(context),
-                     std::move(media_log), std::move(external_decoder),
-                     std::move(external_decoder_task_runner),
-                     std::move(task_runner), exception_context));
+      FROM_HERE,
+      CrossThreadBindOnce(
+          &AsyncAudioDecoder::DecodeOnBackgroundThread,
+          std::move(audio_data_contents), sample_rate,
+          std::move(success_callback), std::move(error_callback),
+          std::move(resolver), std::move(context), std::move(media_log),
+          std::move(external_decoder), std::move(external_decoder_task_runner),
+          std::move(task_runner), exception_context));
 }
 
 void AsyncAudioDecoder::DecodeOnBackgroundThread(
-    DOMArrayBuffer* audio_data,
+    ArrayBufferContents audio_data_contents,
     float sample_rate,
     CrossThreadHandle<V8DecodeSuccessCallback> success_callback,
     CrossThreadHandle<V8DecodeErrorCallback> error_callback,
-    CrossThreadHandle<ScriptPromiseResolver> resolver,
-    BaseAudioContext* context,
+    CrossThreadHandle<ScriptPromiseResolver<AudioBuffer>> resolver,
+    CrossThreadHandle<BaseAudioContext> context,
     std::unique_ptr<media::MediaLog> media_log,
     std::unique_ptr<media::AudioDecoder> external_decoder,
     scoped_refptr<base::SequencedTaskRunner> external_decoder_task_runner,
@@ -160,38 +146,31 @@ void AsyncAudioDecoder::DecodeOnBackgroundThread(
     const ExceptionContext& exception_context) {
   DCHECK(!IsMainThread());
   scoped_refptr<AudioBus> bus = AudioBus::CreateBusFromInMemoryAudioFile(
-      audio_data->Data(), audio_data->ByteLength(), false, sample_rate,
-      external_decoder.get(), external_decoder_task_runner.get());
+      audio_data_contents.Data(), audio_data_contents.DataLength(), false,
+      sample_rate, external_decoder.get(), external_decoder_task_runner.get());
 
   external_decoder_task_runner->DeleteSoon(FROM_HERE,
                                            std::move(external_decoder));
 
-  // Decoding is finished, but we need to do the callbacks on the main thread.
   // A reference to `bus` is retained by base::OnceCallback and will be removed
   // after `NotifyComplete()` is done.
-  //
-  // We also want to avoid notifying the main thread if AudioContext does not
-  // exist any more.
-  if (context) {
-    PostCrossThreadTask(
-        *task_runner, FROM_HERE,
-        CrossThreadBindOnce(&AsyncAudioDecoder::NotifyComplete,
-                            WrapCrossThreadPersistent(audio_data),
-                            MakeUnwrappingCrossThreadHandle(success_callback),
-                            MakeUnwrappingCrossThreadHandle(error_callback),
-                            WTF::RetainedRef(std::move(bus)),
-                            MakeUnwrappingCrossThreadHandle(resolver),
-                            WrapCrossThreadPersistent(context),
-                            exception_context));
-  }
+  PostCrossThreadTask(
+      *task_runner, FROM_HERE,
+      CrossThreadBindOnce(
+          &AsyncAudioDecoder::NotifyComplete, std::move(audio_data_contents),
+          MakeUnwrappingCrossThreadHandle(success_callback),
+          MakeUnwrappingCrossThreadHandle(error_callback),
+          WTF::RetainedRef(std::move(bus)),
+          MakeUnwrappingCrossThreadHandle(resolver),
+          MakeUnwrappingCrossThreadHandle(context), exception_context));
 }
 
 void AsyncAudioDecoder::NotifyComplete(
-    DOMArrayBuffer*,
+    ArrayBufferContents,
     V8DecodeSuccessCallback* success_callback,
     V8DecodeErrorCallback* error_callback,
     AudioBus* audio_bus,
-    ScriptPromiseResolver* resolver,
+    ScriptPromiseResolver<AudioBuffer>* resolver,
     BaseAudioContext* context,
     const ExceptionContext& exception_context) {
   DCHECK(IsMainThread());

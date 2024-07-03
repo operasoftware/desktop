@@ -86,16 +86,16 @@ StyleVariables::OptionalData StyleVariables::GetData(
   if (i != data_.end()) {
     return i->value.get();
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 StyleVariables::OptionalValue StyleVariables::GetValue(
     const AtomicString& name) const {
   auto i = values_->find(name);
   if (i != values_->end()) {
-    return i->value;
+    return i->value.Get();
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 void StyleVariables::SetData(const AtomicString& name,
@@ -123,7 +123,7 @@ std::ostream& operator<<(std::ostream& stream,
                          const StyleVariables& variables) {
   stream << "[";
   for (const auto& [key, value] : variables.data_) {
-    stream << key << ": " << value << ", ";
+    stream << key << ": " << value->Serialize() << ", ";
   }
   stream << "][";
   for (const auto& [key, value] : *variables.values_) {

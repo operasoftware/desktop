@@ -3,9 +3,8 @@
 // found in the LICENSE file.
 
 import 'chrome://personalization/strings.m.js';
-import 'chrome://webui-test/mojo_webui_test_support.js';
 
-import {emptyState, SetSelectedImageAction, WallpaperActionName, WallpaperObserver} from 'chrome://personalization/js/personalization_app.js';
+import {emptyState, SeaPenActionName, SetSelectedImageAction, SetSelectedRecentSeaPenImageAction, WallpaperActionName, WallpaperLayout, WallpaperObserver, WallpaperType} from 'chrome://personalization/js/personalization_app.js';
 import {assertDeepEquals, assertEquals} from 'chrome://webui-test/chai_assert.js';
 
 import {baseSetup} from './personalization_app_test_utils.js';
@@ -52,6 +51,77 @@ suite('WallpaperObserverTest', function() {
             WallpaperActionName.SET_SELECTED_IMAGE) as SetSelectedImageAction;
 
     assertDeepEquals(wallpaperProvider.currentWallpaper, image);
+  });
+
+  test('sets selected sea pen wallpaper data in store on changed', async () => {
+    // Make sure state starts as expected.
+    assertDeepEquals(emptyState(), personalizationStore.data);
+
+    personalizationStore.expectAction(WallpaperActionName.SET_SELECTED_IMAGE);
+    personalizationStore.expectAction(
+        SeaPenActionName.SET_SELECTED_RECENT_SEA_PEN_IMAGE);
+
+    const selectedSeaPenWallpaper = {
+      descriptionContent: 'test content',
+      descriptionTitle: 'test title',
+      key: '111',
+      layout: WallpaperLayout.kCenter,
+      type: WallpaperType.kSeaPen,
+    };
+
+    wallpaperProvider.wallpaperObserverRemote!.onWallpaperChanged(
+        selectedSeaPenWallpaper);
+
+    const {image} =
+        await personalizationStore.waitForAction(
+            WallpaperActionName.SET_SELECTED_IMAGE) as SetSelectedImageAction;
+
+    assertDeepEquals(
+        selectedSeaPenWallpaper, image,
+        'selected image should be a Sea Pen image');
+
+    const {key} = await personalizationStore.waitForAction(
+                      SeaPenActionName.SET_SELECTED_RECENT_SEA_PEN_IMAGE) as
+        SetSelectedRecentSeaPenImageAction;
+
+    assertEquals(
+        parseInt(selectedSeaPenWallpaper.key, 10), key,
+        'selected key should match');
+  });
+
+  test('sets sea pen wallpaper null if not integer >= 0', async () => {
+    // Make sure state starts as expected.
+    assertDeepEquals(emptyState(), personalizationStore.data);
+
+    for (const value
+             of ['1.5', '-23', 'not a number', `${Number.POSITIVE_INFINITY}`]) {
+      const selectedSeaPenWallpaper = {
+        descriptionContent: 'test content',
+        descriptionTitle: 'test title',
+        key: value,
+        layout: WallpaperLayout.kCenter,
+        type: WallpaperType.kSeaPen,
+      };
+
+      personalizationStore.expectAction(WallpaperActionName.SET_SELECTED_IMAGE);
+      personalizationStore.expectAction(
+          SeaPenActionName.SET_SELECTED_RECENT_SEA_PEN_IMAGE);
+
+      wallpaperProvider.wallpaperObserverRemote!.onWallpaperChanged(
+          selectedSeaPenWallpaper);
+
+      const {image} =
+          await personalizationStore.waitForAction(
+              WallpaperActionName.SET_SELECTED_IMAGE) as SetSelectedImageAction;
+      assertDeepEquals(
+          selectedSeaPenWallpaper, image,
+          'selected image should be a SeaPen image');
+
+      const {key} = await personalizationStore.waitForAction(
+                        SeaPenActionName.SET_SELECTED_RECENT_SEA_PEN_IMAGE) as
+          SetSelectedRecentSeaPenImageAction;
+      assertEquals(null, key, 'sea pen selected set to null');
+    }
   });
 
   test('sets selected wallpaper if null', async () => {
